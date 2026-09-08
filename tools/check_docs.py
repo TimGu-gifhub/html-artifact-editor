@@ -93,7 +93,7 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
     print(f"PASS: {len(markdown)} Markdown files, {link_count} local links, {len(tasks)} tasks, {len(milestone_ids)} milestones; DAG and rendering valid.")
-    print("Documentation checks only. No desktop application or platform acceptance has run.")
+    print("Documentation checks only; this command does not run desktop or platform acceptance.")
     return 0
 
 

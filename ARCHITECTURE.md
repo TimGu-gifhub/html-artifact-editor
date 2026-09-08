@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：设计基线，具体实现与依赖版本将在 HAE-001 至 HAE-004 的验证后锁定。
+状态：产品架构设计基线；HAE-001 已加入工具链验证壳，版本与已执行证据见 [开发说明](docs/DEVELOPMENT.md) 和 [交付记录](docs/implementation/HAE-001.md)。用户文件流程仍待后续任务实现。
 
 ## 1. 技术选型
 
@@ -9,7 +9,7 @@
 | 桌面宿主 | Electron，实施时选仍受支持的稳定版本 | 自带 Chromium，Windows/macOS 共用渲染核心；承担体积和更新成本 |
 | 编辑器 UI | React + TypeScript strict | UI 状态明确，减少草稿、保存和异步响应错配 |
 | UI 基础组件 | 优先 Radix 无样式可访问组件，视觉方案后再定样式 | 不把主题库、重型编辑器或整站模板作为前置依赖 |
-| 构建 | Vite + Electron Forge 候选，M1 验证后固定 | 先验证主进程/preload/renderer 分离打包和双平台启动 |
+| 构建 | Vite 8.2.2 独立入口；Forge 打包延后 | 主进程、两个 preload、UI/Preview 分别构建；安装器仍在 HAE-015 |
 | HTML 解析 | parse5，开启 sourceCodeLocationInfo | 获得源码位置，不使用 serializer 保存整份文档 |
 | 修改引擎 | 自研纯 TypeScript 的字节范围替换 | 核心不依赖 DOM、Electron 或操作系统判断 |
 | 会话模型 | 显式 reducer / 状态机 + 版本化 IPC 数据结构 | 先采用最小状态管理，不同时引入多个状态库 |
@@ -65,7 +65,7 @@ HTTP(S)、WebSocket、远程字体、在线 API、`file://`、外部协议、表
 
 ## 3. 模块边界与未来目录
 
-以下是 HAE-001 的实施目标，当前仓库尚未创建应用空壳。
+HAE-001 已创建各顶层模块和内置验证壳；下表的业务子模块仍是后续任务目标。
 
 | 目录 | 职责 | 禁止依赖 |
 | --- | --- | --- |
@@ -113,4 +113,10 @@ HTTP(S)、WebSocket、远程字体、在线 API、`file://`、外部协议、表
 
 WebContentsView 是独立原生视图，可能覆盖 BrowserWindow 内的 DOM 弹层。选区编辑控件默认放在可信侧栏；原位编辑浮层作为候选，必须验证跨 DPI、滚动、缩放、窗口尺寸、IME 候选框和可访问性。不可为实现浮层把文件能力暴露给 Preview。
 
-React/Radix/Vite/Forge/E2E 库的具体版本、源码映射策略和跨平台原子替换封装在 M1 产出 ADR 与验证记录后确定。不得把本文的候选方案报告成已完成实现。
+React/TypeScript/Vite 版本已在 HAE-001 锁定，使用 Node 自带测试运行器与独立 Electron 冒烟入口。Radix、Forge、产品 E2E 驱动、源码映射与跨平台替换仍待对应任务验证。
+
+### HAE-001 验证壳的具体边界
+
+当前只服务构建时自带的页面，通过各 session 内的精确 URL → 内存内容映射返回资源；没有用户目录映射、文件对话框或写入接口。`editor://app/` 与随机 `artifact://…/` 分离。UI 桥只有只读启动信息；Preview 页面没有桥，preload 只报告固定启动诊断，Main 校验 sender、主 frame、完整源 URL 和 payload，收到后撤销该监听器。
+
+Electron 44.2.0 本地实验中 `javascript: false` 阻止了 Preview preload 初始化。因此验证壳保留隔离 preload 所需的引擎，使用响应头 `script-src 'none'` 禁止页面脚本；不启用 bypassCSP，沙箱、上下文隔离和 webSecurity 全部开启。已测试的内置样例范围见交付记录。HAE-002 仍须验证真实用户 HTML 的原 CSP 叠加、各类脚本入口和子 frame；HAE-003 必须按实际 Chromium 脚本解析语义处理 noscript，不能把 CSP 禁止执行等同于解析器 scriptingEnabled=false。

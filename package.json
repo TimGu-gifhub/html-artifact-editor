@@ -1,0 +1,45 @@
+{
+  "name": "html-artifact-editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first HTML text correction tool — toolchain scaffold",
+  "license": "MIT",
+  "type": "module",
+  "main": "out/main/index.cjs",
+  "engines": {
+    "node": ">=24.14.1 <25",
+    "npm": "11.19.1"
+  },
+  "packageManager": "npm@11.19.1",
+  "scripts": {
+    "postinstall": "install-electron",
+    "dev": "npm run build && npm start",
+    "start": "node tools/run-electron.mjs",
+    "build": "node tools/build.mjs",
+    "build:main": "node tools/build.mjs main",
+    "build:preload:ui": "node tools/build.mjs preload-ui",
+    "build:preload:preview": "node tools/build.mjs preload-preview",
+    "build:ui": "node tools/build.mjs ui",
+    "build:preview": "node tools/build.mjs preview",
+    "typecheck": "tsc -p tsconfig.core.json && tsc -p tsconfig.node.json && tsc -p tsconfig.ui.json",
+    "check:boundaries": "node tools/check-boundaries.mjs",
+    "diagnostics": "node tools/platform-info.mjs",
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:smoke": "node tools/build.mjs smoke && node tools/run-electron.mjs --smoke",
+    "licenses": "node tools/licenses.mjs",
+    "licenses:check": "node tools/licenses.mjs --check",
+    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run build && npm run test:smoke && npm run licenses:check"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "electron": "44.2.0",
+    "typescript": "6.0.3",
+    "vite": "8.2.2"
+  }
+}

@@ -6,7 +6,7 @@ A local-first desktop editor for precise text corrections in existing HTML artif
 
 AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日期、段落和表格文字。项目的核心目标是：只改变用户确认的文本范围，保留其余 HTML、CSS、JavaScript 和资源文件。
 
-> **当前状态：规划阶段，尚未实现桌面编辑器。** 本仓库包含产品规格、架构、交互合同、实施任务、验收方案和 MIT 许可证；当前没有可下载安装包，也没有应用测试通过或跨平台兼容性的结论。
+> **当前状态：HAE-001 工具链验证壳。** 已有 Electron 启动入口、独立 UI/Preview 与 preload 构建、本地类型与模块边界检查和启动冒烟。尚不能打开或修改用户 HTML，没有安装包。本地检查范围与平台未测项见 [HAE-001 交付记录](docs/implementation/HAE-001.md)。
 
 ## 计划中的核心流程
 
@@ -53,13 +53,22 @@ AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日�
 
 已建立 [5 个里程碑](https://github.com/TimGu-gifhub/html-artifact-editor/milestones) 和 [20 个实施 Issues](https://github.com/TimGu-gifhub/html-artifact-editor/issues)。从 [本地任务清单](docs/BACKLOG.md) 选择一个依赖已满足的任务；首次实施从 [HAE-001](https://github.com/TimGu-gifhub/html-artifact-editor/issues/1) 开始。提交前阅读 [贡献指南](CONTRIBUTING.md)；AI 开发工具还需阅读 [AGENTS.md](AGENTS.md)。
 
-当前仓库可运行的检查只有文档与任务完整性检查，需 Python 3.10+：
+开发环境固定为 Node.js 24.14.1、npm 11.19.1；文档检查另需 Python 3.10+。
 
 ```sh
-python tools/check_docs.py
+npm ci
+npm run dev
 ```
 
-应用启动、构建和测试命令将在 HAE-001 完成后加入；此时没有 `npm start` 或桌面程序可运行。[GitHub 文档检查](https://github.com/TimGu-gifhub/html-artifact-editor/actions/workflows/docs.yml) 仅验证文档和任务完整性。
+`dev` 先构建再启动，只显示内置样例；修改源码后关闭窗口并重新执行。当前不提供热更新。已构建后可直接 `npm start`。
+
+```sh
+npm run check
+python tools/check_docs.py
+git diff --check
+```
+
+命令、依赖版本、输出边界与环境排错见 [开发说明](docs/DEVELOPMENT.md)，许可证见 [依赖清单](docs/DEPENDENCIES.md)。本项目不使用 GitHub CI，仓库 Actions 已关闭；构建、测试、启动冒烟和文档检查在本地执行，平台可用性由对应 Windows/Mac 实机验收。`npm ci` 是锁定依赖安装命令，继续保留。
 
 ## License
 

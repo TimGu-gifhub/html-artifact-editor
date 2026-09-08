@@ -1,6 +1,6 @@
 # 测试与验收计划
 
-当前状态：以下均为待实现测试，尚无应用运行结果。现有 CI 只校验文档、链接和任务依赖。
+当前状态：HAE-001 增加契约/模块边界测试和内置 Electron 验证壳冒烟，执行记录见 [HAE-001](implementation/HAE-001.md)。以下产品用例仍待实现；验证壳启动不等同于 T-01 的用户文件打开与取消，也不证明保存、恢复或产品 UI 可用。本项目不使用 GitHub CI；本地检查方式与待验证平台见 [开发说明](DEVELOPMENT.md)。
 
 ## 1. 证据分层
 
@@ -66,14 +66,14 @@ S-01 至 S-05 在 M1 即建立负向样例，M2/M3 扩充。S-06 至 S-09 是开
 
 ## 5. 平台矩阵
 
-| 目标 | CI | 人工必需 | 首版状态 |
+| 目标 | 本地自动检查 | 人工必需 | 首版状态 |
 | --- | --- | --- | --- |
-| Windows 10 x64 | 核心/集成，runner 实际 OS 需记录 | 真机或隔离 VM 的安装、路径、IME、DPI、保存恢复 | 待验证 |
+| Windows 10 x64 | 在对应实机或 VM 运行核心/集成，记录实际 OS | 真机或隔离 VM 的安装、路径、IME、DPI、保存恢复 | 待验证 |
 | Windows 11 x64 | 同上 | 同上；不能用 Win11 结果代表 Win10 | 待验证 |
-| macOS 13+ arm64 | 在确认架构的 Mac runner 执行 | Apple Silicon 真机、中文 IME、Retina、权限、DMG/Gatekeeper | 待验证 |
+| macOS 13+ arm64 | 在 Apple Silicon Mac 本地执行 | Apple Silicon 真机、中文 IME、Retina、权限、DMG/Gatekeeper | 待验证 |
 | 其他平台/架构 | 不在本轮发布门槛 | 后续独立提案 | 范围外 |
 
-CI 上的 macOS 名称不等于真实 arm64 或最低 OS；每次记录 `uname`/OS 版本与架构。Electron 相同不能保证跨系统像素一致，字体与原生控件差异按实机评估。
+每次记录实际 OS 版本与 CPU 架构，Mac 需确认 Apple Silicon 及具体系统版本，不能用其他版本代表最低 OS。Electron 相同不能保证跨系统像素一致，字体与原生控件差异按实机评估。所有自动检查本地执行，不设置 GitHub CI 门槛。
 
 ## 6. 性能与退出门槛
 

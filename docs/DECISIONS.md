@@ -34,9 +34,11 @@
 
 ## ADR-006：React/TypeScript 单包结构，最小依赖
 
-**采用方向，具体依赖待验证。** 纯核心不依赖 UI 和 Electron；平台分支仅在适配层。Vite/Forge、Radix 和 E2E 驱动为候选，不把更多框架作为 MVP 前置工作。
+**HAE-001 已实施工具链部分。** 单包、单 npm 锁文件；Electron 44.2.0、React 19.2.8、TypeScript 6.0.3、Vite 8.2.2。纯核心不依赖 UI 和 Electron；平台分支仅在适配层。版本详情、许可证和未测项见 [开发说明](DEVELOPMENT.md)。
 
-HAE-001 锁定依赖、构建/测试命令、许可证清单和 CI；需要新依赖时先说明必要性、替代方案与体积/维护代价。
+构建用 Vite JavaScript API 分别产出 Main、UI preload、Preview preload、UI 与 Preview；每个 preload 为单文件 CJS，沙箱中不加载共享 chunk。开发启动同样读取本地构建产物，无 HTTP/HMR 服务。代价是修改后需重启。Forge 的 [Vite 插件仍标记为实验性](https://www.electronforge.io/config/plugins/vite)，当前没有安装器任务，留到 HAE-015 评估。
+
+测试采用 Node 自带测试运行器与独立 Electron 主进程冒烟入口，暂不引入 Vitest/Playwright/Radix。TypeScript 6 保留稳定编译器 AST API，用于模块边界检查；迁移 TypeScript 7 的原生工具链及新 API 留作独立升级。新增依赖仍须说明必要性、替代方案和维护代价。
 
 ## ADR-007：MIT 开源与透明能力状态
 
@@ -49,3 +51,17 @@ MIT 正文采用 [GitHub MIT 模板](https://api.github.com/licenses/mit)，许�
 **采用。** 一个 Issue 对应有限范围、依赖、产物、自动与人工证据。AI 不自行扩展为网页搭建器，不以测试数或截图替代可用性，也不把设备不可用标成通过。
 
 默认单写入者逐项推进；若另有明确的并行安排，须先划分文件与接口所有权，合并后统一验证。详见 [AI 开发流程](AI_WORKFLOW.md)。
+
+## ADR-009：前端使用 Kimi 最新正式可用模型
+
+**采用，维护者于 2026-09-08 指定。** 前端 UI 设计、组件、样式、交互与可访问性改动使用 Kimi 最新正式可用模型。当前核对基线为 Kimi K3，完整 Kimi Code CLI 别名为 `kimi-code/k3`；依据为 [Kimi 官方模型说明](https://www.kimi.ai/blog/kimi-k3) 与 [CLI 模型配置文档](https://moonshotai.github.io/kimi-code/en/configuration/config-files)。
+
+每项前端任务启动前重新核对，并记录实际模型与执行证据；任务中保持版本一致，不静默替换模型。主开发代理负责纯核心、保存、安全、集成和独立复核，混合任务先划分前端文件与接口，默认只有一个写入者。
+
+此决策规定开发分工，应用技术栈和离线能力保持既定设计；不增加应用内模型调用。实际 Kimi 任务仍须完成完整交互验证，模型配置存在不等于已完成模型调用或前端验收。详见 [AI 开发流程](AI_WORKFLOW.md)。
+
+## ADR-010：使用本地检查与人工验收，取消 GitHub CI
+
+**采用，维护者于 2026-09-08 指定。** 不使用 GitHub Actions/CI；关闭仓库 Actions，移除文档和工具链工作流配置。保留 `npm run check`、`python tools/check_docs.py` 和 `git diff --check` 等本地检查，`npm ci` 继续作为锁定依赖安装命令。
+
+Windows/macOS 的构建、冒烟、权限与 UI 验收在实际目标环境完成，记录 commit、工具链、OS/架构、命令、结果与未测项。远端 CI 不作为任务、合并或发布门槛；没有 Mac 设备时相应验收仍为待执行。此决策取消远端执行方式，保留源码保护、安全检查和真实用户验收标准。

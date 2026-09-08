@@ -1,6 +1,6 @@
 # 贡献指南
 
-欢迎以小范围、可复现的改进参与 HTML Artifact Editor。当前是规划阶段，请先看 [README](README.md)、[PRD](PRD.md)、[路线图](ROADMAP.md) 和 [任务清单](docs/BACKLOG.md)。
+欢迎以小范围、可复现的改进参与 HTML Artifact Editor。当前已有工具链验证壳，产品流程仍待实现。请先看 [README](README.md)、[PRD](PRD.md)、[路线图](ROADMAP.md) 和 [任务清单](docs/BACKLOG.md)。
 
 ## 开始一个改动
 
@@ -9,7 +9,7 @@
 3. 一次完成一个可审查的行为；不同问题拆开，不顺带格式化或重构整个仓库。
 4. 按风险执行检查，在 PR 中写明验证结果和未测项。更改支持边界要同步规格与测试矩阵。
 
-当前可用命令为 `python tools/check_docs.py`（Python 3.10+）和 `git diff --check`。应用构建命令将在 HAE-001 提供，不能把文档 CI 的通过称为应用测试通过。
+先按 [开发说明](docs/DEVELOPMENT.md) 安装固定依赖，在本地运行 `npm run check`、`python tools/check_docs.py`（Python 3.10+）和 `git diff --check`。本项目不使用 GitHub CI，不新增 Actions 工作流；在 PR 中记录本地命令、commit、环境与结果。启动冒烟只覆盖内置验证壳；不能把它、文档检查或纯核心测试的通过称为产品流程验收。
 
 ## 提交内容
 

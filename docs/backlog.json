@@ -50,17 +50,17 @@
       "objective": "建立单包、单锁文件的可复现开发基础，验证可信 UI 与预览可以独立构建。",
       "scope": [
         "src/contracts、src/main、src/preload、src/core、src/platform 的最小边界",
-        "版本锁定、开发/构建/测试命令、Windows 与 Mac 核心 CI"
+        "版本锁定、开发/构建/测试命令、Windows 与 Mac 本地核心检查"
       ],
       "deliverables": [
         "运行时与依赖版本记录、许可证清单",
-        "启动与构建说明、实际 CI 工作流"
+        "启动与构建说明、可复现的本地检查记录"
       ],
       "acceptance": [
         "选择仍受支持的 Electron 稳定版并记录对应 Chromium、Node 和最低 OS。",
         "本地启动/构建成功；代码尚未具备的功能不出现在能力声明中。",
         "核心不依赖 Electron、DOM 或 OS 判断；UI 与 Preview 分别构建 preload。",
-        "记录 CI 实际 OS/架构；没有可用 Mac 环境时保留明确的待验证项。"
+        "记录本地验证的实际 OS/架构；没有可用 Mac 环境时保留明确的待验证项。"
       ],
       "tests": [
         "T-01"
@@ -578,7 +578,7 @@
         "Mac 执行打开、修改、取消、保存/冲突、撤销、重启恢复与浏览器复核。",
         "Cmd 快捷键、中文 IME、Retina、原生菜单、文件权限和焦点正常。",
         "验证 Windows 多 DPI 和最小窗口，Narrator/VoiceOver 核心路径可用。",
-        "核心不新增 OS 分支；设备不可用保持待验收，不以 CI 通过替代。"
+        "核心不新增 OS 分支；设备不可用保持待验收，不以其他环境的本地检查替代。"
       ],
       "tests": [
         "T-10",
@@ -610,7 +610,7 @@
       ],
       "objective": "产出可审查的平台安装包、校验和及分发说明，明确签名和设备条件。",
       "scope": [
-        "Forge/打包配置、发布工作流",
+        "Forge/本地打包配置与发布清单",
         "第三方许可、签名/公证配置与文档"
       ],
       "deliverables": [

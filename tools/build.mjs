@@ -1,0 +1,38 @@
+import { builtinModules } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { build } from 'vite';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const entries = {
+  main: ['src/main/index.ts', 'out/main'],
+  'preload-ui': ['src/preload/ui.ts', 'out/preload/ui'],
+  'preload-preview': ['src/preload/preview.ts', 'out/preload/preview'],
+  smoke: ['tests/smoke/main.ts', 'out/smoke'],
+};
+const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview'];
+const requested = process.argv.slice(2);
+for (const target of requested.length ? requested : defaultTargets) {
+  if (target === 'ui' || target === 'preview') {
+    await build({
+      configFile: false,
+      root: resolve(root, 'src', target), base: './', publicDir: false,
+      oxc: { jsx: { runtime: 'automatic' } },
+      build: { outDir: resolve(root, 'out', target), emptyOutDir: true, target: 'chrome152' },
+    });
+  } else {
+    const entry = entries[target];
+    if (!entry) throw new Error(`Unknown build target: ${target}`);
+    await build({
+      configFile: false, root, publicDir: false,
+      build: {
+        outDir: resolve(root, entry[1]), emptyOutDir: true, target: 'node24',
+        minify: false,
+        lib: { entry: resolve(root, entry[0]), formats: ['cjs'], fileName: () => 'index.cjs' },
+        rolldownOptions: {
+          external: ['electron', ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
+        },
+      },
+    });
+  }
+}

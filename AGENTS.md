@@ -2,7 +2,7 @@
 
 ## Current scope
 
-This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. The repository currently contains planning documents and documentation checks, not an implemented desktop application. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
+This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001 adds a runnable toolchain scaffold with bundled static content; user-file opening, editing and saving are not implemented. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
 
 Human-readable project documentation is primarily Simplified Chinese. Keep identifiers and API contracts concise in English. Do not copy private conversations, user paths or unrelated project data into this public repository.
 
@@ -18,6 +18,15 @@ Human-readable project documentation is primarily Simplified Chinese. Keep ident
 - Do not bypass backup, conflict detection or recovery to make a demo appear complete.
 - Never add layout editing, structural DOM edits, framework source editing, AI services or network features without an explicit scope change.
 
+## Frontend model assignment
+
+- User requirement: frontend design and implementation must use the latest officially released Kimi model available for the task. The verified baseline on 2026-09-08 is Kimi K3 via Kimi Code, using the full CLI alias `kimi-code/k3`.
+- This applies to product UI components, styling, interaction states, accessibility and frontend portions of mixed tasks. Keep React/TypeScript as the application stack; Kimi is a development tool, not an application runtime dependency.
+- Before each frontend task, check official model information and the configured/available Kimi Code models. Record the verification date, CLI version, actual alias/model and relevant settings; keep that choice stable within the task. Do not silently substitute an older model or another provider when the selected model is unavailable.
+- Kimi owns the bounded frontend change. The primary development agent owns core/source mapping, file transactions, security, integration and independent review. Mixed tasks must define the frontend files and contracts before handing off; do not grant the UI authority to change protected core boundaries.
+- Retain one writer at a time unless parallel work is explicitly arranged. Actual Kimi execution must be recorded before claiming that Kimi produced a frontend change; this planning amendment does not itself run a frontend implementation task.
+- Follow the detailed model selection and handoff policy in docs/AI_WORKFLOW.md.
+
 ## Working process
 
 1. Inspect current worktree, target Issue, dependencies and existing code. Preserve unrelated and parallel changes.
@@ -29,12 +38,16 @@ Human-readable project documentation is primarily Simplified Chinese. Keep ident
 
 ## Available checks today
 
+User requirement: do not use GitHub Actions or GitHub-hosted CI. Run build, test, smoke and documentation checks locally; use real target machines for platform acceptance. Do not add workflow files or require remote CI checks for merge/release. Repository Actions are disabled. `npm ci` below installs locked dependencies locally and remains part of setup.
+
 ```sh
+npm ci
+npm run check
 python tools/check_docs.py
 git diff --check
 ```
 
-Python 3.10+ is sufficient. HAE-001 will introduce real application build/test commands and dependency lock files. Do not invent or report nonexistent npm/electron checks. Avoid adding tests that merely mirror low-impact documentation edits.
+Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. The Electron smoke covers only bundled scaffold startup and selected isolation checks, not T-01 or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
 
 For core/file changes, required evidence includes byte preservation, entity/Unicode handling, rejected ambiguous targets, save conflict, failure and recovery tests. For UI changes, also provide executed interaction evidence; screenshots alone do not prove functionality.
 

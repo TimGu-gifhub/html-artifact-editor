@@ -34,9 +34,9 @@
 
 ## 仓库协作设置
 
-使用公开 repository、MIT LICENSE、Issues、里程碑、bug/feature 模板与 PR 模板；初期关闭不需要的 Wiki。默认分支为 main。当前 CI 只校验文档，应用代码加入后再追加真实构建/测试作业。
+使用公开 repository、MIT LICENSE、Issues、里程碑、bug/feature 模板与 PR 模板；初期关闭不需要的 Wiki。默认分支为 main。按维护者要求，不使用 GitHub Actions/CI，仓库 Actions 已关闭；构建、测试、冒烟、文档检查和打包通过本地命令完成，在 PR/发布记录中提供实际执行证据。
 
-在构建检查稳定后再配置所需分支规则与合并门槛；不设置不存在的 required check 或无人可完成的人工审核条件。贡献者与维护者都应只提交相关文件，保留其他并行工作。
+合并与发布依据本地检查记录和必要的人工验收，不设置远端 CI required check，也不以 GitHub 工作流自动发布安装包。贡献者与维护者都应只提交相关文件，保留其他并行工作。
 
 ## 隐私与安全反馈
 
