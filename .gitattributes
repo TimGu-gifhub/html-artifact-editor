@@ -7,8 +7,10 @@
 *.ts text eol=lf
 *.tsx text eol=lf
 *.mjs text eol=lf
+*.js text eol=lf
 *.html text eol=lf
 *.css text eol=lf
+*.svg text eol=lf
 .npmrc text eol=lf
 .nvmrc text eol=lf
 LICENSE text eol=lf

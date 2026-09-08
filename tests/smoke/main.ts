@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { app } from 'electron';
 import { createApplication, registerSchemes } from '../../src/main/application.ts';
+import { captureReady } from '../helpers/capture.ts';
 
 // A separate main entry, never imported or enabled by the application entry.
 registerSchemes();
@@ -86,8 +87,8 @@ async function runSmoke(): Promise<void> {
     });
     window.showInactive();
     await delay(300);
-    await writeFile(resolve(results, 'ui.png'), (await window.webContents.capturePage()).toPNG());
-    await writeFile(resolve(results, 'preview.png'), (await preview.webContents.capturePage()).toPNG());
+    await writeFile(resolve(results, 'ui.png'), await captureReady(window.webContents));
+    await writeFile(resolve(results, 'preview.png'), await captureReady(preview.webContents));
     const previewContents = preview.webContents;
     const previewDestroyed = once(previewContents, 'destroyed');
     window.destroy();

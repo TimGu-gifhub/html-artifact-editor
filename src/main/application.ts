@@ -1,25 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { BrowserWindow, WebContentsView, ipcMain, protocol, session } from 'electron';
-import type { IpcMainEvent, WebContents, WebPreferences } from 'electron';
+import type { IpcMainEvent, WebContents } from 'electron';
 import { BOOTSTRAP_CHANNEL, isBootstrapReady } from '../contracts/bootstrap.ts';
 import type { BootstrapReady } from '../contracts/bootstrap.ts';
 import { attachPreview } from '../platform/window.ts';
 import { registerBundledContent } from './bundled-content.ts';
+import { lockContents, securePreferences } from './preview/security.ts';
 
 export function registerSchemes(): void {
   protocol.registerSchemesAsPrivileged(['editor', 'artifact'].map((scheme) => ({
     scheme,
-    privileges: { standard: true, secure: true, supportFetchAPI: true },
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
   })));
-}
-
-function lockContents(contents: WebContents): void {
-  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  contents.on('will-navigate', (event) => event.preventDefault());
-  contents.on('will-frame-navigate', (event) => event.preventDefault());
-  contents.on('will-redirect', (event) => event.preventDefault());
-  contents.on('will-attach-webview', (event) => event.preventDefault());
 }
 
 function waitForBootstrap(
@@ -33,7 +26,7 @@ function waitForBootstrap(
       contents.removeListener('preload-error', onError);
     };
     const onReady = (event: IpcMainEvent, payload: unknown): void => {
-      if (event.sender !== contents || event.senderFrame !== contents.mainFrame
+      if (event.sender !== contents || event.sender.session !== contents.session || event.senderFrame !== contents.mainFrame
         || event.senderFrame.url !== url || !isBootstrapReady(payload)
         || payload.surface !== surface) return;
       cleanup();
@@ -58,19 +51,6 @@ export async function createApplication(outputRoot: string, visible = true) {
   const previewURL = `artifact://${id}/index.html`;
   await registerBundledContent(uiSession, 'editor', 'app', resolve(outputRoot, 'ui'));
   await registerBundledContent(previewSession, 'artifact', id, resolve(outputRoot, 'preview'));
-  const securePreferences: WebPreferences = {
-    nodeIntegration: false,
-    nodeIntegrationInWorker: false,
-    nodeIntegrationInSubFrames: false,
-    contextIsolation: true,
-    sandbox: true,
-    webSecurity: true,
-    webviewTag: false,
-    allowRunningInsecureContent: false,
-    experimentalFeatures: false,
-    navigateOnDragDrop: false,
-    safeDialogs: true,
-  };
   const window = new BrowserWindow({
     title: 'HTML Artifact Editor · 工具链验证',
     width: 1100, height: 760, minWidth: 960, minHeight: 640,

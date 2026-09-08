@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>自制安全样例</title>
+<link rel="stylesheet" href="assets/site.css">
+<h1>中文 &amp; Emoji 🧪</h1>
+<p id="font">A</p>
+<p id="dynamic">静态原文</p>
+<img id="local-image" src="assets/shape.svg" alt="自制矩形">
+<button id="inline-button" onclick="window.handlerRan = true">事件样例</button>
+<a id="js-link" href="javascript:window.javascriptURLRan=true">脚本链接</a>
+<input id="file-input" type="file">
+<svg xmlns="http://www.w3.org/2000/svg" onload="window.svgHandlerRan=true"><text y="18">只读 SVG</text></svg>
+<canvas id="canvas" width="20" height="20"></canvas>
+<div id="shadow-host"></div>
+<script>window.inlineRan = true;</script>
+<script src="assets/local.js"></script>
+<script type="module" src="assets/module.mjs"></script>
+</html>

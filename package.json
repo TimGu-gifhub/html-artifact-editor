@@ -26,9 +26,12 @@
     "diagnostics": "node tools/platform-info.mjs",
     "test": "node --test tests/unit/*.test.mjs",
     "test:smoke": "node tools/build.mjs smoke && node tools/run-electron.mjs --smoke",
+    "test:security": "node tools/build.mjs security security-preload && node tools/run-electron.mjs --security",
+    "preview": "npm run build && node tools/run-electron.mjs --preview",
+    "preview:interactive": "npm run build && node tools/run-electron.mjs --preview --interactive",
     "licenses": "node tools/licenses.mjs",
     "licenses:check": "node tools/licenses.mjs --check",
-    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run build && npm run test:smoke && npm run licenses:check"
+    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run build && npm run test:smoke && npm run test:security && npm run licenses:check"
   },
   "dependencies": {
     "react": "19.2.8",

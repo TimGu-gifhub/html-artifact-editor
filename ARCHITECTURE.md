@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：产品架构设计基线；HAE-001 已加入工具链验证壳，版本与已执行证据见 [开发说明](docs/DEVELOPMENT.md) 和 [交付记录](docs/implementation/HAE-001.md)。用户文件流程仍待后续任务实现。
+状态：产品架构设计基线；HAE-001 已加入工具链，HAE-002 已加入独立只读项目预览入口。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md) 与 [HAE-002 交付记录](docs/implementation/HAE-002.md)。产品编辑与保存流程仍待实现。
 
 ## 1. 技术选型
 
@@ -117,6 +117,16 @@ React/TypeScript/Vite 版本已在 HAE-001 锁定，使用 Node 自带测试运�
 
 ### HAE-001 验证壳的具体边界
 
-当前只服务构建时自带的页面，通过各 session 内的精确 URL → 内存内容映射返回资源；没有用户目录映射、文件对话框或写入接口。`editor://app/` 与随机 `artifact://…/` 分离。UI 桥只有只读启动信息；Preview 页面没有桥，preload 只报告固定启动诊断，Main 校验 sender、主 frame、完整源 URL 和 payload，收到后撤销该监听器。
+`npm run dev` 保留构建时自带的验证壳，通过各 session 内的精确 URL → 内存内容映射返回资源。`editor://app/` 与随机 `artifact://…/` 分离。UI 桥只有只读启动信息；Preview 页面没有桥，preload 只报告固定启动诊断，Main 校验 sender、session、主 frame、完整源 URL 和 payload，收到后撤销该监听器。
 
-Electron 44.2.0 本地实验中 `javascript: false` 阻止了 Preview preload 初始化。因此验证壳保留隔离 preload 所需的引擎，使用响应头 `script-src 'none'` 禁止页面脚本；不启用 bypassCSP，沙箱、上下文隔离和 webSecurity 全部开启。已测试的内置样例范围见交付记录。HAE-002 仍须验证真实用户 HTML 的原 CSP 叠加、各类脚本入口和子 frame；HAE-003 必须按实际 Chromium 脚本解析语义处理 noscript，不能把 CSP 禁止执行等同于解析器 scriptingEnabled=false。
+Electron 44.2.0 本地实验中 `javascript: false` 阻止了 Preview preload 初始化。因此保留隔离 preload 所需的引擎，使用响应头 `script-src 'none'` 禁止校稿页脚本；不启用 bypassCSP，沙箱、上下文隔离和 webSecurity 全部开启。HAE-002 已验证原 CSP 叠加、脚本入口与子 frame 拒绝；HAE-003 仍必须按实际 Chromium 脚本解析语义处理 noscript，不能把 CSP 禁止执行等同于解析器 scriptingEnabled=false。
+
+### HAE-002 项目预览的实施边界
+
+- Main 原生选择器只授予所选 HTML 的父目录，项目 protocol 只注册在新的内存 session 中。入口为固定 UTF-8 原始字节快照，资源按请求只读；请求解码一次，拒绝私有路径、非白名单类型、符号链接/junction、硬链接与 Windows 路径别名。读取前后的路径链、realpath 与打开句柄的 dev/ino、大小和时间戳必须一致。
+- 校稿以 CSP 禁用全部页面脚本；交互允许本地 classic/module/inline 脚本，不允许 eval。两者都没有选区写回或保存 API。原始 HTML 不删 CSP、不插入标记、不做整页序列化。
+- 网络层拒绝非当前 artifact 域的请求，并将 session 设为 offline；权限、外部导航、弹窗、下载、frame、worker、data/blob 资源均拒绝。资源兼容白名单和大小/并发上限见开发说明；这是有意收缩的初始范围。
+- WebRTC 不完全受 URL 请求过滤控制。Main 在可信空白页启动后、加载用户字节前，通过 [Electron Debugger](https://www.electronjs.org/docs/latest/api/debugger) 和 [CDP Page](https://chromedevtools.github.io/devtools-protocol/tot/Page/) 的文档创建钩子，在所有 frame 中不可重定义地关闭 WebRTC/WebTransport、文件选择 API 和打印，拦截文件拖放，并取消 HTML 文件输入的原生选择器。该钩子没有页面桥，不开放命令给页面；未设置 bypassCSP。保护安装失败或调试连接意外断开会撤销资源并关闭预览，正常销毁先撤销以避免重入。相关 API 依赖锁定 Electron/Chromium，升级时必须重跑负向用例。
+- `PreviewController` 只接受 Main 路径与模式。成功切换先替换权威引用并同步撤销旧权限，销毁旧 WebContents 和清空存储；失败保留旧预览，过期/取消请求不可回填。IPC 目前仅有严格的只读启动确认，Main 验证 contents、session、senderFrame、源 URL、世代、模式和 schema。
+
+路径与句柄复核覆盖已执行的文件替换、junction 替换和读中写入用例，不能冒称为所有文件系统上的内核原子授权或抵御拥有同等 OS 权限的敌对本地进程。网络盘、云同步、Mac 文件系统与更多竞态语料尚未验收；不因此开放任何写入。

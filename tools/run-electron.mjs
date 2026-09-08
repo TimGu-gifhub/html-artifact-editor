@@ -6,10 +6,13 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const smoke = process.argv.includes('--smoke');
-const entry = resolve(root, smoke ? 'out/smoke/index.cjs' : 'out/main/index.cjs');
+const kind = process.argv.includes('--smoke') ? 'smoke'
+  : process.argv.includes('--security') ? 'security'
+    : process.argv.includes('--preview') ? 'preview-tool' : 'main';
+const smoke = kind === 'smoke' || kind === 'security';
+const entry = resolve(root, `out/${kind}/index.cjs`);
 if (!existsSync(entry)) throw new Error('Build output missing. Run npm run build first.');
-const reportPath = resolve(root, 'test-results/smoke.json');
+const reportPath = resolve(root, `test-results/${kind}.json`);
 if (smoke) {
   await mkdir(resolve(root, 'test-results'), { recursive: true });
   await writeFile(reportPath, '{"status":"running"}\n');
@@ -17,9 +20,11 @@ if (smoke) {
 const env = { ...process.env };
 // Embedded terminals may inherit this flag from their own Electron host.
 delete env.ELECTRON_RUN_AS_NODE;
-const child = spawn(electron, [smoke ? entry : root], { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
+const args = [kind === 'main' ? root : entry];
+if (kind === 'preview-tool' && process.argv.includes('--interactive')) args.push('--interactive');
+const child = spawn(electron, args, { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
 const timeout = smoke ? setTimeout(() => {
-  console.error('Electron smoke exceeded 45 seconds.');
+  console.error(`Electron ${kind} exceeded 45 seconds.`);
   child.kill();
   process.exitCode = 1;
 }, 45_000) : undefined;

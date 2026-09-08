@@ -1,0 +1,4 @@
+@import './nested.css';
+@font-face { font-family: HaeTest; src: url('./test.ttf') format('truetype'); }
+body { color: rgb(12, 34, 56); background: white; }
+#font { font-family: HaeTest; }

@@ -2,7 +2,7 @@
 
 ## Current scope
 
-This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001 adds a runnable toolchain scaffold with bundled static content; user-file opening, editing and saving are not implemented. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
+This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001 adds a runnable toolchain scaffold; HAE-002 adds a separate developer entry for read-only local-project previews. Product UI, source mapping, editing and saving are not implemented. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
 
 Human-readable project documentation is primarily Simplified Chinese. Keep identifiers and API contracts concise in English. Do not copy private conversations, user paths or unrelated project data into this public repository.
 
@@ -47,7 +47,7 @@ python tools/check_docs.py
 git diff --check
 ```
 
-Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. The Electron smoke covers only bundled scaffold startup and selected isolation checks, not T-01 or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
+Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. The Electron smoke covers the bundled scaffold; test:security covers the local-project security fixtures documented in docs/implementation/HAE-002.md. Neither substitutes for native-dialog, platform or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
 
 For core/file changes, required evidence includes byte preservation, entity/Unicode handling, rejected ambiguous targets, save conflict, failure and recovery tests. For UI changes, also provide executed interaction evidence; screenshots alone do not prove functionality.
 

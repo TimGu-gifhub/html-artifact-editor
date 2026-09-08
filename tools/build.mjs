@@ -9,8 +9,11 @@ const entries = {
   'preload-ui': ['src/preload/ui.ts', 'out/preload/ui'],
   'preload-preview': ['src/preload/preview.ts', 'out/preload/preview'],
   smoke: ['tests/smoke/main.ts', 'out/smoke'],
+  security: ['tests/security/main.ts', 'out/security'],
+  'security-preload': ['tests/security/hostile-preload.ts', 'out/security/preload'],
+  'preview-tool': ['tools/preview-main.ts', 'out/preview-tool'],
 };
-const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview'];
+const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool'];
 const requested = process.argv.slice(2);
 for (const target of requested.length ? requested : defaultTargets) {
   if (target === 'ui' || target === 'preview') {

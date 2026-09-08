@@ -6,7 +6,7 @@ A local-first desktop editor for precise text corrections in existing HTML artif
 
 AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日期、段落和表格文字。项目的核心目标是：只改变用户确认的文本范围，保留其余 HTML、CSS、JavaScript 和资源文件。
 
-> **当前状态：HAE-001 工具链验证壳。** 已有 Electron 启动入口、独立 UI/Preview 与 preload 构建、本地类型与模块边界检查和启动冒烟。尚不能打开或修改用户 HTML，没有安装包。本地检查范围与平台未测项见 [HAE-001 交付记录](docs/implementation/HAE-001.md)。
+> **当前状态：工具链与只读项目预览验证。** HAE-001 已交付；HAE-002 增加独立开发验证入口，可选择 UTF-8 HTML，以禁用页面脚本的校稿模式或运行本地脚本的交互模式预览。已有目录授权、离线策略与安全测试，尚无文字编辑、保存或安装包。执行范围及未测项见 [HAE-002 交付记录](docs/implementation/HAE-002.md)。
 
 ## 计划中的核心流程
 
@@ -61,6 +61,15 @@ npm run dev
 ```
 
 `dev` 先构建再启动，只显示内置样例；修改源码后关闭窗口并重新执行。当前不提供热更新。已构建后可直接 `npm start`。
+
+只读项目预览使用独立验证入口：
+
+```sh
+npm run preview
+npm run preview:interactive
+```
+
+两条命令分别打开校稿／交互预览，由原生文件选择器取得入口，根范围为该 HTML 所在文件夹。请选择独立项目目录；根内允许的预览资源可被本地脚本读取。该入口没有编辑、保存或产品模式切换控件；兼容限制见 [开发说明](docs/DEVELOPMENT.md)。原生选择器的人工验收仍待执行。
 
 ```sh
 npm run check
