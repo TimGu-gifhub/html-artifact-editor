@@ -180,3 +180,9 @@ WorkspaceSession 让同一 current 服务于可信 IPC、输入/草稿、Preview
 Main DirectoryGrant 固定实际目录身份与私有路径排除；ProjectGrant 加入根内相对 HTML 入口。两步原生选择器产生 Main 授权，switchEntry 复用原根身份并重新核验路径链，不能因目录被替换而重新授权。该根只扩大允许的预览资源范围，另存 writer 仍限入口所在文件夹的新 HTML。Workspace 在完整准备后处理离开确认、视图提交和旧会话撤销，迟到目录答复不能创建新操作。
 
 有界资源诊断汇合协议、webRequest 及现有安全 CDP 连接的 Network/Audits 事件；CSP 拒绝的 fetch 即使没有 Network 请求事件仍可记录。只收集失败目标/类型/原因，URL 去除凭据/查询/fragment、本机路径隐藏，超限标记截断。诊断通过 current.project 和生产可信 IPC 传输，没有新增 Preview bridge、bypassCSP 或联网例外。事件观察失败即拒绝本次预览，升级 Electron 时需重新验证实验性 Audits 接口。八组真实目录实验已执行；产品诊断面板及人工对话框仍待验收，见 [目录资源合同](docs/PROJECT_RESOURCES.md)。
+
+### HAE-010 第一段：覆盖前的私有准备
+
+平台层持有源文件路径链、完整字节、dev/ino 与纳秒时间戳；Main 准备服务以私有存储全局独占锁串行化合作实例，在不可覆写的独立文件中存原始备份、候选、intent 和准备/取消记录。每一步保持句柄写入、sync、回读 hash 和目录/文件复核。记录仅保存规范路径键及显示名称，没有可直接回放的绝对路径。
+
+重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限，当前服务未接入 Workspace/UI。平台替换、ACL、committed、基线重建、恢复向导和持久化编辑意图仍待实现，见 [保存准备合同](docs/SAVE_PREPARATION.md)。

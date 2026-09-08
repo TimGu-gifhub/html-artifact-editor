@@ -6,6 +6,8 @@ This is HTML Artifact Editor, a local-first visual text correction tool for exis
 
 Human-readable project documentation is primarily Simplified Chinese. Keep identifiers and API contracts concise in English. Do not copy private conversations, user paths or unrelated project data into this public repository.
 
+HAE-010 now has an unconnected Main/platform save-preparation experiment: baseline conflict checks, a private cooperative lock, verified backup/candidate records and read-only restart inspection. It never replaces HTML; prepared is not saved. Read docs/SAVE_PREPARATION.md before extending it. `npm run test:storage` executes its real filesystem tests under Electron's bundled Node, without a page or app window.
+
 ## Invariants
 
 - Preserve the original file bytes outside verified text patch ranges. Never save a serialized whole DOM/AST as a shortcut.
