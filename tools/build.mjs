@@ -15,8 +15,10 @@ const entries = {
   'parser-worker': ['src/main/parser/worker.ts', 'out/parser-worker'],
   mapping: ['tests/mapping/main.ts', 'out/mapping'],
   patch: ['tests/patch/main.ts', 'out/patch'],
+  'draft-worker': ['src/main/draft/worker.ts', 'out/draft-worker'],
+  draft: ['tests/draft/main.ts', 'out/draft'],
 };
-const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker'];
+const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker'];
 const requested = process.argv.slice(2);
 for (const target of requested.length ? requested : defaultTargets) {
   if (target === 'ui' || target === 'preview') {

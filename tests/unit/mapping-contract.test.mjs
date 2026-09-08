@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isMappingIdentity, isMappingEvent, isMappingCheck, isMappingCheckResult, sameMapping } from '../../src/contracts/mapping.ts';
+import { isMappingIdentity, isMappingEvent, isMappingCheck, isMappingCheckResult, isMappingApply, isMappingApplyResult, sameMapping } from '../../src/contracts/mapping.ts';
+import { isDraftApply } from '../../src/contracts/draft.ts';
 const identity = { preview: { version: 1, sessionId: '00000000-0000-4000-8000-000000000001', generation: 1, mode: 'proofread' },
   documentId: '00000000-0000-4000-8000-000000000002', baseHash: 'a'.repeat(64) };
 test('mapping identity binds document, snapshot, preview session and generation', () => {
@@ -11,6 +12,22 @@ test('mapping identity binds document, snapshot, preview session and generation'
     assert.equal(isMappingIdentity(bad), false);
   }
   assert.equal(sameMapping(identity, { ...identity, baseHash: 'b'.repeat(64) }), false);
+});
+test('draft commands carry only selection, text and version; mutation replies carry no source authority', () => {
+  const selection = { identity, revision: 2, nodeId: 'n5' };
+  const input = { selection, draftRevision: 1, newText: '中文😀\n<script>&</script>' };
+  assert.ok(isDraftApply(input));
+  for (const bad of [{ ...input, path: 'x' }, { ...input, draftRevision: 0 }, { ...input, draftRevision: NaN },
+    { ...input, newText: 'x'.repeat(128 * 1024 + 1) }, { ...input, selection: { ...selection, startByte: 1 } }]) assert.equal(isDraftApply(bad), false);
+  const request = { ...selection, requestId: '00000000-0000-4000-8000-000000000003', expectedText: '原文', newText: input.newText };
+  assert.ok(isMappingApply(request));
+  for (const bad of [{ ...request, path: 'x' }, { ...request, newText: '\0' }, { ...request, newText: '\ud800' },
+    { ...request, newText: '\udc00' }, { ...request, newText: '\r' }, { ...request, newText: 'x'.repeat(65537) }]) assert.equal(isMappingApply(bad), false);
+  const result = { ...selection, requestId: request.requestId, outcome: 'applied', nextRevision: 3 };
+  assert.ok(isMappingApplyResult(result));
+  assert.equal(isMappingApplyResult({ ...result, newText: 'forged' }), false);
+  assert.equal(isMappingApplyResult({ ...result, outcome: 'saved' }), false);
+  assert.equal(isMappingApplyResult({ ...result, nextRevision: 0 }), false);
 });
 test('mapping events require exact small schemas, bounded ids and positive revisions', () => {
   for (const event of [

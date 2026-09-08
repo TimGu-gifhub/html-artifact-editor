@@ -152,11 +152,11 @@ export function buildPatchCandidate(source: SourceIndex, patches: readonly TextP
   return compile(verifySource(source, hash), patches, hash);
 }
 
-export function createPatchEngine(input: SourceIndex, hash: HashBytes) {
+export function createPatchEngine(input: SourceIndex, hash: HashBytes, initialPatches: readonly TextPatch[] = []) {
   const source = verifySource(input, hash);
   const nodes = new Map(source.nodes.map((node) => [node.nodeId, node]));
   const fallback = defaultLineEnding(source.text);
-  let current = compile(source, [], hash);
+  let current = compile(source, initialPatches, hash);
   return Object.freeze({
     source,
     get candidate(): PatchCandidate { return current; },

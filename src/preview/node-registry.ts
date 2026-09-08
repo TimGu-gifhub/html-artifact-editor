@@ -1,6 +1,6 @@
 import { HTML_NAMESPACE, MAX_TREE_DEPTH, MAX_TREE_NODES, orderedAttributes } from '../contracts/source-tree.ts';
 import type { SourceTree, TreeNode } from '../contracts/source-tree.ts';
-import type { MappingCheck, MappingEvent, MappingFailure, MappingIdentity } from '../contracts/mapping.ts';
+import type { MappingApply, MappingApplyResult, MappingCheck, MappingEvent, MappingFailure, MappingIdentity } from '../contracts/mapping.ts';
 import { sameMapping } from '../contracts/mapping.ts';
 
 // Called only from the isolated preload. There is no page-world bridge or marker.
@@ -113,12 +113,36 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
       emit({ identity, kind: 'ready', revision: ++revision, editableCount: byId.size });
     }
   } catch { invalidate('UNSUPPORTED_DOM'); }
-  return {
-    check(request: MappingCheck): boolean {
+  const check = (request: MappingCheck): boolean => {
       if (!drain() || crossesText() || !sameMapping(request.identity, identity) || request.revision !== revision || request.nodeId !== selected) return false;
       const node = byId.get(request.nodeId);
       return !!node && node.isConnected && node.getRootNode() === root && byObject.get(node) === request.nodeId
         && node.data === valueById.get(request.nodeId) && !hasGeneratedContent(node);
+  };
+  return {
+    check,
+    apply(request: MappingApply): MappingApplyResult {
+      const result = (outcome: MappingApplyResult['outcome']): MappingApplyResult => ({
+        identity, requestId: request.requestId, nodeId: request.nodeId, revision: request.revision,
+        outcome, nextRevision: revision,
+      });
+      if (!check(request) || valueById.get(request.nodeId) !== request.expectedText) return result('rejected');
+      const node = byId.get(request.nodeId)!;
+      try {
+        if (node.data !== request.newText) {
+          // Keep observing. Consume exactly our synchronous Text.data record; never
+          // leave an observation gap or excuse another mutation with the same value.
+          node.data = request.newText;
+          const records = observer.takeRecords();
+          if (records.length !== 1 || records[0]!.type !== 'characterData' || records[0]!.target !== node
+            || node.data !== request.newText || !node.isConnected || node.getRootNode() !== root) {
+            invalidate('DOM_MUTATED'); return result('unknown');
+          }
+          valueById.set(request.nodeId, request.newText);
+        }
+        ++revision; // Even a no-op retires the request's selection revision.
+        return result('applied');
+      } catch { invalidate('DOM_MUTATED'); return result('unknown'); }
     },
     close: (): void => invalidate('CLOSED'),
   };

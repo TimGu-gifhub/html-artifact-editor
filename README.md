@@ -6,7 +6,7 @@ A local-first desktop editor for precise text corrections in existing HTML artif
 
 AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日期、段落和表格文字。项目的核心目标是：只改变用户确认的文本范围，保留其余 HTML、CSS、JavaScript 和资源文件。
 
-> **当前状态：源码定位与纯字节 Patch 验证。** HAE-001/002 已交付工具链、目录授权和离线预览；HAE-003 可核对完整树并定位点击的 Text；HAE-004 可从冻结基线生成经重新解析验证的候选字节，保持其他源码和资源不变。开发预览仍只读，尚无产品文字编辑、文件保存或安装包；执行范围见 [HAE-004 交付记录](docs/implementation/HAE-004.md)。
+> **当前状态：草稿与新文件另存的集成实验。** HAE-001 至 HAE-004 已验证工具链、隔离预览、静态映射与纯字节 Patch；HAE-005 第一段已在自动实验中接通原生选字、受控草稿、独占创建同目录新文件和重开验证。正常应用入口仍只读，尚无产品校稿 UI、覆盖保存、备份恢复或安装包；HAE-005 尚未整体完成，执行范围见 [阶段记录](docs/implementation/HAE-005.md)。
 
 [HAE-007 视觉候选](docs/design/hae-007/README.md) 已提供三种可运行布局，用同一份自制报告演示校稿和状态切换，等待维护者选稿。它们只修改内存中的演示数据，不代表桌面应用已实现编辑或保存；实际检查见 [候选稿交付记录](docs/implementation/HAE-007.md)。
 

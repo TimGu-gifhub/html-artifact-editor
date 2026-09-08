@@ -1,6 +1,6 @@
 # 源码定位与 Patch 规范
 
-版本：schema 1 设计基线。HAE-003/004 已实现静态索引与纯字节 Patch 候选；Main 草稿接入和 HAE-010 文件事务仍待实现。
+版本：schema 1 设计基线。HAE-003/004 已实现静态索引与纯字节 Patch 候选；HAE-005 第一段已验证 Main 草稿和独占新文件另存，产品接线与 HAE-010 覆盖事务仍待实现。
 
 ## 1. 保存不变量
 
@@ -72,7 +72,7 @@ HAE-003 必须构造失败样例，验证“拒绝不确定定位”是否工作
 
 实施结果见 [HAE-003](implementation/HAE-003.md) 与 [决策记录 ADR-011](DECISIONS.md)。Main 将预期整树发送到隔离 preload；返回的 selection 仅含绑定身份、递增 revision 与 nodeId（或 null），不接受路径、偏移或目标文字。校稿 parse5 与 Chromium 均按 scripting-enabled 语义解析，但 CSP 禁止页面脚本执行。DOMContentLoaded 后至绑定前也监视变化；绑定后 MutationObserver、takeRecords 和 Text 对象登记共同拒绝外部更改，包括改回相同文字。
 
-`validateSelection` 仅证明请求执行时的选择/对象状态，不是可跨异步步骤复用的写租约。后续草稿命令必须在 preload 同步完成验证及受控 Text.data 变化，并由 Main 重新核验源索引。当前 registry 没有任何修改文字或写盘方法。
+`validateSelection` 仅证明请求执行时的选择/对象状态，不是可跨异步步骤复用的写租约。HAE-005 第一段的 `applyText` 在 Main worker 验证完整候选后，要求隔离 registry 同步核对身份、当前选择版本、对象和旧值，再更新 Text.data。观察器始终连接，预先排空外部记录，赋值后只消费本次唯一的目标 characterData 记录。没有页面 bridge 或 registry 写盘方法；未知结果保留前后候选并禁止重试，见 [阶段记录](implementation/HAE-005.md)。
 
 ### JS 交互预览
 
@@ -126,7 +126,7 @@ Main 从权威索引生成 TextPatch，并重新校验上下文、范围、旧�
 
 同一 nodeId 连续编辑合并为针对保存基线的一份净补丁；历史仍保留每次“应用”的操作组。A→B→C 最终保存 A→C；A→B→A 取消净补丁。不同节点基于同一份不可变基线，直到保存后统一重建索引，不能增量猜测所有下游 offset。
 
-HAE-004 的实际纯核心入口为 [createPatchEngine / buildPatchCandidate](../src/core/patch/engine.ts)。上面的 ApplyTextDraft 是后续 UI→Main 设计；核心 `TextChange` 精确包含 `identity`、`baseHash`、`nodeId`、`expectedText` 和 `newText`。其中 expectedText 是当前内存候选文字，用来拒绝过期输入；TextPatch.expectedText 则始终是原始基线的解码文字。Main 还须验证选择版本/来源，不能直接向页面开放核心 API。
+HAE-004 的实际纯核心入口为 [createPatchEngine / buildPatchCandidate](../src/core/patch/engine.ts)。上面的 ApplyTextDraft 是规划形式；HAE-005 第一段实际 Main 命令为精确三个字段的 `DraftApply { selection: MappingSelection, draftRevision, newText }`，其 selection 包含完整映射身份、revision 和 nodeId。核心 `TextChange` 精确包含 `identity`、`baseHash`、`nodeId`、`expectedText` 和 `newText`。其中 expectedText 是当前内存候选文字，用来拒绝过期输入；TextPatch.expectedText 则始终是原始基线的解码文字。Main 验证选择版本/来源，从自身状态获取旧值，不能直接向页面开放核心 API。
 
 engine 初始重新解析并核对源索引；apply 在全部候选校验成功后才更新内存状态。无变化返回原候选，同节点改回基线文字移除净 Patch 并保留原实体拼写。失败保留上一候选。`PatchCandidate` 包含冻结身份、baseHash/resultHash、只读 patches 与返回副本的 bytes；没有文件 I/O、DOM 操作、历史或保存点。限制为每节点 64 KiB UTF-8 新文字、1,000 个净 Patch 和 5 MiB 输出，替换字节总预算也受限。后续交互接入应在可取消任务中运行这些同步核心计算。
 
@@ -143,6 +143,8 @@ HAE-004 已验证 1–4，并冻结可供第 5 步使用的候选结果；尚无
 目标节点改为空字符串后，内存编辑会话保留该 Text 对象；保存重解析时空节点可能不再存在。清空选择并保留逻辑历史，恢复该节点必须重新生成经验证的相反操作，不能把旧 nodeId 强行复用。
 
 ## 7. 保存事务
+
+HAE-005 的 M1 简化另存已实现为独占创建同目录新 HTML：冻结当前候选，选择目标后用 O_EXCL 打开并保留句柄，写入/flush/回读 hash，核对目录链与叶子身份。取消零写入；已有文件一律拒绝；创建后的任何异常标记 unknown 并保留现场。另存不清空原入口草稿或移动保存点，不复制资源或自动切换入口。下面的覆盖备份、journal、恢复与保存点事务仍是 HAE-010 设计，不能用新文件实验代替。
 
 单文件事务设计，不承诺跨多个文件原子性。普通本地磁盘是保证验证范围，网络盘和云同步目录先作为条件支持。
 

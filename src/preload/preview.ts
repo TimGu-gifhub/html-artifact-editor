@@ -1,7 +1,7 @@
 import { ipcRenderer } from 'electron';
 import { BOOTSTRAP_CHANNEL, CONTRACT_VERSION } from '../contracts/bootstrap.ts';
 import { isPreviewIdentity, PREVIEW_ARGUMENT, PREVIEW_READY_CHANNEL } from '../contracts/preview.ts';
-import { isMappingCheck, isMappingIdentity, MAPPING_CHECK, MAPPING_CHECK_RESULT, MAPPING_EVENT, MAPPING_INSTALL, MAPPING_REVOKE, sameMapping } from '../contracts/mapping.ts';
+import { isMappingApply, isMappingCheck, isMappingIdentity, MAPPING_APPLY, MAPPING_APPLY_RESULT, MAPPING_CHECK, MAPPING_CHECK_RESULT, MAPPING_EVENT, MAPPING_INSTALL, MAPPING_REVOKE, sameMapping } from '../contracts/mapping.ts';
 import type { MappingIdentity, MappingInstall } from '../contracts/mapping.ts';
 import { MAX_TREE_NODES } from '../contracts/source-tree.ts';
 import { createNodeRegistry } from '../preview/node-registry.ts';
@@ -48,6 +48,13 @@ if (argument) {
     ipcRenderer.on(MAPPING_CHECK, (_event, request: unknown) => {
       if (!isMappingCheck(request)) return;
       ipcRenderer.send(MAPPING_CHECK_RESULT, { ...request, valid: registry?.check(request) ?? false });
+    });
+    ipcRenderer.on(MAPPING_APPLY, (_event, request: unknown) => {
+      if (!isMappingApply(request) || !mappingIdentity || !sameMapping(request.identity, mappingIdentity)) return;
+      ipcRenderer.send(MAPPING_APPLY_RESULT, registry?.apply(request) ?? {
+        identity: request.identity, requestId: request.requestId, nodeId: request.nodeId,
+        revision: request.revision, nextRevision: request.revision, outcome: 'rejected',
+      });
     });
     ipcRenderer.on(MAPPING_REVOKE, (_event, value: unknown) => {
       if (mappingIdentity && isMappingIdentity(value) && sameMapping(mappingIdentity, value)) registry?.close();
