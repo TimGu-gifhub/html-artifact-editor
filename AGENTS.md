@@ -2,7 +2,7 @@
 
 ## Current scope
 
-This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001/002 add the toolchain and read-only project previews; HAE-003/004 verify static mapping and byte patches. HAE-005 experiments connect drafts, isolated Text changes, exclusive copies, pending input, trusted IPC and protected document/window lifetimes. The normal app still has no product editing UI, overwrite saving or recovery. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
+This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001/002 add the toolchain and read-only project previews; HAE-003/004 verify static mapping and byte patches. HAE-005 experiments connect drafts, isolated Text changes, exclusive copies, pending input and trusted IPC through a unified Main window session with document/view transitions and close protection. The normal app still has no product editing UI, overwrite saving or recovery. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
 
 Human-readable project documentation is primarily Simplified Chinese. Keep identifiers and API contracts concise in English. Do not copy private conversations, user paths or unrelated project data into this public repository.
 
@@ -47,7 +47,7 @@ python tools/check_docs.py
 git diff --check
 ```
 
-Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. Electron test:smoke/security/mapping/patch/draft/editor/workspace cover the experiments in docs/implementation/HAE-001.md through HAE-005.md. These do not substitute for native-dialog, overwrite transaction, platform or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
+Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. Electron test:smoke/security/mapping/patch/draft/editor/workspace/session cover the experiments in docs/implementation/HAE-001.md through HAE-005.md. These do not substitute for native-dialog, overwrite transaction, platform or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
 
 For core/file changes, required evidence includes byte preservation, entity/Unicode handling, rejected ambiguous targets, save conflict, failure and recovery tests. For UI changes, also provide executed interaction evidence; screenshots alone do not prove functionality.
 

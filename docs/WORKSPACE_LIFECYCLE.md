@@ -1,6 +1,6 @@
 # 文档与窗口生命周期
 
-日期：2026-09-09；HAE-005 第四阶段。当前是 Main 服务和原生 window.close 事件的自动实验。正常应用入口仍只读；此模块、[编辑器 bridge](EDITOR_BRIDGE.md) 与 Kimi 前端尚未组成用户可操作窗口。
+日期：2026-09-09；HAE-005 第四/五阶段。当前是 Main 服务和原生窗口的自动实验；第五阶段已连接 [统一窗口会话](WORKSPACE_SESSION.md) 的文档身份、可信 IPC、挂载与关闭。正常应用入口仍只读，Kimi 产品前端尚未接入。
 
 ## 打开与替换
 
@@ -10,7 +10,7 @@
 
 确认包含随机 reviewId、当前/下一文件显示名、输入状态版本和变更摘要。只接受同一 reviewId 的 cancel/discard/save-copy。放弃或另存前重新检查输入、草稿版本与候选 hash；确认期间有新文字到达，旧确认拒绝，保留新输入。干净文档可以直接替换，但提交前仍做最终状态核验。
 
-提交 current 的替换是 Main 同一任务中的同步动作，然后关闭旧输入和旧预览。所有结果在清理和状态回到 idle 后返回；不把半途 committing 快照当成完成状态。若旧文档 teardown 失败，保留引用并设置 cleanupPending，阻止继续创建更多文档；这不是文件恢复界面。
+提交 current 前先执行同步激活端口，挂载成功且最终权限与输入仍匹配才发布新身份，然后关闭旧输入和旧预览。激活失败恢复旧视图；成功挂载后核验失败也回滚，旧输入不被销毁。所有结果在清理和状态回到 idle 后返回；不把 committing 快照当成完成状态。旧文档 teardown 或视图回滚无法完成时，保留引用并设置 cleanupPending，阻止继续创建更多文档；这不是文件恢复界面。
 
 ## 离开动作
 
@@ -32,10 +32,10 @@ dispose 仅用于进程/测试的强制清理，保留当前对象引用并取�
 
 纯类型与确认 schema 在 [workspace.ts](../src/contracts/workspace.ts)。Main 使用 open(expectedRevision, chooser)、requestClose(expectedRevision)、snapshot/onState；路径和选择器函数均留在 Main，不进入纯状态。review 与 chooseCopy 回调由后续应用层实现，真实 UI 仍须先同步未应用输入、结束 IME，并按当前 revision 作出决定。
 
-该阶段仅协调静态校稿文档的打开/关闭；JS 模式切换、目录选择、资源诊断面板、UI 页面/bridge 重建和视图挂载失败恢复仍需应用接线。不得直接用只读 PreviewController 替换正在编辑的文档；其预览成功即销毁旧页的语义不足以保护后续映射初始化。
+该阶段仅协调静态校稿文档的打开/关闭；第五阶段已验证 Main 重建失效 UI bridge 和视图挂载回滚，JS 模式切换、目录选择、资源诊断面板与用户操作入口仍待实现。不得直接用只读 PreviewController 替换正在编辑的文档；其预览成功即销毁旧页的语义不足以保护后续映射初始化。
 
 ## 验证范围
 
 `npm run test:workspace` 在 Electron 44.2.0 中执行七组真实预览、源解析深度失败、确认竞争、另存/重开和 window.close 事件实验；保存前后按独立完整字节期望核对，原 HTML/CSS 均未改变。创建文件后注入错误时，部分文件、草稿及原窗口保留，后续打开被阻止。报告为忽略的 `test-results/workspace.json`。
 
-另有十一项单元反例，含解析准备取消、旧确认、清理失败、不返回的选择/确认回调和强制清理后的迟到结果，见 [状态测试](../tests/unit/workspace.test.mjs) 与 [Electron 实验](../tests/workspace/main.ts)。文件选择和用户决定采用测试回调；没有维护者点击原生关闭按钮、真实对话框或 IME 操作记录。HAE-005 和 M2 仍未整体通过。
+另有十五项单元反例，含解析准备取消、旧确认、清理失败、不返回的回调、迟到结果、激活失败/回滚及连接撤销，见 [状态测试](../tests/unit/workspace.test.mjs) 与 [Electron 实验](../tests/workspace/main.ts)。第五阶段的十组窗口/IPC/挂载实验见 [统一会话](WORKSPACE_SESSION.md)。文件选择和用户决定采用测试回调；没有维护者点击原生关闭按钮、真实对话框或 IME 操作记录。HAE-005 和 M2 仍未整体通过。

@@ -53,12 +53,13 @@ npm run dev
 | `npm run test:draft` | 原生选字、worker、Main 草稿、隔离 Text 修改、独占新文件另存/重开及异步故障；选择器以测试回调替代，不代表原生对话框验收 |
 | `npm run test:editor` | 真实 UI preload/IPC、来源/参数/重复请求拒绝、逐次另存结果、主框架导航与 renderer 崩溃保留；不含产品控件或真实 IME |
 | `npm run test:workspace` | 新文档完整准备后替换、旧输入保留、window.close 事件、另存后关闭、取消/失败/未知结果；选择和确认仍为测试回调 |
+| `npm run test:session` | 同一窗口的可信 IPC/文档身份/预览/关闭，挂载回滚、旧请求拒绝、UI 崩溃重连与未返回选择器撤销；不是产品控件验收 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 许可证 |
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
@@ -76,7 +77,7 @@ HAE-004 增加纯核心内存 Patch 候选：64 KiB UTF-8 新文字、1,000 个�
 
 ## 项目资源范围
 
-HAE-005 的 `test:draft` 执行 20 组草稿/输入/另存断言，`test:editor` 执行 9 组真实 IPC 与 renderer 失效检查，`test:workspace` 执行 7 组文档替换、window.close 和保存结果检查。报告在 `test-results/draft.json`、`editor.json` 和 `workspace.json`，均记录实际版本与文件 hash；130 项单元检查包含真实文件故障、协议和异步离开反例。composing 标志不代表真实 IME；未知新文件结果保留现场，尚无恢复界面。正常 `dev` / `preview` 入口仍只读；见 [阶段记录](implementation/HAE-005.md)、[编辑器接口](EDITOR_BRIDGE.md) 与 [文档生命周期](WORKSPACE_LIFECYCLE.md)。
+HAE-005 的 `test:draft` 执行 20 组草稿/输入/另存断言，`test:editor` 执行 9 组真实 IPC 与 renderer 失效检查，`test:workspace` 执行 7 组文档替换、window.close 和保存结果检查，`test:session` 执行 10 组统一窗口/文档身份/视图回滚/崩溃重连与原生 resize 故障检查。报告在 `test-results/draft.json`、`editor.json`、`workspace.json` 和 `session.json`，均记录实际版本与文件 hash；135 项单元检查包含真实文件故障、协议和异步离开/激活反例。composing 标志不代表真实 IME；未知新文件或视图结果保留现场，尚无恢复界面。正常 `dev` / `preview` 入口仍只读；见 [阶段记录](implementation/HAE-005.md)、[编辑器接口](EDITOR_BRIDGE.md)、[文档生命周期](WORKSPACE_LIFECYCLE.md) 与 [统一窗口会话](WORKSPACE_SESSION.md)。
 
 原生选择器选中的 HTML 及其父目录为授权范围，不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 

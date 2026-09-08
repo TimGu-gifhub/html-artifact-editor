@@ -4,6 +4,9 @@ import type { EditorBootstrap } from '../contracts/bootstrap.ts';
 import { EDITOR_COMMAND, EDITOR_CONNECT, EDITOR_STATE, EDITOR_URL, isEditorCommand } from '../contracts/editor.ts';
 import type { EditorAPI, EditorCommand, EditorConnection, EditorReply, EditorResult } from '../contracts/editor.ts';
 import type { InputSnapshot } from '../contracts/input.ts';
+import { WORKSPACE_COMMAND, WORKSPACE_CONNECT, WORKSPACE_STATE, isWorkspaceCommand } from '../contracts/workspace-editor.ts';
+import type { WorkspaceAPI, WorkspaceCommand, WorkspaceConnection, WorkspaceReply, WorkspaceResult } from '../contracts/workspace-editor.ts';
+import type { WorkspaceSnapshot } from '../contracts/workspace.ts';
 
 const bootstrap: EditorBootstrap = Object.freeze({
   contractVersion: CONTRACT_VERSION,
@@ -69,4 +72,59 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
     },
   });
   contextBridge.exposeInMainWorld('haeEditor', api);
+}
+
+// Window-scoped API for the unified Main session. The single-document API above
+// remains only for earlier experiments; Main installs exactly one transport.
+if (process.isMainFrame && location.href === EDITOR_URL) {
+  let connection: Promise<WorkspaceConnection | null> | undefined;
+  let sessionId: string | null = null;
+  let sequence = 0;
+  let latest: WorkspaceSnapshot | null = null;
+  const listeners = new Set<(state: WorkspaceSnapshot) => void>();
+  const accept = (state: WorkspaceSnapshot): void => {
+    if (latest && state.stateRevision <= latest.stateRevision) return;
+    latest = state;
+    for (const listener of listeners) { try { listener(state); } catch { /* Main still owns the state. */ } }
+  };
+  const connect = (): Promise<WorkspaceConnection | null> => {
+    connection ??= ipcRenderer.invoke(WORKSPACE_CONNECT).then((value: WorkspaceConnection | null) => {
+      if (value) { sessionId = value.sessionId; accept(value.state); }
+      else connection = undefined;
+      return value;
+    }, () => { connection = undefined; return null; });
+    return connection;
+  };
+  ipcRenderer.on(WORKSPACE_STATE, (_event, value: WorkspaceConnection) => {
+    if (sessionId && value.sessionId === sessionId) accept(value.state);
+  });
+  const failure = (code: string, documentId: string | null): WorkspaceResult =>
+    ({ ok: false, code, state: latest, documentId, copy: null, outcome: null });
+  const request = async (command: WorkspaceCommand): Promise<WorkspaceResult> => {
+    const documentId = command.kind === 'edit' ? command.documentId : null;
+    if (!isWorkspaceCommand(command)) return failure('INVALID_WORKSPACE_REQUEST', documentId);
+    const connected = await connect();
+    if (!connected || sequence >= Number.MAX_SAFE_INTEGER) return failure('EDITOR_DISCONNECTED', documentId);
+    const current = ++sequence;
+    try {
+      const reply: WorkspaceReply | null = await ipcRenderer.invoke(WORKSPACE_COMMAND, { sessionId, sequence: current, command });
+      if (!reply || reply.sessionId !== sessionId || reply.sequence !== current) return failure('EDITOR_DISCONNECTED', documentId);
+      if (reply.result.state) accept(reply.result.state);
+      // State may already describe a newer document. Per-request documentId and
+      // copy/outcome are retained; never attribute an old save to the new page.
+      return { ...reply.result, state: latest };
+    } catch { return failure('EDITOR_DISCONNECTED', documentId); }
+  };
+  const api: WorkspaceAPI = Object.freeze({
+    read: () => request({ kind: 'read' }),
+    open: (stateRevision) => request({ kind: 'open', stateRevision }),
+    edit: (documentId, value) => request({ kind: 'edit', documentId, value }),
+    onState: (listener) => {
+      if (typeof listener !== 'function' || listeners.size >= 32) throw new Error('INVALID_EDITOR_LISTENER');
+      listeners.add(listener);
+      if (latest) { try { listener(latest); } catch { /* See accept. */ } }
+      return () => { listeners.delete(listener); };
+    },
+  });
+  contextBridge.exposeInMainWorld('haeWorkspace', api);
 }

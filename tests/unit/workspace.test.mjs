@@ -37,13 +37,14 @@ function source(name) {
 function setup() {
   const docs = new Map();
   const controls = { chooseCalls: 0, prepareCalls: 0, reviewCalls: 0, copyCalls: 0,
+    activate: () => () => {},
     review: async (value) => ({ reviewId: value.reviewId, decision: 'cancel' }),
     chooseCopy: async () => undefined,
     prepare: async (_root, path) => { if (!docs.has(path)) throw new Error('prepare failed'); return docs.get(path); } };
   const workspace = createWorkspace('test-output', {
     review: (value) => { controls.reviewCalls++; return controls.review(value); },
     chooseCopy: (name) => { controls.copyCalls++; return controls.chooseCopy(name); },
-  }, (...args) => { controls.prepareCalls++; return controls.prepare(...args); });
+  }, (...args) => { controls.prepareCalls++; return controls.prepare(...args); }, (...args) => controls.activate(...args));
   const open = (name) => workspace.open(workspace.snapshot().stateRevision, async () => { controls.chooseCalls++; return name; });
   return { workspace, controls, docs, open, add(name) { const value = source(name); docs.set(name, value); return value; } };
 }
@@ -156,4 +157,52 @@ test('teardown cancels a non-returning file chooser before preparation and consu
   await started.promise; await f.workspace.dispose(); await rejected;
   answer.reject(new Error('late dialog failure')); await Promise.resolve();
   assert.equal(f.controls.prepareCalls, 0); assert.equal(f.workspace.snapshot().phase, 'disposed');
+});
+
+test('activation failure does not publish or retire the old document, even after explicit discard', async () => {
+  const f = setup(); const first = f.add('first'); const second = f.add('second'); await f.open('first'); first.dirty();
+  f.controls.review = async (value) => ({ reviewId: value.reviewId, decision: 'discard' });
+  const seen = [];
+  f.workspace.onState(() => seen.push(f.workspace.current));
+  f.controls.activate = (next, previous) => {
+    assert.equal(next, second); assert.equal(previous, first); assert.equal(f.workspace.current, first);
+    throw new Error('DOCUMENT_ACTIVATION_FAILED');
+  };
+  const before = first.input.snapshot();
+  await assert.rejects(f.open('second'), /DOCUMENT_ACTIVATION_FAILED/);
+  assert.equal(f.workspace.current, first); assert.deepEqual(first.input.snapshot(), before);
+  assert.equal(first.calls.closed, 0); assert.equal(second.calls.closed, 1); assert.equal(first.calls.write, 0);
+  assert.ok(seen.every((value) => value === first)); assert.equal(f.workspace.snapshot().phase, 'idle');
+});
+
+test('synchronous authority loss between native activation and commit rolls back and keeps old input', async () => {
+  const f = setup(); const first = f.add('first'); const second = f.add('second'); await f.open('first');
+  let rolledBack = 0;
+  f.controls.activate = () => { f.workspace.cancelPending(); return () => { rolledBack++; }; };
+  await assert.rejects(f.open('second'), /WORKSPACE_CANCELLED/);
+  assert.equal(rolledBack, 1); assert.equal(f.workspace.current, first); assert.equal(first.calls.closed, 0);
+  assert.equal(second.calls.closed, 1); assert.equal(f.workspace.snapshot().phase, 'idle');
+});
+
+test('failed activation rollback retains the current document and blocks subsequent allocation', async () => {
+  const f = setup(); const first = f.add('first'); f.add('second'); await f.open('first');
+  f.controls.activate = () => { f.workspace.cancelPending(); return () => { throw new Error('host gone'); }; };
+  await assert.rejects(f.open('second'), /DOCUMENT_ACTIVATION_UNKNOWN/);
+  assert.equal(f.workspace.current, first); assert.equal(first.calls.closed, 0); assert.equal(f.workspace.snapshot().cleanupPending, true);
+  const prepared = f.controls.prepareCalls;
+  await assert.rejects(f.open('third'), /DOCUMENT_CLEANUP_REQUIRED/); assert.equal(f.controls.prepareCalls, prepared);
+});
+
+test('connection revocation cancels a non-returning review without disposing the current workspace', async () => {
+  const f = setup(); const first = f.add('first'); const second = f.add('second'); await f.open('first'); first.dirty();
+  const answer = deferred(); const started = deferred(); let request;
+  f.controls.review = async (value) => { request = value; started.resolve(); return answer.promise; };
+  const opening = f.open('second'); const rejected = assert.rejects(opening, /WORKSPACE_CANCELLED/);
+  await started.promise; f.workspace.cancelPending(); await rejected;
+  assert.equal(f.workspace.current, first); assert.equal(first.calls.closed, 0); assert.equal(second.calls.closed, 1);
+  assert.equal(first.input.snapshot().input.text, '保留输入'); assert.equal(f.workspace.snapshot().phase, 'idle');
+  answer.resolve({ reviewId: request.reviewId, decision: 'discard' }); await Promise.resolve();
+  assert.equal(f.workspace.current, first);
+  f.controls.review = async (value) => ({ reviewId: value.reviewId, decision: 'cancel' });
+  assert.equal((await f.workspace.requestClose(f.workspace.snapshot().stateRevision)).status, 'cancelled');
 });

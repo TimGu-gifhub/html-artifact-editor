@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 第一段接通 Main 草稿、隔离 Text 修改与新文件另存的自动实验；正常应用入口及产品保存流程仍待实现。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md) 与 [HAE-005 阶段记录](docs/implementation/HAE-005.md)。
+状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；正常应用入口及产品保存流程仍待实现。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md) 与 [HAE-005 阶段记录](docs/implementation/HAE-005.md)。
 
 ## 1. 技术选型
 
@@ -167,4 +167,10 @@ Main 将 bridge 安装到指定 WebContents 的局部 IPC，首次握手固定�
 
 Main prepareDocument 先独立准备新预览、源映射、草稿、输入及 writer，原文档一直保持可用。Workspace 在准备完成后处理离开确认，确认身份、输入/草稿版本和候选 hash 仍匹配才同步替换 current；取消或失败只销毁新候选。界面确认期间的后到输入使旧确认失效。
 
-原生 window close 先 preventDefault，重复请求共用一个待处理确认。取消、组合态、失败或未知另存保持窗口；明确放弃或经核验的新文件副本才可完成关闭。未知状态要求恢复，不能借打开另一份文档丢掉现场；teardown 失败保留引用并阻止继续堆积文档。该模块已执行真实预览、文件和 window.close 事件实验；正常应用、可信 UI bridge 与用户对话框尚未联合接入，详见 [文档生命周期](docs/WORKSPACE_LIFECYCLE.md)。
+原生 window close 先 preventDefault，重复请求共用一个待处理确认。取消、组合态、失败或未知另存保持窗口；明确放弃或经核验的新文件副本才可完成关闭。未知状态要求恢复，不能借打开另一份文档丢掉现场；teardown 失败保留引用并阻止继续堆积文档。该模块已执行真实预览、文件和 window.close 事件实验；统一 bridge/视图接线见下一段，正常应用与用户对话框仍待接入，详见 [文档生命周期](docs/WORKSPACE_LIFECYCLE.md)。
+
+### HAE-005 第五段：统一窗口会话
+
+WorkspaceSession 让同一 current 服务于可信 IPC、输入/草稿、PreviewHost 和原生关闭。窗口接口 read/open/edit/onState 使用持续递增的窗口状态版本；每个 edit 显式携带操作时的 documentId，旧文档请求不能命中新文档的同值 revision。共用 transport 保持来源、schema、连接 token 与重放检查，Preview 无权限。
+
+视图激活是提交前的同步端口，挂载/尺寸/移除失败恢复旧视图，最终权限核验后才发布新 current。回滚或原生 resize 状态无法确定时保留输入并阻止后续应用、保存、打开和关闭。UI 导航/崩溃撤销连接、取消未返回的确认/另存选择器；Main 可为同一文档重建固定 UI 页面，不清空输入或自动写盘。真实 Electron 十组实验已执行；真实界面、对话框和持久化恢复仍待实现，见 [统一窗口会话](docs/WORKSPACE_SESSION.md)。

@@ -4,25 +4,29 @@ import type { LeaveReview, WorkspaceOutcome, WorkspacePhase, WorkspaceSnapshot }
 import type { InputSnapshot } from '../../contracts/input.ts';
 import type { OpenDocument, prepareDocument } from './document.ts';
 
-type Decisions = Readonly<{
+export type WorkspaceDecisions = Readonly<{
   review: (value: LeaveReview) => Promise<unknown>;
   chooseCopy: (name: string) => Promise<string | undefined>;
 }>;
+export type ActivateDocument = (next: OpenDocument | null, previous: OpenDocument | null) => () => void;
 // Private Main coordinator. It has no renderer/path IPC or implicit HTML Save.
-// A document replacement is committed synchronously only after preparation and
-// a still-current leave decision. Native-window/view attachment is a later port.
-export function createWorkspace(outputRoot: string, decisions: Decisions, prepare: typeof prepareDocument) {
+// The synchronous activation port must restore its prior state before throwing.
+// A successful activation returns a rollback for a failed final authority check.
+export function createWorkspace(outputRoot: string, decisions: WorkspaceDecisions, prepare: typeof prepareDocument,
+  activate: ActivateDocument = () => () => {}) {
   let current: OpenDocument | null = null;
   let phase: WorkspacePhase = 'idle';
   let revision = 1;
   let generation = 0;
   let disposed = false;
+  let disposal: Promise<void> | undefined;
   let review: LeaveReview | null = null;
   let pending: AbortController | null = null;
   const listeners = new Set<() => void>();
   // Keep objects whose teardown failed as evidence; block further opens instead
   // of accumulating unbounded views or pretending cleanup succeeded.
   const failedCleanup = new Set<OpenDocument>();
+  let activationUncertain = false;
   let unsubscribe = (): void => {};
   const notify = (): void => {
     ++revision;
@@ -30,7 +34,7 @@ export function createWorkspace(outputRoot: string, decisions: Decisions, prepar
   };
   const snapshot = (): WorkspaceSnapshot => Object.freeze({ stateRevision: revision, phase,
     current: current ? Object.freeze({ id: current.id, name: current.name, input: current.input.snapshot() }) : null,
-    review, cleanupPending: failedCleanup.size > 0 });
+    review, cleanupPending: activationUncertain || failedCleanup.size > 0 });
   const inputReady = (state: InputSnapshot | undefined): void => {
     if (!state) return;
     if (state.phase !== 'idle' || !['idle', 'uncertain'].includes(state.draftPhase)) throw new Error('DOCUMENT_BUSY');
@@ -40,7 +44,7 @@ export function createWorkspace(outputRoot: string, decisions: Decisions, prepar
   const begin = (expectedRevision: number, initialPhase: WorkspacePhase): AbortController => {
     if (disposed || phase !== 'idle') throw new Error('WORKSPACE_BUSY');
     if (expectedRevision !== revision) throw new Error('STALE_WORKSPACE');
-    if (failedCleanup.size) throw new Error('DOCUMENT_CLEANUP_REQUIRED');
+    if (activationUncertain || failedCleanup.size) throw new Error('DOCUMENT_CLEANUP_REQUIRED');
     inputReady(current?.input.snapshot());
     pending = new AbortController(); phase = initialPhase; notify(); return pending;
   };
@@ -109,12 +113,28 @@ export function createWorkspace(outputRoot: string, decisions: Decisions, prepar
     inputReady(saved); return saved;
   };
   const commit = (next: OpenDocument | null, proof: InputSnapshot | null, operation: AbortController): OpenDocument | null => {
-    live(operation);
-    if (current ? !proof || !sameInput(proof, current.input.snapshot()) : proof !== null) throw new Error('STALE_DOCUMENT_REVIEW');
-    inputReady(current?.input.snapshot());
+    const check = (): void => {
+      live(operation);
+      if (current ? !proof || !sameInput(proof, current.input.snapshot()) : proof !== null) throw new Error('STALE_DOCUMENT_REVIEW');
+      inputReady(current?.input.snapshot());
+    };
+    check();
     const previous = current;
-    unsubscribe(); current = next;
-    unsubscribe = next ? next.input.onState(notify) : () => {};
+    const nextSubscription = next ? next.input.onState(notify) : () => {};
+    let rollback: (() => void) | undefined;
+    try {
+      rollback = activate(next, previous);
+      // A Main port can synchronously revoke a connection or discover a failure.
+      // Do not close the old input or publish the new identity until this passes.
+      check();
+    } catch (error) {
+      nextSubscription();
+      if (error instanceof Error && error.message === 'DOCUMENT_ACTIVATION_UNKNOWN') activationUncertain = true;
+      try { rollback?.(); } catch { activationUncertain = true; }
+      if (activationUncertain) throw new Error('DOCUMENT_ACTIVATION_UNKNOWN');
+      throw error;
+    }
+    unsubscribe(); current = next; unsubscribe = nextSubscription;
     phase = 'committing'; review = null; notify();
     return previous;
   };
@@ -123,6 +143,10 @@ export function createWorkspace(outputRoot: string, decisions: Decisions, prepar
     snapshot,
     get current() { return current; },
     onState(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    // Main-only authority revocation. It settles chooser/review waits, but never
+    // disposes the current input or interrupts a file write already in progress.
+    cancelPending(): void { pending?.abort(); },
+    invalidateActivation(): void { activationUncertain = true; pending?.abort(); notify(); },
     async open(expectedRevision: number, choose: () => Promise<string | undefined>): Promise<WorkspaceOutcome> {
       const operation = begin(expectedRevision, 'choosing');
       let candidate: OpenDocument | null = null;
@@ -154,10 +178,10 @@ export function createWorkspace(outputRoot: string, decisions: Decisions, prepar
     // Process/test teardown only, never a user-facing close/quit command. Keep
     // current/evidence references and prohibit a later result from committing.
     async dispose(): Promise<void> {
-      if (disposed) return;
+      if (disposed) return disposal;
       disposed = true; pending?.abort(); unsubscribe(); phase = 'disposed'; notify();
-      await retire(current);
-      listeners.clear();
+      disposal = retire(current).finally(() => { listeners.clear(); });
+      return disposal;
     },
   });
 }

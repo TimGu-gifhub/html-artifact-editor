@@ -20,6 +20,8 @@ const entries = {
   editor: ['tests/editor/main.ts', 'out/editor'],
   'editor-probe': ['tests/editor/probe.ts', 'out/editor/probe'],
   workspace: ['tests/workspace/main.ts', 'out/workspace'],
+  session: ['tests/session/main.ts', 'out/session'],
+  'session-probe': ['tests/session/probe.ts', 'out/session/probe'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker'];
 const requested = process.argv.slice(2);

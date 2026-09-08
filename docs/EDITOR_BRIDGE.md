@@ -1,6 +1,6 @@
 # 可信编辑器接口
 
-日期：2026-09-09；HAE-005 第三阶段。当前为独立自动实验中的真实 preload/IPC 接线，正常应用没有调用此 Main bridge，也没有产品校稿控件。Kimi 前端须在维护者选定视觉方案后接入，见 [产品设计](PRODUCT_DESIGN.md) 和 [分工规则](AI_WORKFLOW.md)。
+日期：2026-09-09；本文保留 HAE-005 第三阶段的单文档实验接口。第五阶段已形成 [统一窗口会话](WORKSPACE_SESSION.md)，后续 Kimi 前端应使用其显式文档身份接口。正常应用仍无产品校稿控件；须在维护者选定视觉方案后接入，见 [产品设计](PRODUCT_DESIGN.md) 和 [分工规则](AI_WORKFLOW.md)。
 
 ## 权限与生命周期
 
@@ -8,7 +8,7 @@
 
 每次 bridge 有独立随机连接 ID，preload 内部保存；命令携带严格递增的安全整数 sequence，Main 使用常数空间拒绝重复和旧请求。请求不可携带路径、选择器、源码范围、任意 IPC channel 或强制覆盖选项。UI 中的 editToken 仅代表当前输入所属的已核验 Text，并非文件权限。
 
-主框架导航（包括重载）、renderer 崩溃和销毁撤销 bridge。Main 的输入、已知候选和文件结果继续保留；选择器返回时重新检查连接，已失效就不启动写入。已开始的写入不得中断或盲目重试。更换文档须经过 [Main 文档生命周期](WORKSPACE_LIFECYCLE.md)；该模块与此 bridge 的统一应用接线仍待完成，不得通过重新握手绕过未保存保护。
+主框架导航（包括重载）、renderer 崩溃和销毁撤销 bridge。Main 的输入、已知候选和文件结果继续保留；未返回的选择器可响应撤销结束等待，迟到路径不启动写入。已开始的写入不得中断或盲目重试。更换文档须经过 [Main 文档生命周期](WORKSPACE_LIFECYCLE.md)；统一窗口接线使用 [Workspace bridge](../src/main/workspace/bridge.ts)，不得通过重新握手绕过未保存保护。
 
 ## 公开方法
 
