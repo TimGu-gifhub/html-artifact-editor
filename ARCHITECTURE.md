@@ -155,4 +155,10 @@ Main 的 DraftSession 独占调度准备、应用和另存；输入只含选择�
 
 beginEditing 在隔离 registry 核验当前选择后建立 token，目标固定到原 Text；后续原生点击仅发回递增 sequence 的切换意图。Main 要求匹配最新意图才能释放或接受新目标，失效/确认丢失撤销编辑权限。应用仍同步核验原对象、旧值和 revision，不能把浏览器的新选区作为旧输入的目标。
 
-Main InputController 持有未应用文本、composing、输入版本与已应用值；begin/change/apply/resolve/saveCopy 输出纯 InputSnapshot，不暴露文件路径或字节范围。组合态阻止应用级动作，过期和忙碌请求拒绝，失败保留输入；当前只接入自动实验，UI bridge 和真实输入法事件仍待前端阶段。原生窗口关闭保护、历史及持久化恢复不由这个内存控制器代替。
+Main InputController 持有未应用文本、composing、输入版本与已应用值；begin/change/apply/resolve/saveCopy 输出纯 InputSnapshot，不暴露文件路径或字节范围。组合态阻止应用级动作，过期和忙碌请求拒绝，失败保留输入。原生窗口关闭保护、历史及持久化恢复不由这个内存控制器代替。
+
+### HAE-005 第三段：可信编辑器 IPC
+
+Main 将 bridge 安装到指定 WebContents 的局部 IPC，首次握手固定实际主框架和随机会话。每条命令同时核对 contents/session/frame/精确 editor URL、完整 schema 和递增 sequence。UI preload 只暴露七个固定方法和纯状态，Preview 无此 bridge；用户页面、同源其他窗口、子框架与旧会话均不能获得权限。
+
+重载、主框架导航或 renderer 崩溃撤销 bridge，但不销毁 Main 输入/候选。选择器返回后再次检查 bridge，防止界面已离开却开始写文件；已开始的写入继续按原事务返回结果。本次另存的取消/创建/失败/未知结果单独返回，不能用历史 lastCopy 判断本次成功。真实 IPC 和 renderer 崩溃实验已执行；应用窗口管理、原生对话框和 Kimi 前端接入仍待完成，合同见 [可信编辑器接口](docs/EDITOR_BRIDGE.md)。

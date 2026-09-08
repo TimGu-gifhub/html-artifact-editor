@@ -132,7 +132,7 @@ HAE-004 的实际纯核心入口为 [createPatchEngine / buildPatchCandidate](..
 
 engine 初始重新解析并核对源索引；apply 在全部候选校验成功后才更新内存状态。无变化返回原候选，同节点改回基线文字移除净 Patch 并保留原实体拼写。失败保留上一候选。`PatchCandidate` 包含冻结身份、baseHash/resultHash、只读 patches 与返回副本的 bytes；没有文件 I/O、DOM 操作、历史或保存点。限制为每节点 64 KiB UTF-8 新文字、1,000 个净 Patch 和 5 MiB 输出，替换字节总预算也受限。后续交互接入应在可取消任务中运行这些同步核心计算。
 
-HAE-005 的 [Main InputController](../src/main/draft/input.ts) 单独保存未应用文本、composing、输入 revision 与已应用值。输入更新不产生 Patch；Apply/取消/处理切换请求绑定 editToken 和输入版本。composing=true 时拒绝应用、放弃输入及另存；尚未应用的文字也阻止打开保存选择器。校验失败保持原输入；确认已应用后再接受目标意图，新意图使旧确认失效。纯数据 [InputSnapshot](../src/contracts/input.ts) 可供后续可信 UI bridge 使用，当前没有 renderer 文件权限或实际 UI 输入法事件接线。
+HAE-005 的 [Main InputController](../src/main/draft/input.ts) 单独保存未应用文本、composing、输入 revision 与已应用值。输入更新不产生 Patch；Apply/取消/处理切换请求绑定 editToken 和输入版本。composing=true 时拒绝应用、放弃输入及另存；尚未应用的文字也阻止打开保存选择器。校验失败保持原输入；确认已应用后再接受目标意图，新意图使旧确认失效。纯数据 [InputSnapshot](../src/contracts/input.ts) 经 [可信编辑器接口](EDITOR_BRIDGE.md) 传输，第三阶段已在真实 IPC 实验中执行；没有 renderer 路径权限或实际 UI 输入法事件接线。
 
 ## 6. 结果构造与验证
 

@@ -17,6 +17,8 @@ const entries = {
   patch: ['tests/patch/main.ts', 'out/patch'],
   'draft-worker': ['src/main/draft/worker.ts', 'out/draft-worker'],
   draft: ['tests/draft/main.ts', 'out/draft'],
+  editor: ['tests/editor/main.ts', 'out/editor'],
+  'editor-probe': ['tests/editor/probe.ts', 'out/editor/probe'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker'];
 const requested = process.argv.slice(2);

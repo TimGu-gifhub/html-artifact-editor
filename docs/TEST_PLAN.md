@@ -1,6 +1,6 @@
 # 测试与验收计划
 
-HAE-005 当前 `test:draft` 共 20 组集成断言，覆盖草稿/新文件、编辑目标固定、Main 未应用输入、意图/输入版本竞争及确认丢失；补充 T-02/T-03/T-07/T-11/T-13/T-20 的后台范围。T-09 目前仅验证 Main 收到 composing=true 时拒绝操作，不是真实 IME 或控件事件证据。阶段一独立 Edge 回环 HTTP 重开已执行；T-01 原生对话框、产品 UI/IME、覆盖事务与维护者验收仍待完成。见 [HAE-005 阶段记录](implementation/HAE-005.md)。
+HAE-005 当前 `test:draft` 共 20 组草稿/新文件/目标及输入保护断言，`test:editor` 共 9 组真实可信 IPC、命令拒绝、另存结果、导航及 renderer 崩溃保留检查；补充 T-02/T-03/T-07/T-11/T-13/T-20 和 S-02 的后台范围。T-09 仅证明 composing 标志的接口行为，不是真实 IME；renderer 崩溃保留也不证明 Main 崩溃或断电恢复。阶段一独立 Edge 回环 HTTP 重开已执行；原生对话框、产品 UI、覆盖事务与维护者验收仍待完成。见 [HAE-005 阶段记录](implementation/HAE-005.md)。
 
 HAE-004 增加 T-02/T-05/T-06/T-07/T-11 的纯字节断言及 T-20 的候选文件 Chromium 重开检查，见 [HAE-004](implementation/HAE-004.md)。这里只创建自制临时候选文件，不是应用保存事务，也不替代维护者独立浏览器/真实报告验收。
 

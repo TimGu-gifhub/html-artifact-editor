@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，以及 HAE-005 的 Main 草稿、目标/输入保护与独占新文件另存。
+日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，以及 HAE-005 的草稿、输入保护、可信 IPC 与独占新文件另存。
 
 ## 固定版本
 
@@ -51,12 +51,13 @@ npm run dev
 | `npm run test:mapping` | 构建 worker/preload/mapping，真实 Chromium 树、原生点击、世代/对象失效与解析故障实验 |
 | `npm run test:patch` | 生成自制候选文件并在真实 Chromium 重开；验证纯文本、清空、变长、pre 空行与资源不变，不是应用 Save |
 | `npm run test:draft` | 原生选字、worker、Main 草稿、隔离 Text 修改、独占新文件另存/重开及异步故障；选择器以测试回调替代，不代表原生对话框验收 |
+| `npm run test:editor` | 真实 UI preload/IPC、来源/参数/重复请求拒绝、逐次另存结果、主框架导航与 renderer 崩溃保留；不含产品控件或真实 IME |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存实验 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 许可证 |
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
@@ -74,7 +75,7 @@ HAE-004 增加纯核心内存 Patch 候选：64 KiB UTF-8 新文字、1,000 个�
 
 ## 项目资源范围
 
-HAE-005 的 `test:draft` 在独立入口执行 Main 草稿、同步隔离 Text 修改、目标固定、未应用输入状态和同目录新 HTML 另存。`test-results/draft.json` 记录 20 组集成断言、实际版本与文件 hash；116 项单元检查包含新文件实际 I/O、故障和命令 schema。Main 收到 composing=true 时拒绝应用级操作；这不代表真实输入法或 UI 键盘交互已通过。新文件创建的未知结果保留现场并禁止盲目重试，尚无恢复界面。正常 `dev` / `preview` 入口仍只读；阶段范围和阶段一独立 Edge 回环 HTTP 复核见 [HAE-005](implementation/HAE-005.md)。
+HAE-005 的 `test:draft` 执行 20 组草稿、Text 修改、目标/输入保护和同目录另存断言；`test:editor` 增加 9 组真实 IPC、来源/命令拒绝、保存结果与 renderer 失效检查。报告为 `test-results/draft.json` 和 `editor.json`，均记录实际版本和文件 hash。119 项单元检查包含新文件实际 I/O、故障和命令 schema。Main 收到 composing=true 时拒绝应用级操作，但真实输入法和 UI 控件仍待接入。未知新文件结果保留现场，尚无恢复界面。正常 `dev` / `preview` 入口仍只读；见 [阶段记录](implementation/HAE-005.md) 与 [接口合同](EDITOR_BRIDGE.md)。
 
 原生选择器选中的 HTML 及其父目录为授权范围，不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 

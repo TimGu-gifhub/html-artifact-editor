@@ -95,3 +95,9 @@ M1 另存仅在已授权目录独占创建新 HTML，经 flush、回读 hash 与
 **HAE-005 第二段后台实验通过。** 可信调用方须先取得隔离 registry 确认的编辑 token，才创建 Main 输入记录。持有 token 时，原生点击与跨节点选区成为待处理意图，不能移动正在编辑的目标；确认意图时检查最新 sequence。应用沿用原 Text 对象，继续验证映射、旧值和当前 revision。开始/结束确认超时会撤销权限并保留数据。
 
 输入文本、已应用值、输入 revision 和 composing 单独保存在 Main；更新输入不产生 Patch，组合态不响应应用级操作。应用失败不覆盖输入，放弃不产生 Patch；应用并切换先提交旧目标草稿，再接受新意图。新意图若已出现，后一步拒绝并保留已应用结果。该合同为后续 Kimi 前端提供稳定数据边界，不能替代真实组合事件、焦点、原生关闭对话框或崩溃持久化。见 [HAE-005 阶段记录](implementation/HAE-005.md)。
+
+## ADR-015：编辑器接口绑定实际页面与逐次保存结果
+
+HAE-005 第三段采用 WebContents 局部 IPC，固定可信顶层页面、会话及 InputController。Main 严格核对来源与命令 schema，随机连接身份和递增 sequence 拒绝旧请求；连接标识只在 preload 内部使用。页面导航或崩溃撤销接口，Main 草稿独立保留。此实现遵循 [Electron 的 IPC 来源校验要求](https://www.electronjs.org/docs/latest/tutorial/security#17-validate-the-sender-of-all-ipc-messages)，并在本地 Electron 44.2.0 执行来源反例。
+
+每次 saveCopy 独立返回 cancelled/created/failed/unknown，取消不能误用历史成功记录，失败与未知不能返回成功。选择器前后检查会话，文件路径只来自 Main；尚未提供更换文档、窗口关闭保护或重启恢复协议。公开方法、前端交接和验证限制见 [接口合同](EDITOR_BRIDGE.md)。
