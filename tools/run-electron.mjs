@@ -12,8 +12,9 @@ const kind = process.argv.includes('--smoke') ? 'smoke'
       : process.argv.includes('--patch') ? 'patch'
         : process.argv.includes('--draft') ? 'draft'
           : process.argv.includes('--editor') ? 'editor'
+            : process.argv.includes('--workspace') ? 'workspace'
     : process.argv.includes('--preview') ? 'preview-tool' : 'main';
-const smoke = ['smoke', 'security', 'mapping', 'patch', 'draft', 'editor'].includes(kind);
+const smoke = ['smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace'].includes(kind);
 const entry = resolve(root, `out/${kind}/index.cjs`);
 if (!existsSync(entry)) throw new Error('Build output missing. Run npm run build first.');
 const reportPath = resolve(root, `test-results/${kind}.json`);

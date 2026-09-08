@@ -31,11 +31,12 @@
     "test:patch": "node tools/build.mjs parser-worker preload-preview patch && node tools/run-electron.mjs --patch",
     "test:draft": "node tools/build.mjs parser-worker draft-worker preload-preview draft && node tools/run-electron.mjs --draft",
     "test:editor": "node tools/build.mjs parser-worker draft-worker preload-preview editor editor-probe && node tools/run-electron.mjs --editor",
+    "test:workspace": "node tools/build.mjs parser-worker draft-worker preload-preview workspace && node tools/run-electron.mjs --workspace",
     "preview": "npm run build && node tools/run-electron.mjs --preview",
     "preview:interactive": "npm run build && node tools/run-electron.mjs --preview --interactive",
     "licenses": "node tools/licenses.mjs",
     "licenses:check": "node tools/licenses.mjs --check",
-    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run build && npm run test:smoke && npm run test:security && npm run test:mapping && npm run test:patch && npm run test:draft && npm run test:editor && npm run licenses:check"
+    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run build && npm run test:smoke && npm run test:security && npm run test:mapping && npm run test:patch && npm run test:draft && npm run test:editor && npm run test:workspace && npm run licenses:check"
   },
   "dependencies": {
     "parse5": "8.0.1",

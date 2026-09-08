@@ -19,6 +19,7 @@ const entries = {
   draft: ['tests/draft/main.ts', 'out/draft'],
   editor: ['tests/editor/main.ts', 'out/editor'],
   'editor-probe': ['tests/editor/probe.ts', 'out/editor/probe'],
+  workspace: ['tests/workspace/main.ts', 'out/workspace'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker'];
 const requested = process.argv.slice(2);

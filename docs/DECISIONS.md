@@ -101,3 +101,9 @@ M1 另存仅在已授权目录独占创建新 HTML，经 flush、回读 hash 与
 HAE-005 第三段采用 WebContents 局部 IPC，固定可信顶层页面、会话及 InputController。Main 严格核对来源与命令 schema，随机连接身份和递增 sequence 拒绝旧请求；连接标识只在 preload 内部使用。页面导航或崩溃撤销接口，Main 草稿独立保留。此实现遵循 [Electron 的 IPC 来源校验要求](https://www.electronjs.org/docs/latest/tutorial/security#17-validate-the-sender-of-all-ipc-messages)，并在本地 Electron 44.2.0 执行来源反例。
 
 每次 saveCopy 独立返回 cancelled/created/failed/unknown，取消不能误用历史成功记录，失败与未知不能返回成功。选择器前后检查会话，文件路径只来自 Main；尚未提供更换文档、窗口关闭保护或重启恢复协议。公开方法、前端交接和验证限制见 [接口合同](EDITOR_BRIDGE.md)。
+
+## ADR-016：完整准备后替换文档，原生关闭服从离开结果
+
+HAE-005 第四段采用独立 prepareDocument，避免先关闭旧预览、后续源映射失败时丢失编辑会话。Workspace 同时最多持有当前文档和一个待替换候选；输入/草稿/候选版本与离开确认身份共同校验。取消、异常及过期确认只清理新候选；失败清理保留引用并阻止后续打开。未知保存结果不能被新的文档替换绕过。
+
+window.close 先被阻止，重复关闭不创建并发确认。明确放弃或经核验的另存结果才允许关闭；另存取消保留明确应用过的草稿，失败/未知保持原窗口。该实验仍采用同目录新副本，尚无覆盖保存/恢复，也未与产品 UI 和真实文件对话框联合接入。见 [文档生命周期合同](WORKSPACE_LIFECYCLE.md)。

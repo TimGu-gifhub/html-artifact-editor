@@ -161,4 +161,10 @@ Main InputController 持有未应用文本、composing、输入版本与已应�
 
 Main 将 bridge 安装到指定 WebContents 的局部 IPC，首次握手固定实际主框架和随机会话。每条命令同时核对 contents/session/frame/精确 editor URL、完整 schema 和递增 sequence。UI preload 只暴露七个固定方法和纯状态，Preview 无此 bridge；用户页面、同源其他窗口、子框架与旧会话均不能获得权限。
 
-重载、主框架导航或 renderer 崩溃撤销 bridge，但不销毁 Main 输入/候选。选择器返回后再次检查 bridge，防止界面已离开却开始写文件；已开始的写入继续按原事务返回结果。本次另存的取消/创建/失败/未知结果单独返回，不能用历史 lastCopy 判断本次成功。真实 IPC 和 renderer 崩溃实验已执行；应用窗口管理、原生对话框和 Kimi 前端接入仍待完成，合同见 [可信编辑器接口](docs/EDITOR_BRIDGE.md)。
+重载、主框架导航或 renderer 崩溃撤销 bridge，但不销毁 Main 输入/候选。选择器返回后再次检查 bridge，防止界面已离开却开始写文件；已开始的写入继续按原事务返回结果。本次另存的取消/创建/失败/未知结果单独返回，不能用历史 lastCopy 判断本次成功。真实 IPC 和 renderer 崩溃实验已执行；原生对话框和 Kimi 前端接入仍待完成，合同见 [可信编辑器接口](docs/EDITOR_BRIDGE.md)。
+
+### HAE-005 第四段：文档替换和窗口关闭
+
+Main prepareDocument 先独立准备新预览、源映射、草稿、输入及 writer，原文档一直保持可用。Workspace 在准备完成后处理离开确认，确认身份、输入/草稿版本和候选 hash 仍匹配才同步替换 current；取消或失败只销毁新候选。界面确认期间的后到输入使旧确认失效。
+
+原生 window close 先 preventDefault，重复请求共用一个待处理确认。取消、组合态、失败或未知另存保持窗口；明确放弃或经核验的新文件副本才可完成关闭。未知状态要求恢复，不能借打开另一份文档丢掉现场；teardown 失败保留引用并阻止继续堆积文档。该模块已执行真实预览、文件和 window.close 事件实验；正常应用、可信 UI bridge 与用户对话框尚未联合接入，详见 [文档生命周期](docs/WORKSPACE_LIFECYCLE.md)。
