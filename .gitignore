@@ -19,6 +19,7 @@ playwright-report/
 .editor/
 .local-html-editor/
 .artifact-editor/
+.hae-*
 backups/
 recovery/
 

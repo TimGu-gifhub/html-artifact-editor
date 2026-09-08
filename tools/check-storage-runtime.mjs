@@ -4,20 +4,25 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { arch, release, type } from 'node:os';
 import { resolve } from 'node:path';
 import electron from 'electron';
+import { buildNative } from './build-native.mjs';
 
 // Filesystem tests under Electron's bundled Node, with no window or user page.
 // Node mode is scoped to these child processes; normal app launch is unchanged.
-const options = { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', windowsHide: true, timeout: 45000, maxBuffer: 4 * 1024 * 1024 };
+const options = { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', windowsHide: true, timeout: 60000, maxBuffer: 4 * 1024 * 1024 };
 const results = resolve('test-results'); mkdirSync(results, { recursive: true });
 const record = { status: 'running', commit: null, dirty: null, platform: { os: type(), release: release(), arch: arch() }, versions: null };
 const report = () => writeFileSync(resolve(results, 'storage-runtime.json'), `${JSON.stringify(record, null, 2)}\n`);
 report();
 try {
+  buildNative({ tests: true });
   const git = (args) => { const r = spawnSync('git', args, { encoding: 'utf8', windowsHide: true }); assert.equal(r.status, 0); return r.stdout.trim(); };
   record.commit = git(['rev-parse', 'HEAD']); record.dirty = !!git(['status', '--porcelain']);
   const version = spawnSync(electron, ['-p', 'JSON.stringify(process.versions)'], options); assert.equal(version.status, 0);
   record.versions = JSON.parse(version.stdout); assert.ok(record.versions.electron && record.versions.node);
-  const run = spawnSync(electron, ['--test', '--test-reporter=tap', 'tests/unit/save-preparation.test.mjs'], options);
+  const files = ['tests/unit/save-preparation.test.mjs'];
+  if (process.platform === 'win32') files.push('tests/unit/save-commit.test.mjs');
+  record.nativeReplacement = process.platform === 'win32' ? 'included' : 'unsupported';
+  const run = spawnSync(electron, ['--test', '--test-reporter=tap', ...files], options);
   const output = (run.stdout ?? '') + (run.stderr ?? '');
   writeFileSync(resolve(results, 'storage-runtime.log'), output);
   assert.equal(run.status, 0, run.error?.message ?? output.slice(-6000));

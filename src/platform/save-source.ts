@@ -20,7 +20,7 @@ export async function openSaveSource(input: string, expected: Uint8Array) {
   // Windows can also contain directories with case-sensitive filenames.
   const targetKey = createHash('sha256').update(await realpath(path)).digest('hex');
   const identity = storedIdentity(initial.stat);
-  return Object.freeze({ path, targetKey, name, identity, baseHash, size: bytes.length,
+  return Object.freeze({ path, targetKey, name, identity, baseHash, size: bytes.length, directoryIdentities: folder.identityChain,
     get bytes(): Uint8Array { return new Uint8Array(bytes); },
     async current(): Promise<SaveTargetState> {
       const value = await folder.read(name, MAX_SOURCE_BYTES);

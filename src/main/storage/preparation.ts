@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { isContentHash, isSaveIntent, isSaveSeal, isTransactionId } from '../../contracts/save-record.ts';
-import type { RecoveryState, SaveIntent, SaveSeal } from '../../contracts/save-record.ts';
+import { isContentHash, isSaveCommit, isSaveIntent, isSaveSeal, isTransactionId, sameStoredIdentity } from '../../contracts/save-record.ts';
+import type { RecoveryState, SaveCommit, SaveIntent, SaveSeal } from '../../contracts/save-record.ts';
 import { MAX_SOURCE_BYTES } from '../../contracts/source-tree.ts';
 import type { PatchCandidate } from '../../core/patch/engine.ts';
 import { checkedDirectory, digest } from '../../platform/storage-files.ts';
 import type { CheckedDirectory } from '../../platform/storage-files.ts';
 import type { SaveSource, SaveTargetState } from '../../platform/save-source.ts';
+import type { ReplacementResult, SourceReplacer } from '../../platform/windows-replacement.ts';
 
 const JSON_LIMIT = 16 * 1024;
 const STORE_LIMIT = 200 * 1024 * 1024;
@@ -13,9 +14,10 @@ const encode = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.
 const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 type Lock = Awaited<ReturnType<CheckedDirectory['writeNew']>>;
 export type PreparationResult = Readonly<{ status: 'failed'; code: string; transactionId: string | null; cancel: null }>
-  | Readonly<{ status: 'prepared'; code: null; transactionId: string; intent: SaveIntent; cancel: () => Promise<void> }>;
+  | Readonly<{ status: 'prepared'; code: null; transactionId: string; intent: SaveIntent; cancel: () => Promise<void>;
+    commit: () => Promise<ReplacementResult> }>;
 export type PreparationInspection = Readonly<{
-  transactionId: string; phase: 'incomplete' | 'invalid' | 'prepared' | 'cancelled';
+  transactionId: string; phase: 'incomplete' | 'invalid' | 'prepared' | 'cancelled' | 'replacing' | 'committed';
   state: RecoveryState; intent: SaveIntent | null;
 }>;
 async function optionalRead(folder: CheckedDirectory, name: string, limit: number) {
@@ -33,8 +35,9 @@ const codeFor = (error: unknown): string => {
 };
 
 // A dedicated directory beneath Main's private app data, never a project root.
-// Preparation writes only private evidence. It has no HTML replace/rename API.
-export async function createSavePreparationStore(path: string, onStep: (step: string) => Promise<void> = async () => {}) {
+// Preparing/cancelling writes only private evidence. An explicit Main commit
+// requires a platform replacer; no renderer or normal-app integration exists yet.
+export async function createSavePreparationStore(path: string, onStep: (step: string) => Promise<void> = async () => {}, replacer?: SourceReplacer) {
   const root = await checkedDirectory(path); let busy = false;
   const checkQuota = async (source: SaveSource, candidateSize: number): Promise<void> => {
     const entries = await root.entries(512); let used = 0; let count = 0;
@@ -42,8 +45,8 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       if (item.name === 'active.lock' && item.kind === 'file') { used += item.size; continue; }
       if (item.kind !== 'directory' || !isTransactionId(item.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
       const folder = await root.directory(item.name);
-      for (const file of await folder.entries(5)) {
-        if (file.kind !== 'file' || !['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json'].includes(file.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
+      for (const file of await folder.entries(7)) {
+        if (file.kind !== 'file' || !['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json'].includes(file.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
         used += file.size;
       }
       const record = decode((await folder.read('intent.json', JSON_LIMIT)).bytes);
@@ -69,6 +72,8 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       const candidate = await optionalRead(folder, 'candidate.bin', MAX_SOURCE_BYTES);
       const prepared = await optionalRead(folder, 'prepared.json', JSON_LIMIT);
       const cancelled = await optionalRead(folder, 'cancelled.json', JSON_LIMIT);
+      const replacing = await optionalRead(folder, 'replacing.json', JSON_LIMIT);
+      const committed = await optionalRead(folder, 'committed.json', JSON_LIMIT);
       if ((backup && (backup.hash !== intent.oldHash || backup.bytes.length !== intent.oldSize))
         || (candidate && (candidate.hash !== intent.newHash || candidate.bytes.length !== intent.newSize))) return result('invalid', 'invalid');
       if (!backup || !candidate || !prepared) return result('incomplete', 'incomplete');
@@ -76,14 +81,22 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
         const seal = decode(bytes);
         return isSaveSeal(seal) && seal.phase === phase && seal.transactionId === transactionId && seal.intentHash === header.hash;
       };
-      if (!matches(prepared.bytes, 'prepared') || (cancelled && !matches(cancelled.bytes, 'cancelled'))) return result('invalid', 'invalid');
-      const phase = cancelled ? 'cancelled' : 'prepared';
+      if (!matches(prepared.bytes, 'prepared') || (cancelled && (!matches(cancelled.bytes, 'cancelled') || replacing || committed))
+        || (replacing && !matches(replacing.bytes, 'replacing'))) return result('invalid', 'invalid');
+      let commit: SaveCommit | null = null;
+      if (committed) {
+        const value = decode(committed.bytes);
+        if (!replacing || !isSaveCommit(value) || value.transactionId !== transactionId || value.intentHash !== header.hash
+          || value.resultHash !== intent.newHash) return result('invalid', 'invalid');
+        commit = value;
+      }
+      const phase = commit ? 'committed' : replacing ? 'replacing' : cancelled ? 'cancelled' : 'prepared';
       if (!readTarget) return result(phase, 'unavailable');
       let target: SaveTargetState;
       try { target = await readTarget(); } catch { return result(phase, 'unavailable'); }
       if (target.targetKey !== intent.targetKey) return result(phase, 'wrong-target');
-      if (target.hash === intent.oldHash && target.identity.dev === intent.identity.dev && target.identity.ino === intent.identity.ino
-        && target.identity.mtimeNs === intent.identity.mtimeNs && target.identity.ctimeNs === intent.identity.ctimeNs) return result(phase, 'baseline-matches');
+      if (commit) return result(phase, target.hash === commit.resultHash && sameStoredIdentity(target.identity, commit.identity) ? 'committed-matches' : 'conflict');
+      if (target.hash === intent.oldHash && sameStoredIdentity(target.identity, intent.identity)) return result(phase, 'baseline-matches');
       // Matching candidate bytes alone never constitute a committed save.
       if (target.hash === intent.newHash) return result(phase, 'candidate-on-disk');
       return result(phase, 'conflict');
@@ -134,9 +147,52 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
         await source.verify(); // A late external edit is a conflict, not a backup failure.
         if (evidence.phase !== 'prepared' || evidence.state !== 'baseline-matches') throw new Error('BACKUP_VERIFY_FAILED');
         await root.verify(); retained = true;
-        let cancellation: Promise<void> | undefined;
+        let cancellation: Promise<void> | undefined; let commitment: Promise<ReplacementResult> | undefined;
         return Object.freeze({ status: 'prepared', code: null, transactionId: id, intent,
+          commit(): Promise<ReplacementResult> {
+            if (cancellation) return Promise.resolve(Object.freeze({ status: 'failed', code: 'SAVE_CANCELLED', cleanupPending: false }));
+            if (!replacer) return Promise.resolve(Object.freeze({ status: 'failed', code: 'SAVE_PLATFORM_UNSUPPORTED', cleanupPending: false }));
+            commitment ??= (async (): Promise<ReplacementResult> => {
+              const verifyEvidence = async (): Promise<void> => {
+                await lock!.verifyOwned(); await root.verify();
+                if ((await folder.read('intent.json', JSON_LIMIT)).hash !== header.hash
+                  || (await folder.read('backup.bin', MAX_SOURCE_BYTES)).hash !== intent.oldHash
+                  || (await folder.read('candidate.bin', MAX_SOURCE_BYTES)).hash !== intent.newHash) throw new Error('BACKUP_VERIFY_FAILED');
+              };
+              let result: ReplacementResult; let entered = false;
+              try {
+                await verifyEvidence(); entered = true;
+                result = await replacer(source, id, bytes, { onStep,
+                  async beforeReplace() {
+                    await verifyEvidence(); await source.verify();
+                    if ((await inspect(id, source.current)).phase !== 'prepared') throw new Error('SAVE_RECORD_CHANGED');
+                    await folder.writeNew('replacing.json', encode({ ...seal, phase: 'replacing' }), (step) => onStep(`replacing-${step}`));
+                    await verifyEvidence(); await source.verify();
+                  },
+                  async afterReplace(identity) {
+                    await verifyEvidence();
+                    const current = await source.current();
+                    if (current.hash !== intent.newHash || !sameStoredIdentity(current.identity, identity)) throw new Error('SAVE_RESULT_CHANGED');
+                    const commit: SaveCommit = Object.freeze({ version: 1, transactionId: id, intentHash: header.hash,
+                      phase: 'committed', identity, resultHash: intent.newHash });
+                    await folder.writeNew('committed.json', encode(commit), (step) => onStep(`committed-${step}`));
+                    if ((await inspect(id, source.current)).state !== 'committed-matches') throw new Error('SAVE_COMMIT_VERIFY_FAILED');
+                    await lock!.verifyOwned();
+                  },
+                });
+              } catch (error) { result = Object.freeze({ status: entered ? 'unknown' : 'failed', code: entered ? 'SAVE_OUTCOME_UNKNOWN' : codeFor(error), cleanupPending: true }); }
+              if (result.status === 'committed') {
+                try { await onStep('release-lock'); await lock!.removeOwned(); busy = false; }
+                catch { return Object.freeze({ status: 'committed', code: 'SAVE_CLEANUP_PENDING', cleanupPending: true }); }
+              }
+              // A started commit is never retried/cancelled blindly, even after a
+              // known pre-write failure. Recovery owns retained records and locks.
+              return result;
+            })();
+            return commitment;
+          },
           cancel(): Promise<void> {
+            if (commitment) return Promise.reject(new Error('SAVE_REVIEW_REQUIRED'));
             cancellation ??= (async () => {
               // Cancellation only releases our verified private lock. Evidence stays.
               await folder.writeNew('cancelled.json', encode({ ...seal, phase: 'cancelled' }));

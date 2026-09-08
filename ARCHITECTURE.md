@@ -181,8 +181,10 @@ Main DirectoryGrant 固定实际目录身份与私有路径排除；ProjectGrant
 
 有界资源诊断汇合协议、webRequest 及现有安全 CDP 连接的 Network/Audits 事件；CSP 拒绝的 fetch 即使没有 Network 请求事件仍可记录。只收集失败目标/类型/原因，URL 去除凭据/查询/fragment、本机路径隐藏，超限标记截断。诊断通过 current.project 和生产可信 IPC 传输，没有新增 Preview bridge、bypassCSP 或联网例外。事件观察失败即拒绝本次预览，升级 Electron 时需重新验证实验性 Audits 接口。八组真实目录实验已执行；产品诊断面板及人工对话框仍待验收，见 [目录资源合同](docs/PROJECT_RESOURCES.md)。
 
-### HAE-010 第一段：覆盖前的私有准备
+### HAE-010：私有准备与 Windows 提交实验
 
 平台层持有源文件路径链、完整字节、dev/ino 与纳秒时间戳；Main 准备服务以私有存储全局独占锁串行化合作实例，在不可覆写的独立文件中存原始备份、候选、intent 和准备/取消记录。每一步保持句柄写入、sync、回读 hash 和目录/文件复核。记录仅保存规范路径键及显示名称，没有可直接回放的绝对路径。
 
-重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限，当前服务未接入 Workspace/UI。平台替换、ACL、committed、基线重建、恢复向导和持久化编辑意图仍待实现，见 [保存准备合同](docs/SAVE_PREPARATION.md)。
+Main 明确 commit 后，Windows 适配器独占创建同目录候选临时文件；来自可信安装目录的有限协议助手固定目录/源句柄，最后复核身份、正文及元数据。Main 先写 replacing 记录，助手用 ReplaceFileW 保留被替换的原文件，再保持结果读取句柄；Main 独立回读新 hash/身份，写入并验证 committed，才确认提交。成功后的清理只删除仍持有的原文件备份句柄和本调用的私有锁；失败/未知保留证据，不能取消或盲目重试已启动的提交。候选始终来自字节 Patch；C# 仅处理平台文件能力，没有 Preview/renderer 桥。
+
+重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选、已提交版本或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限，当前服务未接入 Workspace/UI。基线重建、恢复向导、持久化编辑意图与 Windows 10/macOS 验收仍待完成，完整协议与 OS 竞态边界见 [保存事务合同](docs/SAVE_PREPARATION.md)。

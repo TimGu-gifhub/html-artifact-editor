@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的私有保存准备实验。
+日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的私有准备和 Windows 保存事务实验。
 
 ## 固定版本
 
@@ -17,6 +17,7 @@
 | parse5 / entities | 8.0.1 / 8.1.0 | 纯核心 HTML5 解析；精确锁定，原始 MIT / BSD-2-Clause 声明保留 |
 | 单元测试 | Node 内置 node:test | 无额外测试框架、浏览器下载 |
 | 文档检查 | Python 3.10+ | 无第三方 Python 依赖 |
+| Windows 替换助手 | .NET Framework 4.x / C# 5 | 使用本机 Framework64/v4.0.30319/csc.exe 编译仓库源码；未引入 npm 原生扩展 |
 
 截至核对日，Electron 团队支持 [最近三个稳定主版本](https://www.electronjs.org/docs/latest/tutorial/electron-timelines#version-support-policy)，44 属于支持范围。更新 Electron 时重新核对安全更新、最低 OS、内嵌版本与两平台回归。
 
@@ -35,10 +36,13 @@ npm run dev
 
 `dev` = 构建后启动；修改源码后关闭窗口并重新执行。暂不提供 watch/HMR。`npm start` 只运行已有构建。不要使用 `--ignore-scripts` 跳过安装步骤后直接推断运行时已可用。
 
+Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺少时明确失败，不下载或提交替代二进制。`build` 从源码生成 out/native/ReplaceHelper.exe，单元/存储测试另生成只用于自制文件的 out/storage-test/StorageFixture.exe。其他 OS 跳过原生构建并报告覆盖不支持；这不代表 macOS 保存已实现。安装打包如何携带助手、目标机 .NET Framework 和 Windows 10 验收仍待完成。
+
 | 命令 | 产物或检查 |
 | --- | --- |
-| `npm run build` | 八个构建目标，包含 out/preview-tool、out/parser-worker 和 out/draft-worker |
+| `npm run build` | 八个 JS/页面构建目标，另构建 Windows 原生替换助手 |
 | `npm run build:main` | out/main/index.cjs |
+| `npm run build:native` | Windows .NET Framework 编译原生替换助手；其他 OS 明示不支持 |
 | `npm run build:preload:ui` | out/preload/ui/index.cjs，独立单文件 CJS |
 | `npm run build:preload:preview` | out/preload/preview/index.cjs，独立单文件 CJS |
 | `npm run build:ui` | out/ui，React 渲染器 |
@@ -55,7 +59,7 @@ npm run dev
 | `npm run test:workspace` | 新文档完整准备后替换、旧输入保留、window.close 事件、另存后关闭、取消/失败/未知结果；选择和确认仍为测试回调 |
 | `npm run test:session` | 同一窗口的可信 IPC/文档身份/预览/关闭，挂载回滚、旧请求拒绝、UI 崩溃重连与未返回选择器撤销；不是产品控件验收 |
 | `npm run test:project` | 生产 preload/IPC 上的目录授权、嵌套资源、CSP/API 诊断、入口切换/另存/撤销及根目录替换；选择器仍为 Main 测试回调 |
-| `npm run test:storage` | Electron 内嵌 Node 执行保存准备的真实文件/独立进程/强杀与重新检查测试；无产品窗口，也不覆盖 HTML |
+| `npm run test:storage` | Electron 内嵌 Node 执行真实文件准备、Windows 原生替换、权限/占用、提交故障及进程强杀；仅覆盖自制临时 HTML，无产品窗口 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run preview:directory` | 原生选择根目录及其中 HTML，保留嵌套相对资源路径；只读校稿预览，诊断输出到终端 |
@@ -85,7 +89,9 @@ HAE-005 的 `test:draft` 执行 20 组草稿/输入/另存断言，`test:editor`
 
 HAE-008 的 `test:project` 增加 8 组真实目录资源/诊断/入口切换实验与 6 项单元检查，该阶段发布时共 141 单元、55 源文件边界。`test-results/project.json` 记录实际版本、八组结果、0 次回环 TCP 连接与七份完整文件 hash。文件/对话框选择由 Main 测试回调控制，诊断面板和人工对话框操作未验收；详见 [阶段记录](implementation/HAE-008.md)。
 
-HAE-010 第一阶段增加 10 项真实存储/进程测试，当前共 151 单元、59 源文件边界。`test:storage` 在 Electron 内嵌 Node 下重跑同一存储文件，必须有明确的测试计数且无失败/跳过；报告 `test-results/storage-runtime.json` 与日志记录真实版本。仅测试子进程使用 ELECTRON_RUN_AS_NODE，正常应用仍使用既有启动器。基线/备份/准备记录、六个真实强杀点、重启只读检查和保留限制见 [保存准备合同](SAVE_PREPARATION.md) 与 [HAE-010](implementation/HAE-010.md)；没有覆盖、恢复 UI 或实际断电验收。
+HAE-010 第一阶段增加 10 项真实存储/进程测试，当时共 151 单元、59 源文件边界。`test:storage` 在 Electron 内嵌 Node 下重跑同一存储文件，必须有明确的测试计数且无失败/跳过；报告 `test-results/storage-runtime.json` 与日志记录真实版本。仅测试子进程使用 ELECTRON_RUN_AS_NODE，正常应用仍使用既有启动器。基线/备份/准备记录、六个真实强杀点、重启只读检查和保留限制见 [保存事务合同](SAVE_PREPARATION.md) 与 [HAE-010](implementation/HAE-010.md)；第一阶段没有覆盖能力。
+
+第二阶段将明确的 Main commit 连到 Windows ReplaceFileW 和 committed 日志，新增 11 项事务测试；当前完整门槛的版本/数量见 [HAE-010 阶段记录](implementation/HAE-010.md)。内嵌测试在 Windows 运行两份存储测试文件，并记录 nativeReplacement=included；其他 OS 仅运行准备测试且标为 unsupported。实际只读/ACL/占用、旧式及保护 DACL、命名数据流、四处 Main 强杀、结果未知与清理失败均单独断言；正常应用接线和恢复界面仍待完成。
 
 单文件原生选择器以 HTML 父目录为根；目录入口先明确授权根，再选择根内 HTML，切换入口保留原根身份。两种方式都不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 

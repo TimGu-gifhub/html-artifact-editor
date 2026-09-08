@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, open, opendir, realpath, unlink } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { isTransactionId } from '../contracts/save-record.ts';
 
 export const digest = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 export const sameFile = (a: Pick<BigIntStats, 'dev' | 'ino'>, b: Pick<BigIntStats, 'dev' | 'ino'>): boolean =>
@@ -66,8 +67,8 @@ export async function checkedDirectory(input: string) {
       return { bytes, stat: opened, hash: digest(bytes) };
     } finally { await file.close(); }
   };
-  const writeNew = async (name: string, value: Uint8Array, onStep: (step: StorageStep) => Promise<void> = async () => {}) => {
-    childName(name); const bytes = new Uint8Array(value); const expectedHash = digest(bytes);
+  const writeNewFile = async (name: string, value: Uint8Array, onStep: (step: StorageStep) => Promise<void>) => {
+    const bytes = new Uint8Array(value); const expectedHash = digest(bytes);
     await verify(); const target = join(path, name);
     const file = await open(target, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
     let written: BigIntStats;
@@ -87,17 +88,32 @@ export async function checkedDirectory(input: string) {
       if (!sameVersion(written, await file.stat({ bigint: true })) || !sameVersion(written, await lstat(target, { bigint: true }))) throw new Error('STORAGE_FILE_CHANGED');
     } finally { await file.close(); } // Failure retains partial evidence; never unlink it.
     let removed = false;
-    return Object.freeze({ hash: expectedHash,
+    const verifyOwned = async (): Promise<void> => {
+      await verify(); const actual = await read(name, bytes.length);
+      if (!sameVersion(written, actual.stat) || actual.hash !== expectedHash) throw new Error('STORAGE_LOCK_CHANGED');
+    };
+    return Object.freeze({ hash: expectedHash, identity: Object.freeze({ dev: written.dev.toString(), ino: written.ino.toString(),
+      mtimeNs: written.mtimeNs.toString(), ctimeNs: written.ctimeNs.toString() }),
+      verifyOwned,
       // Only the owner of a verified lock uses this; never use it for HTML or evidence.
       async removeOwned(): Promise<void> {
         if (removed) return;
-        await verify(); const actual = await read(name, bytes.length);
-        if (!sameVersion(written, actual.stat) || actual.hash !== expectedHash) throw new Error('STORAGE_LOCK_CHANGED');
+        await verifyOwned();
         await unlink(target); removed = true;
       },
     });
   };
-  return Object.freeze({ path, verify, read, writeNew,
+  return Object.freeze({ path, verify, read,
+    writeNew(name: string, value: Uint8Array, onStep: (step: StorageStep) => Promise<void> = async () => {}) {
+      childName(name); return writeNewFile(name, value, onStep);
+    },
+    async writeReplacement(transactionId: string, value: Uint8Array, onStep: (step: StorageStep) => Promise<void>) {
+      if (!isTransactionId(transactionId)) throw new Error('STORAGE_INVALID_NAME');
+      const written = await writeNewFile(`.hae-${transactionId}.tmp`, value, onStep);
+      // No unlink capability for a project temporary file or original HTML.
+      return Object.freeze({ hash: written.hash, identity: written.identity });
+    },
+    identityChain: Object.freeze(initial.map((stat) => Object.freeze({ dev: stat.dev.toString(), ino: stat.ino.toString() }))),
     async directory(name: string, create = false) {
       childName(name); await verify(); const target = join(path, name);
       if (create) await mkdir(target, { mode: 0o700 });

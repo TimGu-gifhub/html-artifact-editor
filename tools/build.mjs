@@ -2,6 +2,7 @@ import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { build } from 'vite';
+import { buildNative } from './build-native.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const entries = {
@@ -24,10 +25,12 @@ const entries = {
   'session-probe': ['tests/session/probe.ts', 'out/session/probe'],
   project: ['tests/project/main.ts', 'out/project'],
 };
-const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker'];
+const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'native'];
 const requested = process.argv.slice(2);
 for (const target of requested.length ? requested : defaultTargets) {
-  if (target === 'ui' || target === 'preview') {
+  if (target === 'native') {
+    buildNative();
+  } else if (target === 'ui' || target === 'preview') {
     await build({
       configFile: false,
       root: resolve(root, 'src', target), base: './', publicDir: false,

@@ -5,6 +5,7 @@
 *.yaml text eol=lf
 *.py text eol=lf
 *.ts text eol=lf
+*.cs text eol=lf
 *.tsx text eol=lf
 *.mjs text eol=lf
 *.js text eol=lf
