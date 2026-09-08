@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { app, BaseWindow, dialog } from 'electron';
 import { registerSchemes } from '../src/main/application.ts';
 import { PreviewController } from '../src/main/preview/project-preview.ts';
+import { createPreviewMapping } from '../src/main/preview/source-mapping.ts';
 import { selectPreviewFile } from '../src/platform/project-dialog.ts';
 
 // Developer verification entry only; no product UI, editing or save IPC.
@@ -23,6 +24,22 @@ void app.whenReady().then(async () => {
   };
   resize(); window.on('resize', resize);
   window.on('closed', () => { window = undefined; void previews.close().finally(() => app.quit()); });
+  if (mode === 'proofread') {
+    try {
+      const mapping = await createPreviewMapping(resolve(__dirname, '..'), preview);
+      console.log(JSON.stringify({ mapping: mapping.status, reason: mapping.reason,
+        verifiedTextNodes: mapping.source.nodes.filter((node) => node.editable).length }));
+      mapping.onEvent((event) => {
+        if (event.kind === 'selection' && event.nodeId) {
+          const node = mapping.source.nodes.find((item) => item.nodeId === event.nodeId)!;
+          console.log(JSON.stringify({ nodeId: node.nodeId, generation: mapping.identity.preview.generation,
+            revision: event.revision, startByte: node.startByte, endByte: node.endByte }));
+        } else console.log(JSON.stringify({ mapping: event.kind }));
+      });
+    } catch {
+      console.log('Source mapping unavailable; preview remains read-only.');
+    }
+  }
 }).catch(async () => {
   await previews.close();
   dialog.showErrorBox('预览未打开', '文件读取、资源授权或隔离初始化失败。源文件未修改。请检查独立项目目录和 UTF-8 HTML。');

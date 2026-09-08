@@ -21,19 +21,21 @@
     "build:preload:preview": "node tools/build.mjs preload-preview",
     "build:ui": "node tools/build.mjs ui",
     "build:preview": "node tools/build.mjs preview",
-    "typecheck": "tsc -p tsconfig.core.json && tsc -p tsconfig.node.json && tsc -p tsconfig.ui.json",
+    "typecheck": "tsc -p tsconfig.core.json && tsc -p tsconfig.node.json && tsc -p tsconfig.preload.json && tsc -p tsconfig.ui.json",
     "check:boundaries": "node tools/check-boundaries.mjs",
     "diagnostics": "node tools/platform-info.mjs",
     "test": "node --test tests/unit/*.test.mjs",
     "test:smoke": "node tools/build.mjs smoke && node tools/run-electron.mjs --smoke",
     "test:security": "node tools/build.mjs security security-preload && node tools/run-electron.mjs --security",
+    "test:mapping": "node tools/build.mjs parser-worker preload-preview mapping && node tools/run-electron.mjs --mapping",
     "preview": "npm run build && node tools/run-electron.mjs --preview",
     "preview:interactive": "npm run build && node tools/run-electron.mjs --preview --interactive",
     "licenses": "node tools/licenses.mjs",
     "licenses:check": "node tools/licenses.mjs --check",
-    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run build && npm run test:smoke && npm run test:security && npm run licenses:check"
+    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run build && npm run test:smoke && npm run test:security && npm run test:mapping && npm run licenses:check"
   },
   "dependencies": {
+    "parse5": "8.0.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

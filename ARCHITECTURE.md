@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：产品架构设计基线；HAE-001 已加入工具链，HAE-002 已加入独立只读项目预览入口。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md) 与 [HAE-002 交付记录](docs/implementation/HAE-002.md)。产品编辑与保存流程仍待实现。
+状态：产品架构设计基线；HAE-001/002 已加入工具链和独立只读预览，HAE-003 已验证静态树与源码索引。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md) 与 [HAE-003 交付记录](docs/implementation/HAE-003.md)。产品编辑与保存流程仍待实现。
 
 ## 1. 技术选型
 
@@ -113,13 +113,13 @@ HAE-001 已创建各顶层模块和内置验证壳；下表的业务子模块仍
 
 WebContentsView 是独立原生视图，可能覆盖 BrowserWindow 内的 DOM 弹层。选区编辑控件默认放在可信侧栏；原位编辑浮层作为候选，必须验证跨 DPI、滚动、缩放、窗口尺寸、IME 候选框和可访问性。不可为实现浮层把文件能力暴露给 Preview。
 
-React/TypeScript/Vite 版本已在 HAE-001 锁定，使用 Node 自带测试运行器与独立 Electron 冒烟入口。Radix、Forge、产品 E2E 驱动、源码映射与跨平台替换仍待对应任务验证。
+React/TypeScript/Vite 版本已在 HAE-001 锁定，使用 Node 自带测试运行器与独立 Electron 冒烟入口。HAE-003 锁定 parse5 并验证静态映射；Radix、Forge、产品 E2E 驱动与跨平台替换仍待对应任务验证。
 
 ### HAE-001 验证壳的具体边界
 
 `npm run dev` 保留构建时自带的验证壳，通过各 session 内的精确 URL → 内存内容映射返回资源。`editor://app/` 与随机 `artifact://…/` 分离。UI 桥只有只读启动信息；Preview 页面没有桥，preload 只报告固定启动诊断，Main 校验 sender、session、主 frame、完整源 URL 和 payload，收到后撤销该监听器。
 
-Electron 44.2.0 本地实验中 `javascript: false` 阻止了 Preview preload 初始化。因此保留隔离 preload 所需的引擎，使用响应头 `script-src 'none'` 禁止校稿页脚本；不启用 bypassCSP，沙箱、上下文隔离和 webSecurity 全部开启。HAE-002 已验证原 CSP 叠加、脚本入口与子 frame 拒绝；HAE-003 仍必须按实际 Chromium 脚本解析语义处理 noscript，不能把 CSP 禁止执行等同于解析器 scriptingEnabled=false。
+Electron 44.2.0 本地实验中 `javascript: false` 阻止了 Preview preload 初始化。因此保留隔离 preload 所需的引擎，使用响应头 `script-src 'none'` 禁止校稿页脚本；不启用 bypassCSP，沙箱、上下文隔离和 webSecurity 全部开启。HAE-002 已验证原 CSP 叠加、脚本入口与子 frame 拒绝；HAE-003 采用 scriptingEnabled=true 并通过 noscript 对照，不能把 CSP 禁止执行等同于解析器 scriptingEnabled=false。
 
 ### HAE-002 项目预览的实施边界
 
@@ -130,3 +130,11 @@ Electron 44.2.0 本地实验中 `javascript: false` 阻止了 Preview preload �
 - `PreviewController` 只接受 Main 路径与模式。成功切换先替换权威引用并同步撤销旧权限，销毁旧 WebContents 和清空存储；失败保留旧预览，过期/取消请求不可回填。IPC 目前仅有严格的只读启动确认，Main 验证 contents、session、senderFrame、源 URL、世代、模式和 schema。
 
 路径与句柄复核覆盖已执行的文件替换、junction 替换和读中写入用例，不能冒称为所有文件系统上的内核原子授权或抵御拥有同等 OS 权限的敌对本地进程。网络盘、云同步、Mac 文件系统与更多竞态语料尚未验收；不因此开放任何写入。
+
+### HAE-003 静态源码映射
+
+纯核心复制并严格解码 UTF-8，生成含 BOM 修正的 UTF-16→字节边界索引，再由 parse5 8.0.1 生成规范化整树与连续文本范围。SHA-256 由 Main 的 Node crypto 注入；纯核心不使用 DOM、Electron 或文件系统。
+
+Main 在有超时、取消和 V8 堆限制的 worker 中解析同一入口快照，将预期树发往隔离 preload。preload 核对父子顺序、元素/属性/命名空间、注释、doctype、template.content 和解码 Text；完全一致后登记 WeakMap<Text, nodeId>。没有源码标记、页面桥或 DOM 序列化保存。
+
+DOMContentLoaded 后即观察变化，takeRecords 防止同一任务里的变更绕过校验。选择消息绑定 documentId、baseHash、session/generation 和递增 revision；Main 另外核对 sender、session、主 frame、完整 URL 与已知节点。`validateSelection` 是瞬时检查，后续草稿操作不能把它当作跨异步写租约。实际拒绝表见 [HAE-003](docs/implementation/HAE-003.md)。

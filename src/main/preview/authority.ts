@@ -13,11 +13,16 @@ export type PreviewAuthority = Readonly<{
 // This guard grants only acknowledgement of startup. There is no save channel.
 export function acceptsPreviewReady(authority: PreviewAuthority, event: IpcMainEvent, payload: unknown): boolean {
   if (!authority.isActive() || authority.contents.isDestroyed() || !isPreviewReady(payload)) return false;
+  return acceptsPreviewSender(authority, event)
+    && payload.sessionId === authority.identity.sessionId
+    && payload.generation === authority.identity.generation && payload.mode === authority.identity.mode;
+}
+
+export function acceptsPreviewSender(authority: PreviewAuthority, event: IpcMainEvent): boolean {
+  if (!authority.isActive() || authority.contents.isDestroyed()) return false;
   try {
     return event.sender === authority.contents && event.sender.session === authority.session
       && event.senderFrame !== null && event.senderFrame === authority.contents.mainFrame
-      && event.senderFrame.url === authority.url && event.sender.getURL() === authority.url
-      && payload.sessionId === authority.identity.sessionId
-      && payload.generation === authority.identity.generation && payload.mode === authority.identity.mode;
+      && event.senderFrame.url === authority.url && event.sender.getURL() === authority.url;
   } catch { return false; } // Destroyed/navigating frames cannot authorize anything.
 }

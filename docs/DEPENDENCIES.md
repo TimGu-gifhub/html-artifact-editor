@@ -33,6 +33,7 @@ runtime 表示应用依赖，dev 表示开发/构建依赖。许可证字段来�
 | debug | 4.4.3 | dev | MIT | all / all |
 | detect-libc | 2.1.2 | dev | Apache-2.0 | all / all |
 | electron | 44.2.0 | dev | MIT | all / all |
+| entities | 8.1.0 | runtime | BSD-2-Clause | all / all |
 | env-paths | 3.0.0 | dev | MIT | all / all |
 | fdir | 6.5.0 | dev | MIT | all / all |
 | fsevents | 2.3.3 | dev | MIT | darwin / all |
@@ -51,6 +52,7 @@ runtime 表示应用依赖，dev 表示开发/构建依赖。许可证字段来�
 | lightningcss-win32-x64-msvc | 1.33.0 | dev | MPL-2.0 | win32 / x64 |
 | ms | 2.1.3 | dev | MIT | all / all |
 | nanoid | 3.3.18 | dev | MIT | all / all |
+| parse5 | 8.0.1 | runtime | MIT | all / all |
 | picocolors | 1.1.1 | dev | ISC | all / all |
 | picomatch | 4.0.7 | dev | MIT | all / all |
 | postcss | 8.5.28 | dev | MIT | all / all |
@@ -73,6 +75,7 @@ runtime 表示应用依赖，dev 表示开发/构建依赖。许可证字段来�
 `npm run licenses` 同时写出被 Git 忽略的 `out/licenses/`：
 
 - React、React DOM、Scheduler 的原始 MIT LICENSE。
+- parse5 的 MIT LICENSE 与其运行依赖 entities 的 BSD-2-Clause LICENSE。
 - Electron 的 LICENSE 与完整 LICENSES.chromium.html；后者包含 Chromium/Node 及其第三方组件声明。
 - 本项目的 MIT LICENSE。
 

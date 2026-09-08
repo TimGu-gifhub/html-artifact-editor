@@ -6,7 +6,7 @@ A local-first desktop editor for precise text corrections in existing HTML artif
 
 AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日期、段落和表格文字。项目的核心目标是：只改变用户确认的文本范围，保留其余 HTML、CSS、JavaScript 和资源文件。
 
-> **当前状态：工具链与只读项目预览验证。** HAE-001 已交付；HAE-002 增加独立开发验证入口，可选择 UTF-8 HTML，以禁用页面脚本的校稿模式或运行本地脚本的交互模式预览。已有目录授权、离线策略与安全测试，尚无文字编辑、保存或安装包。执行范围及未测项见 [HAE-002 交付记录](docs/implementation/HAE-002.md)。
+> **当前状态：只读预览与静态源码定位验证。** HAE-001/002 已交付工具链、目录授权和离线预览；HAE-003 在独立开发入口中验证 parse5 与 Chromium 的完整树，并将点击的 Text 对象关联到唯一原始字节范围。歧义、外部 DOM 变化和交互脚本视图保持只读。尚无文字编辑、保存或安装包；执行范围见 [HAE-003 交付记录](docs/implementation/HAE-003.md)。
 
 [HAE-007 视觉候选](docs/design/hae-007/README.md) 已提供三种可运行布局，用同一份自制报告演示校稿和状态切换，等待维护者选稿。它们只修改内存中的演示数据，不代表桌面应用已实现编辑或保存；实际检查见 [候选稿交付记录](docs/implementation/HAE-007.md)。
 
@@ -72,6 +72,8 @@ npm run preview:interactive
 ```
 
 两条命令分别打开校稿／交互预览，由原生文件选择器取得入口，根范围为该 HTML 所在文件夹。请选择独立项目目录；根内允许的预览资源可被本地脚本读取。该入口没有编辑、保存或产品模式切换控件；兼容限制见 [开发说明](docs/DEVELOPMENT.md)。原生选择器的人工验收仍待执行。
+
+校稿入口在开发终端输出映射状态；点击支持的文字可看到 Main 核验的 nodeId、generation、revision 与字节范围。页面没有桥，也不写文件。交互入口不创建映射。
 
 ```sh
 npm run check

@@ -9,6 +9,14 @@ test('pure modules allow only core and contracts without ambient platform global
   `), []);
 });
 
+test('parse5 is a narrow pure-core dependency, not a renderer or contracts dependency', () => {
+  assert.deepEqual(checkSource('src/core/parser/source-index.ts', "import { parse } from 'parse5';"), []);
+  for (const layer of ['contracts', 'ui', 'preview', 'preload', 'main']) {
+    assert.ok(checkSource(`src/${layer}/sample.ts`, "import 'parse5';").length);
+  }
+  assert.ok(checkSource('src/core/sample.ts', "import 'parse5/dist/parser/index.js';").length);
+});
+
 for (const source of [
   "import 'electron';", "export * from 'node:fs';",
   "import type { X } from '../platform/window.ts';", "import '../../tools/build.mjs';",

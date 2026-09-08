@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-08。范围：HAE-001 工具链及 HAE-002 独立只读项目预览验证入口。
+日期：2026-09-09。范围：HAE-001 工具链、HAE-002 只读项目预览及 HAE-003 静态源码映射实验。
 
 ## 固定版本
 
@@ -14,6 +14,7 @@
 | React / React DOM | 19.2.8 | package.json 与 package-lock.json |
 | TypeScript | 6.0.3 | strict；保留稳定 AST API 做边界检查 |
 | Vite | 8.2.2 | 独立入口构建；不依赖本地开发服务器 |
+| parse5 / entities | 8.0.1 / 8.1.0 | 纯核心 HTML5 解析；精确锁定，原始 MIT / BSD-2-Clause 声明保留 |
 | 单元测试 | Node 内置 node:test | 无额外测试框架、浏览器下载 |
 | 文档检查 | Python 3.10+ | 无第三方 Python 依赖 |
 
@@ -36,23 +37,24 @@ npm run dev
 
 | 命令 | 产物或检查 |
 | --- | --- |
-| `npm run build` | 六个构建目标，包含独立 out/preview-tool 入口 |
+| `npm run build` | 七个构建目标，包含 out/preview-tool 和 out/parser-worker |
 | `npm run build:main` | out/main/index.cjs |
 | `npm run build:preload:ui` | out/preload/ui/index.cjs，独立单文件 CJS |
 | `npm run build:preload:preview` | out/preload/preview/index.cjs，独立单文件 CJS |
 | `npm run build:ui` | out/ui，React 渲染器 |
 | `npm run build:preview` | out/preview，固定静态样例 |
-| `npm run typecheck` | 纯核心、主进程/preload、UI 三套 strict 编译边界 |
+| `npm run typecheck` | 核心、主进程、preload、UI 四套 strict 编译边界；仅 preload/渲染器含 DOM 类型 |
 | `npm run check:boundaries` | AST 检查跨层 import/export/动态加载与核心平台全局变量 |
-| `npm test` | 契约、边界、资源路径/句柄/快照/撤销测试；没有 Patch 算法测试 |
+| `npm test` | 契约、分层、资源路径/句柄/快照/撤销、UTF-8、源码索引与拒绝反例；Patch 拼接留到 HAE-004 |
 | `npm run test:smoke` | 已构建应用的 Electron 冒烟，独立 out/smoke 入口 |
 | `npm run test:security` | 已构建 preload 的真实项目协议、两种模式、恶意请求和 IPC 测试；独立 out/security 入口 |
+| `npm run test:mapping` | 构建 worker/preload/mapping，真实 Chromium 树、原生点击、世代/对象失效与解析故障实验 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全测试 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → 许可证 |
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
@@ -62,7 +64,9 @@ npm run dev
 
 smoke 记录 preload 实际报告的 sandbox/contextIsolation、页面 Node 能力缺失、源/session 分离、脚本阻断、外部请求/弹窗阻断、尺寸跟随和子视图销毁。截图前会短暂显示不抢焦点的测试窗口，然后自动关闭。报告位于 `test-results/smoke.json`，记录基线 commit 及工作区是否有修改；截图仅是该内置样例的视觉证据。测试 profile 留在 `test-results/profile`，不作为公开 artifact 上传。
 
-HAE-002 的 `preview` / `preview:interactive` 使用独立原生选择器与 WebContentsView，项目文件协议与生命周期由 Main 管理；`dev` 内置壳及 React UI 保持原样。没有源码映射、草稿、保存、备份或恢复。产品视觉稿仍需 HAE-007 选择，后续产品前端按 Kimi 分工执行。本任务没有调用 Kimi，也没有把安全测试页面标为产品设计。测试入口及其故意增强的攻击 preload 不从应用入口导入，没有页面可开启的测试开关。
+HAE-002 的 `preview` / `preview:interactive` 使用独立原生选择器与 WebContentsView，项目文件协议与生命周期由 Main 管理；`dev` 内置壳及 React UI 保持原样。HAE-003 为静态入口增加源码映射与点击诊断；没有草稿、保存、备份或恢复。产品视觉稿仍需 HAE-007 选择，后续产品前端按 Kimi 分工执行。映射/安全实现由主开发代理负责；不把测试页面标为产品设计。测试入口及故意增强的攻击 preload 不从应用入口导入，没有页面可开启的测试开关。
+
+`test-results/mapping.json` 记录运行版本、commit/工作区、25 份自制 HTML 的 SHA-256 与 10 组映射断言；`mapping-repeated.png` 是渲染辅助证据。纯核心校验全部合法 Unicode 标量、字节边界和 10,000 行索引。支持/拒绝表与故障注入见 [HAE-003](implementation/HAE-003.md)。解析上限为 5 MiB、100,000 个规范化节点、256 层；Main worker 有 5 秒期限和 V8 堆限制，超时/取消等待 worker 终止后返回。它不是整个进程的硬内存上限，也不是 HAE-013 性能验收。
 
 ## 项目资源范围
 
@@ -88,7 +92,7 @@ HAE-002 的 `preview` / `preview:interactive` 使用独立原生选择器与 Web
 
 | 目标环境 | 执行方式 | 当前验证状态 |
 | --- | --- | --- |
-| Windows 11 x64 | 本机运行相同锁文件和固定工具链的检查 | 已有 HAE-001/002 本地执行记录，不能代替产品验收 |
+| Windows 11 x64 | 本机运行相同锁文件和固定工具链的检查 | 已有 HAE-001/002/003 本地执行记录，不能代替产品验收 |
 | Windows 10 x64 | 对应实机或隔离 VM 运行同一检查和验收 | 待验证，不能由 Windows 11 结果代替 |
 | macOS 13+ arm64 | Apple Silicon Mac 本地构建、检查与人工验收 | 当前没有 Mac 实测结果 |
 

@@ -12,8 +12,10 @@ const entries = {
   security: ['tests/security/main.ts', 'out/security'],
   'security-preload': ['tests/security/hostile-preload.ts', 'out/security/preload'],
   'preview-tool': ['tools/preview-main.ts', 'out/preview-tool'],
+  'parser-worker': ['src/main/parser/worker.ts', 'out/parser-worker'],
+  mapping: ['tests/mapping/main.ts', 'out/mapping'],
 };
-const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool'];
+const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker'];
 const requested = process.argv.slice(2);
 for (const target of requested.length ? requested : defaultTargets) {
   if (target === 'ui' || target === 'preview') {

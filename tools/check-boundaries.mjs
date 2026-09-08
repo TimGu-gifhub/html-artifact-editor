@@ -35,6 +35,7 @@ export function checkSource(file, text) {
       }
     } else {
       const allowed = ((layer === 'main' || layer === 'platform') && specifier.startsWith('node:'))
+        || (layer === 'core' && specifier === 'parse5')
         || (['main', 'platform', 'preload'].includes(layer) && specifier === 'electron')
         || (layer === 'ui' && /^(react|react-dom)(\/|$)/.test(specifier));
       if (!allowed) errors.push(`${file}: forbidden external dependency ${specifier}`);

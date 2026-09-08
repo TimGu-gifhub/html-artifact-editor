@@ -1,6 +1,6 @@
 # 源码定位与 Patch 规范
 
-版本：schema 1 设计稿。本文规定不变量；实际类型、算法和测试由 HAE-003、HAE-004、HAE-010 实现。
+版本：schema 1 设计基线。HAE-003 已实现静态源码索引；Patch 与文件事务仍由 HAE-004、HAE-010 实现。
 
 ## 1. 保存不变量
 
@@ -49,6 +49,8 @@ type TextSource = {
 
 无效 UTF-8 必须拒绝覆盖，不能让解码器的替换字符悄悄进入输出。首版不支持 UTF-16/GBK 自动转换。若解析输入剥离 3 字节 UTF-8 BOM，所有映射必须补偿 BOM；原文件是否含 BOM 不变。
 
+HAE-003 的实际纯核心类型为 `SourceIndex` / `TextSource`（[实现](../src/core/parser/source-index.ts)）。`identity` 组织 projectId/documentId/generation，`nodes` 为只读数组并携带 treeIndex；Main 自行按 nodeId 查找。字节属性每次返回副本，源树、身份与文本描述冻结。文件身份由 Main 授权层单独持有，不进入纯核心。上面的 SourceSnapshot 是后续保存会话的组合设计，不能把尚未组合的 fileIdentity 字段或 Map 作为当前接口。
+
 ## 3. DOM 到源码的可行性验证
 
 ### 首版保证路径：脚本关闭的静态校稿
@@ -66,6 +68,10 @@ parse5 与 Chromium 必须使用一致的脚本解析语义（例如 noscript）
 - 当前对象身份、generation、revision 与选择时一致。非编辑器引发的节点变化使该映射失效。
 
 HAE-003 必须构造失败样例，验证“拒绝不确定定位”是否工作。若完整静态树映射在预算内未通过，先限于无解析错误的普通块级元素单 Text 子节点，并在支持矩阵中记录缩减。不能以全局 replace 或 nth-child 猜测替代。
+
+实施结果见 [HAE-003](implementation/HAE-003.md) 与 [决策记录 ADR-011](DECISIONS.md)。Main 将预期整树发送到隔离 preload；返回的 selection 仅含绑定身份、递增 revision 与 nodeId（或 null），不接受路径、偏移或目标文字。校稿 parse5 与 Chromium 均按 scripting-enabled 语义解析，但 CSP 禁止页面脚本执行。DOMContentLoaded 后至绑定前也监视变化；绑定后 MutationObserver、takeRecords 和 Text 对象登记共同拒绝外部更改，包括改回相同文字。
+
+`validateSelection` 仅证明请求执行时的选择/对象状态，不是可跨异步步骤复用的写租约。后续草稿命令必须在 preload 同步完成验证及受控 Text.data 变化，并由 Main 重新核验源索引。当前 registry 没有任何修改文字或写盘方法。
 
 ### JS 交互预览
 

@@ -19,6 +19,7 @@ for (const [path, info] of rows) {
 lines.push('', '## 随构建保留的声明', '',
   '`npm run licenses` 同时写出被 Git 忽略的 `out/licenses/`：', '',
   '- React、React DOM、Scheduler 的原始 MIT LICENSE。',
+  '- parse5 的 MIT LICENSE 与其运行依赖 entities 的 BSD-2-Clause LICENSE。',
   '- Electron 的 LICENSE 与完整 LICENSES.chromium.html；后者包含 Chromium/Node 及其第三方组件声明。',
   '- 本项目的 MIT LICENSE。', '',
   '当前没有安装包。HAE-015 打包时必须带上这些声明，并重新审查实际分发依赖；',
@@ -37,6 +38,8 @@ for (const [source, name] of [
   ['node_modules/react/LICENSE', 'React-LICENSE'],
   ['node_modules/react-dom/LICENSE', 'React-DOM-LICENSE'],
   ['node_modules/scheduler/LICENSE', 'Scheduler-LICENSE'],
+  ['node_modules/parse5/LICENSE', 'parse5-LICENSE'],
+  ['node_modules/entities/LICENSE', 'entities-LICENSE'],
   ['node_modules/electron/dist/LICENSE', 'Electron-LICENSE'],
   ['node_modules/electron/dist/LICENSES.chromium.html', 'LICENSES.chromium.html'],
 ]) await copyFile(`${root}${source}`, `${root}out/licenses/${name}`);

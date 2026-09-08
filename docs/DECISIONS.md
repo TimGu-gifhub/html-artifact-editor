@@ -2,6 +2,8 @@
 
 日期：2026-09-08。下列“采用”表示计划基线采用；不代表软件已实现或通过验证。候选项在对应实验结束后补充结果。
 
+2026-09-09 实施更新：静态源码定位见 ADR-011；字节 Patch 和文件事务仍待验证。
+
 ## ADR-001：采用 Electron 与同版本 Chromium
 
 **采用。** 项目核心是渲染现有 HTML 并定位文字，Windows/macOS 共用 Chromium 的价值高于最小安装包体积。比较过 Tauri 系统 WebView 的路线，本项目优先渲染语义的一致性；不承诺不同 OS 字体、DPI 和原生控件的像素一致。
@@ -65,3 +67,13 @@ MIT 正文采用 [GitHub MIT 模板](https://api.github.com/licenses/mit)，许�
 **采用，维护者于 2026-09-08 指定。** 不使用 GitHub Actions/CI；关闭仓库 Actions，移除文档和工具链工作流配置。保留 `npm run check`、`python tools/check_docs.py` 和 `git diff --check` 等本地检查，`npm ci` 继续作为锁定依赖安装命令。
 
 Windows/macOS 的构建、冒烟、权限与 UI 验收在实际目标环境完成，记录 commit、工具链、OS/架构、命令、结果与未测项。远端 CI 不作为任务、合并或发布门槛；没有 Mac 设备时相应验收仍为待执行。此决策取消远端执行方式，保留源码保护、安全检查和真实用户验收标准。
+
+## ADR-011：静态完整树核对与对象身份登记
+
+**HAE-003 实验通过，采用为初始静态范围。** 固定 parse5 8.0.1，开启 sourceCodeLocationInfo 和 scriptingEnabled；后者与保留 JS 引擎、通过 CSP 禁止脚本的 Chromium 校稿环境一致。完整比较规范化树的顺序、父子关系、命名空间、属性、doctype/兼容模式、注释、template.content 和 Text 值，再在隔离世界登记 Text 对象身份。源码字节范围、旧片段 hash 与上下文指纹始终由 Main 的源索引提供。
+
+连续范围必须独立解码成相同的单 Text。缺失范围、重叠、非连续合并、特殊上下文拒绝；parse5 未报告错误的 formatting element 克隆也检测并拒绝。其他解析错误使整页只读，缺少 doctype 可在兼容模式一致时核对。重复文字与重复 id 通过完整树和不同源码范围区分；不使用全局 replace、selector 或页面传来的偏移授权。
+
+从 DOMContentLoaded 开始观察变化；绑定后同时登记对象身份、校验 generation/revision 并同步排空 MutationObserver 记录。相同值重建、移走再放回、拆分再合并都使会话映射失效。JS 交互视图不安装映射；Shadow DOM 和伪元素文字保守只读。身份确认是瞬时检查，不是写租约，后续应用草稿需新的同步验证/修改合同。
+
+代价是部分浏览器能够显示的 HTML 暂不能选字；不因追求可编辑覆盖率放弃准确性。Main 使用可终止 worker 执行解析，V8 堆限制和超时不等于整个进程的硬内存限制。原始库许可随构建保留。10 组真实 Electron 检查、支持矩阵、失败反例与平台限制见 [HAE-003 记录](implementation/HAE-003.md)；尚无 Patch、保存、产品 UI 或实机人工验收。
