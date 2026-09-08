@@ -1,6 +1,6 @@
 # 源码定位与 Patch 规范
 
-版本：schema 1 设计基线。HAE-003 已实现静态源码索引；Patch 与文件事务仍由 HAE-004、HAE-010 实现。
+版本：schema 1 设计基线。HAE-003/004 已实现静态索引与纯字节 Patch 候选；Main 草稿接入和 HAE-010 文件事务仍待实现。
 
 ## 1. 保存不变量
 
@@ -42,6 +42,7 @@ type TextSource = {
   contextFingerprint: string;
   parentTag: string;
   namespace: 'html';
+  consumesLeadingLf: boolean; // pre/listing 标签后起始 Text 范围的首 LF 消费规则
   editable: boolean;
   readOnlyReason?: string;
 };
@@ -87,6 +88,8 @@ parse5 下标针对解析字符串；不得直接切 UTF-8 Buffer。实现一份
 
 新输入先统一为逻辑 LF；输出目标片段新增换行采用该片段原有单一换行风格，否则采用文档统计得到的风格，平局取 LF。混合换行片段在 Diff 中明确展示重编码结果；目标范围外混合行尾严格保持。样例必须覆盖 `pre` 和普通段落的不同视觉空白行为。
 
+HAE-004 已实现上述规则。HTML 的 pre/listing 会消费紧接开始标签的第一个 LF；parse5 在多 LF token 上可能把被消费的首 LF 也算入 Text 范围。仅当父标签、首子节点和源 startTag.endOffset 共同证明这一上下文时，索引按消费一个 LF 校验原始片段；若新文字以 LF 起始，编码器补一个会被消费的换行。已经位于目标范围之外的前缀保持原始字节。`consumesLeadingLf` 和 `leadingLfCompensation` 是权威索引/补丁字段，不能由页面指定；六组真实 Chromium 反例见 [HAE-004](implementation/HAE-004.md)。
+
 ## 5. 编辑命令与 Patch
 
 Preview 只能报告选择。来自可信 UI 的编辑命令也只传 nodeId、新文字和版本，不允许传任意文件路径或字节范围：
@@ -103,16 +106,18 @@ type ApplyTextDraft = {
 
 type TextPatch = {
   schemaVersion: 1;
-  id: string;
-  documentId: string;
-  generation: number;
+  identity: { projectId: string; documentId: string; generation: number };
   baseHash: string;
   nodeId: string;
   startByte: number;
   endByte: number;
   oldSliceHash: string;
+  contextFingerprint: string;
   expectedText: string;
   newText: string;
+  lineEnding: '\n' | '\r\n' | '\r';
+  mixedLineEndings: boolean;
+  leadingLfCompensation: boolean;
   replacementBytes: Uint8Array;
 };
 ```
@@ -121,6 +126,10 @@ Main 从权威索引生成 TextPatch，并重新校验上下文、范围、旧�
 
 同一 nodeId 连续编辑合并为针对保存基线的一份净补丁；历史仍保留每次“应用”的操作组。A→B→C 最终保存 A→C；A→B→A 取消净补丁。不同节点基于同一份不可变基线，直到保存后统一重建索引，不能增量猜测所有下游 offset。
 
+HAE-004 的实际纯核心入口为 [createPatchEngine / buildPatchCandidate](../src/core/patch/engine.ts)。上面的 ApplyTextDraft 是后续 UI→Main 设计；核心 `TextChange` 精确包含 `identity`、`baseHash`、`nodeId`、`expectedText` 和 `newText`。其中 expectedText 是当前内存候选文字，用来拒绝过期输入；TextPatch.expectedText 则始终是原始基线的解码文字。Main 还须验证选择版本/来源，不能直接向页面开放核心 API。
+
+engine 初始重新解析并核对源索引；apply 在全部候选校验成功后才更新内存状态。无变化返回原候选，同节点改回基线文字移除净 Patch 并保留原实体拼写。失败保留上一候选。`PatchCandidate` 包含冻结身份、baseHash/resultHash、只读 patches 与返回副本的 bytes；没有文件 I/O、DOM 操作、历史或保存点。限制为每节点 64 KiB UTF-8 新文字、1,000 个净 Patch 和 5 MiB 输出，替换字节总预算也受限。后续交互接入应在可取消任务中运行这些同步核心计算。
+
 ## 6. 结果构造与验证
 
 1. 验证全部补丁绑定相同快照、范围合法且不重叠，旧片段哈希一致。
@@ -128,6 +137,8 @@ Main 从权威索引生成 TextPatch，并重新校验上下文、范围、旧�
 3. 重新解析候选输出，验证目标解码 Text 为新值；结构、属性、脚本和样式 token 没有意外变化。
 4. 独立比较每段未改原始 Buffer 切片与输出对应片段；首版保护边界由直接字节断言证明。
 5. UI Diff 由即将写入的候选字节生成。Diff 与写盘使用同一冻结结果；禁止在用户确认后再重新编码成另一份结果。
+
+HAE-004 已验证 1–4，并冻结可供第 5 步使用的候选结果；尚无产品 Diff 或写盘入口。整树核对仅忽略目标 Text 的新值、清空后消失的 Text 及随之变化的索引编号；其他父子结构、属性、注释、脚本/样式文字和未选 Text 必须一致。清空后再次输入仍基于同一旧范围，不能拿新候选的变长 offset 回写原基线。
 
 目标节点改为空字符串后，内存编辑会话保留该 Text 对象；保存重解析时空节点可能不再存在。清空选择并保留逻辑历史，恢复该节点必须重新生成经验证的相反操作，不能把旧 nodeId 强行复用。
 

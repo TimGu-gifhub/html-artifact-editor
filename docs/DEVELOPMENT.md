@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-09。范围：HAE-001 工具链、HAE-002 只读项目预览及 HAE-003 静态源码映射实验。
+日期：2026-09-09。范围：HAE-001 工具链、HAE-002 只读预览、HAE-003 静态映射与 HAE-004 纯字节 Patch 实验。
 
 ## 固定版本
 
@@ -45,16 +45,17 @@ npm run dev
 | `npm run build:preview` | out/preview，固定静态样例 |
 | `npm run typecheck` | 核心、主进程、preload、UI 四套 strict 编译边界；仅 preload/渲染器含 DOM 类型 |
 | `npm run check:boundaries` | AST 检查跨层 import/export/动态加载与核心平台全局变量 |
-| `npm test` | 契约、分层、资源路径/句柄/快照/撤销、UTF-8、源码索引与拒绝反例；Patch 拼接留到 HAE-004 |
+| `npm test` | 契约、分层、资源路径/句柄/快照/撤销、UTF-8、源码索引、纯字节 Patch 与拒绝反例 |
 | `npm run test:smoke` | 已构建应用的 Electron 冒烟，独立 out/smoke 入口 |
 | `npm run test:security` | 已构建 preload 的真实项目协议、两种模式、恶意请求和 IPC 测试；独立 out/security 入口 |
 | `npm run test:mapping` | 构建 worker/preload/mapping，真实 Chromium 树、原生点击、世代/对象失效与解析故障实验 |
+| `npm run test:patch` | 生成自制候选文件并在真实 Chromium 重开；验证纯文本、清空、变长、pre 空行与资源不变，不是应用 Save |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 许可证 |
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
@@ -67,6 +68,8 @@ smoke 记录 preload 实际报告的 sandbox/contextIsolation、页面 Node 能�
 HAE-002 的 `preview` / `preview:interactive` 使用独立原生选择器与 WebContentsView，项目文件协议与生命周期由 Main 管理；`dev` 内置壳及 React UI 保持原样。HAE-003 为静态入口增加源码映射与点击诊断；没有草稿、保存、备份或恢复。产品视觉稿仍需 HAE-007 选择，后续产品前端按 Kimi 分工执行。映射/安全实现由主开发代理负责；不把测试页面标为产品设计。测试入口及故意增强的攻击 preload 不从应用入口导入，没有页面可开启的测试开关。
 
 `test-results/mapping.json` 记录运行版本、commit/工作区、25 份自制 HTML 的 SHA-256 与 10 组映射断言；`mapping-repeated.png` 是渲染辅助证据。纯核心校验全部合法 Unicode 标量、字节边界和 10,000 行索引。支持/拒绝表与故障注入见 [HAE-003](implementation/HAE-003.md)。解析上限为 5 MiB、100,000 个规范化节点、256 层；Main worker 有 5 秒期限和 V8 堆限制，超时/取消等待 worker 终止后返回。它不是整个进程的硬内存上限，也不是 HAE-013 性能验收。
+
+HAE-004 增加纯核心内存 Patch 候选：64 KiB UTF-8 新文字、1,000 个净补丁、5 MiB 输出上限。无变化和还原基线文字保留原始实体拼写；失败不改变已有候选。`test-results/patch.json` 与 `patch-candidate.png` 记录 4 组真实 Chromium 重开断言及自制文件 hash。测试仅创建新的临时候选文件，原 HTML/CSS/JS 不变；没有覆盖保存、备份或恢复实现。详细 API、pre 首换行及限制见 [HAE-004](implementation/HAE-004.md)。
 
 ## 项目资源范围
 
@@ -92,7 +95,7 @@ HAE-002 的 `preview` / `preview:interactive` 使用独立原生选择器与 Web
 
 | 目标环境 | 执行方式 | 当前验证状态 |
 | --- | --- | --- |
-| Windows 11 x64 | 本机运行相同锁文件和固定工具链的检查 | 已有 HAE-001/002/003 本地执行记录，不能代替产品验收 |
+| Windows 11 x64 | 本机运行相同锁文件和固定工具链的检查 | 已有 HAE-001 至 HAE-004 本地执行记录，不能代替产品验收 |
 | Windows 10 x64 | 对应实机或隔离 VM 运行同一检查和验收 | 待验证，不能由 Windows 11 结果代替 |
 | macOS 13+ arm64 | Apple Silicon Mac 本地构建、检查与人工验收 | 当前没有 Mac 实测结果 |
 

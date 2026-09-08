@@ -14,6 +14,7 @@ const entries = {
   'preview-tool': ['tools/preview-main.ts', 'out/preview-tool'],
   'parser-worker': ['src/main/parser/worker.ts', 'out/parser-worker'],
   mapping: ['tests/mapping/main.ts', 'out/mapping'],
+  patch: ['tests/patch/main.ts', 'out/patch'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker'];
 const requested = process.argv.slice(2);

@@ -9,6 +9,7 @@ export type TextSource = Readonly<{
   nodeId: string; treeIndex: number; startCodeUnit: number; endCodeUnit: number;
   startByte: number; endByte: number; rawSliceHash: string; decodedText: string;
   contextFingerprint: string; parentTag: string; namespace: string;
+  consumesLeadingLf: boolean;
   editable: boolean; readOnlyReason: string | null;
 }>;
 export type SourceIndex = Readonly<{
@@ -65,6 +66,10 @@ export function createSourceIndex(input: Uint8Array, identity: SourceIdentity, h
     } else if (node.nodeName === '#text') {
       const value = (node as P5.TextNode).value;
       const location = node.sourceCodeLocation;
+      const parentElement = (node as P5.TextNode).parentNode;
+      const consumesLeadingLf = parentElement !== null && isElement(parentElement) && ['pre', 'listing'].includes(parentElement.tagName)
+        && parentElement.childNodes[0] === node
+        && location?.startOffset === parentElement.sourceCodeLocation?.startTag?.endOffset;
       let readOnlyReason = inherited ?? (errors.size ? 'PARSE_ERROR' : null);
       let startByte = -1;
       let endByte = -1;
@@ -78,8 +83,11 @@ export function createSourceIndex(input: Uint8Array, identity: SourceIdentity, h
           if (!readOnlyReason) {
             const fragment = parseFragment(decoded.text.slice(startCodeUnit, endCodeUnit), { scriptingEnabled: true });
             const single = fragment.childNodes[0];
+            let fragmentText = single?.nodeName === '#text' ? (single as P5.TextNode).value : null;
+            // parse5 may include the consumed first LF in a multi-LF token's source span.
+            if (consumesLeadingLf && fragmentText?.startsWith('\n')) fragmentText = fragmentText.slice(1);
             if (fragment.childNodes.length !== 1 || single?.nodeName !== '#text'
-              || (single as P5.TextNode).value !== value) readOnlyReason = 'NONCONTIGUOUS_TEXT';
+              || fragmentText !== value) readOnlyReason = 'NONCONTIGUOUS_TEXT';
           }
         } catch { readOnlyReason ??= 'INVALID_SOURCE_RANGE'; }
       }
@@ -87,9 +95,10 @@ export function createSourceIndex(input: Uint8Array, identity: SourceIdentity, h
       const nodeId = `n${treeIndex}`;
       nodes.push({ nodeId, treeIndex, startCodeUnit, endCodeUnit, startByte, endByte,
         rawSliceHash: startByte >= 0 ? hash(bytes.slice(startByte, endByte)) : '', decodedText: value,
-        contextFingerprint: hash(encodeUtf8(JSON.stringify({ parent, parentNode, treeIndex, value }))),
+        contextFingerprint: hash(encodeUtf8(JSON.stringify({ parent, parentNode, treeIndex, value, consumesLeadingLf }))),
         parentTag: parentNode?.kind === 'element' ? parentNode.name : '',
         namespace: parentNode?.kind === 'element' ? parentNode.namespace : '',
+        consumesLeadingLf,
         editable: readOnlyReason === null, readOnlyReason,
       });
       descriptor = { parent, kind: 'text', value, nodeId, editable: readOnlyReason === null, readOnlyReason };

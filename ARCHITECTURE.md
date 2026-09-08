@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：产品架构设计基线；HAE-001/002 已加入工具链和独立只读预览，HAE-003 已验证静态树与源码索引。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md) 与 [HAE-003 交付记录](docs/implementation/HAE-003.md)。产品编辑与保存流程仍待实现。
+状态：产品架构设计基线；HAE-001/002 已加入工具链和独立只读预览，HAE-003/004 已验证静态树、源码索引与纯字节候选。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md) 与 [HAE-004 交付记录](docs/implementation/HAE-004.md)。产品编辑与保存流程仍待实现。
 
 ## 1. 技术选型
 
@@ -138,3 +138,9 @@ Electron 44.2.0 本地实验中 `javascript: false` 阻止了 Preview preload �
 Main 在有超时、取消和 V8 堆限制的 worker 中解析同一入口快照，将预期树发往隔离 preload。preload 核对父子顺序、元素/属性/命名空间、注释、doctype、template.content 和解码 Text；完全一致后登记 WeakMap<Text, nodeId>。没有源码标记、页面桥或 DOM 序列化保存。
 
 DOMContentLoaded 后即观察变化，takeRecords 防止同一任务里的变更绕过校验。选择消息绑定 documentId、baseHash、session/generation 和递增 revision；Main 另外核对 sender、session、主 frame、完整 URL 与已知节点。`validateSelection` 是瞬时检查，后续草稿操作不能把它当作跨异步写租约。实际拒绝表见 [HAE-003](docs/implementation/HAE-003.md)。
+
+### HAE-004 纯字节候选
+
+`createPatchEngine` 独立重建并核验 SourceIndex，按冻结基线保存每节点的一份净 Patch。apply 只接受身份、baseHash、nodeId、预期当前文字和新文字；先构造及验证全部候选，再改变内存状态。非法输入、旧值、范围、编码和候选结构变化均保留旧候选。
+
+输出拼接原始未改片段与确定编码的替换字节，随后独立比对未改片段，并重新解析核对整树。只允许目标 Text 改值及清空后的节点消失；元素/属性/注释/脚本与其他 Text 不变。pre/listing 开头换行按词法上下文证明并补偿；没有插入新标签或序列化保存。候选、Patch 元数据冻结，字节返回副本。调用接入、异步任务取消与保存事务属于后续 Main 集成，当前只在核心和独立 Electron 实验中执行。

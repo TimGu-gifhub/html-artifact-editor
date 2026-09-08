@@ -2,7 +2,7 @@
 
 ## Current scope
 
-This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001 adds a runnable toolchain scaffold; HAE-002 adds read-only local-project previews; HAE-003 verifies static source mapping and native text selection in the developer entry. Product UI, editing and saving are not implemented. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
+This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001/002 add the toolchain and read-only project previews; HAE-003 verifies static mapping and native text selection; HAE-004 adds a pure byte-patch candidate engine. Product UI, live draft editing and file saving are not implemented. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
 
 Human-readable project documentation is primarily Simplified Chinese. Keep identifiers and API contracts concise in English. Do not copy private conversations, user paths or unrelated project data into this public repository.
 
@@ -47,7 +47,7 @@ python tools/check_docs.py
 git diff --check
 ```
 
-Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. The Electron smoke covers the bundled scaffold; test:security covers docs/implementation/HAE-002.md; test:mapping covers the source/DOM experiments in docs/implementation/HAE-003.md. These do not substitute for native-dialog, platform or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
+Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. Electron test:smoke/security/mapping/patch cover the experiments in docs/implementation/HAE-001.md through HAE-004.md. These do not substitute for native-dialog, file-transaction, platform or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
 
 For core/file changes, required evidence includes byte preservation, entity/Unicode handling, rejected ambiguous targets, save conflict, failure and recovery tests. For UI changes, also provide executed interaction evidence; screenshots alone do not prove functionality.
 
