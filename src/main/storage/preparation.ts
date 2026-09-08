@@ -36,7 +36,7 @@ const codeFor = (error: unknown): string => {
 
 // A dedicated directory beneath Main's private app data, never a project root.
 // Preparing/cancelling writes only private evidence. An explicit Main commit
-// requires a platform replacer; no renderer or normal-app integration exists yet.
+// requires a platform replacer; the optional Workspace port keeps this store in Main.
 export async function createSavePreparationStore(path: string, onStep: (step: string) => Promise<void> = async () => {}, replacer?: SourceReplacer) {
   const root = await checkedDirectory(path); let busy = false;
   const checkQuota = async (source: SaveSource, candidateSize: number): Promise<void> => {

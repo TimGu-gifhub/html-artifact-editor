@@ -4,6 +4,7 @@ import type { PatchCandidate } from '../../core/patch/engine.ts';
 import type { PreviewMapping } from '../preview/source-mapping.ts';
 import { freezeCandidate, prepareDraft } from './prepare.ts';
 import type { NewFileOutcome, NewFileWriter } from '../../platform/new-file.ts';
+import type { OriginalSaveResult } from '../storage/original.ts';
 
 type MappingPort = Pick<PreviewMapping, 'source' | 'identity' | 'status' | 'selection' | 'applyText'>;
 type Phase = 'idle' | 'preparing' | 'applying' | 'saving' | 'uncertain' | 'closed';
@@ -71,6 +72,21 @@ export function createDraftSession(outputRoot: string, mapping: MappingPort, pre
         // A copy does not replace this session's original baseline or clear drafts.
         return copyOutcome;
       } finally { if (copyOutcome?.status !== 'unknown') phase = closed ? 'closed' : 'idle'; }
+    },
+    async saveOriginal(write: (candidate: PatchCandidate) => Promise<OriginalSaveResult>): Promise<OriginalSaveResult> {
+      if (closed || phase !== 'idle' || mapping.status !== 'ready') throw new Error('DRAFT_UNAVAILABLE');
+      phase = 'saving';
+      try {
+        const result = await write(current);
+        // The old mapping cannot edit against an overwritten baseline. A fresh
+        // verified document must replace this session; retain these bytes until then.
+        if (result.status === 'committed' || result.status === 'unknown' || result.requiresReview) uncertain = current;
+        return result;
+      } catch {
+        uncertain = current;
+        return Object.freeze({ status: 'unknown', code: 'SAVE_OUTCOME_UNKNOWN', transactionId: null,
+          expectedHash: current.resultHash, cleanupPending: true, requiresReview: true, verifySaved: null });
+      } finally { phase = uncertain ? 'uncertain' : closed ? 'closed' : 'idle'; }
     },
     close(): void { closed = true; cancellation.abort(); if (!uncertain && copyOutcome?.status !== 'unknown') phase = 'closed'; },
   });

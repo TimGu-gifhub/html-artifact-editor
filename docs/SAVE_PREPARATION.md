@@ -1,6 +1,6 @@
 # 保存事务与私有证据
 
-日期：2026-09-09；HAE-010 第二阶段。准备服务创建私有备份、候选和记录；明确调用 Main 的 commit 才进入 Windows 原生替换。没有 renderer 接口、恢复写盘或正常应用接线。`prepared` 表示准备证据可读，不表示 HTML 已保存，也不是可以跨异步步骤复用的替换权限。执行范围见 [阶段记录](implementation/HAE-010.md)。
+日期：2026-09-09；HAE-010 第三阶段。准备服务创建私有备份、候选和记录；明确调用 Main 的 commit 才进入 Windows 原生替换。现通过 Workspace 的可选 Main 端口和可信 save 命令验证保存及新基线，正常应用与恢复写盘尚未接入。`prepared` 表示准备证据可读，不表示 HTML 已保存，也不是可以跨异步步骤复用的替换权限。执行范围见 [阶段记录](implementation/HAE-010.md)。
 
 ## Main 调用边界
 
@@ -11,6 +11,8 @@
 `prepare(source, candidate)` 的 candidate 来自 Main 已核验的纯字节 Patch 流程。此存储层检查 baseHash、结果 hash、大小并复制候选，不能替代源码映射和 Patch 语义核验。无净变化不创建事务。返回 failed 或 prepared，prepared 含 Main 可用的 cancel/commit 方法；失败不清除调用者的原输入/候选。
 
 第三个工厂参数是 Main 创建的 [平台替换适配器](../src/platform/windows-replacement.ts)。Windows 工厂只接受可信安装目录中的 ReplaceHelper.exe 绝对路径，固定并复核其字节；禁止从工作目录猜测、从 journal 或页面取得执行路径。未提供适配器时 commit 返回 SAVE_PLATFORM_UNSUPPORTED，仍可取消。
+
+[OriginalSaver](../src/main/storage/original.ts) 组合 prepare/cancel/commit，并为提交结果提供 Main 私有的 verifySaved 回调。Workspace 在打开文档时捕获 SaveSource，显式保存冻结的草稿；UI 撤销只能取消尚未开始的替换，已开始的 commit 必须继续确认结果。只有新文档的源版本、结果 hash、committed 记录和映射全部通过才发布 saved；重建失败保留旧候选，清理警告与失败分开。renderer 仅能传 documentId 和状态版本，不接触 store、回调、记录目录或任意文件路径。状态合同见 [统一窗口会话](WORKSPACE_SESSION.md)。
 
 ## 准备顺序
 
@@ -64,4 +66,4 @@ intent/seal/commit 严格按 [纯 schema](../src/contracts/save-record.ts) 检�
 
 ## 后续接线
 
-下一阶段需要处理保存后基线/映射重建、Main 窗口会话与正常应用接线，以及持久化未保存编辑意图、恢复向导、遗留锁和残留 sidecar 的安全处理。已执行普通 NTFS 文件、真实只读/写权限拒绝、外部文件占用和进程强杀；真实磁盘满、断电、Windows 10/macOS、网络/云同步盘与产品人工验收仍待完成，不能用存储测试代替可用 MVP。
+下一阶段需要处理正常产品窗口、跨保存的逻辑历史、持久化未保存编辑意图、恢复向导、遗留锁和残留 sidecar 的安全处理。已执行普通 NTFS 文件、真实只读/写权限拒绝、外部文件占用、进程强杀以及窗口保存/重建；真实磁盘满、断电、Windows 10/macOS、网络/云同步盘与产品人工验收仍待完成，不能用存储测试代替可用 MVP。

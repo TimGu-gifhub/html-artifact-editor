@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；HAE-008 为其增加明确目录授权、入口切换和资源诊断。正常应用入口、产品面板及覆盖保存流程仍待实现。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md)、[HAE-005](docs/implementation/HAE-005.md) 与 [HAE-008](docs/implementation/HAE-008.md)。
+状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；HAE-008 增加目录授权、入口切换和资源诊断；HAE-010 增加显式覆盖保存与新基线接线。正常应用入口、产品面板、撤销历史和恢复流程仍待实现。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md)、[HAE-005](docs/implementation/HAE-005.md)、[HAE-008](docs/implementation/HAE-008.md) 与 [HAE-010](docs/implementation/HAE-010.md)。
 
 ## 1. 技术选型
 
@@ -165,13 +165,13 @@ Main 将 bridge 安装到指定 WebContents 的局部 IPC，首次握手固定�
 
 ### HAE-005 第四段：文档替换和窗口关闭
 
-Main prepareDocument 先独立准备新预览、源映射、草稿、输入及 writer，原文档一直保持可用。Workspace 在准备完成后处理离开确认，确认身份、输入/草稿版本和候选 hash 仍匹配才同步替换 current；取消或失败只销毁新候选。界面确认期间的后到输入使旧确认失效。
+Main prepareDocument 先独立准备新预览、源映射、草稿、输入及 writer，并固定保存源的文件身份/版本，原文档一直保持可用。Workspace 在准备完成后处理离开确认，确认身份、输入/草稿版本和候选 hash 仍匹配才同步替换 current；取消或失败只销毁新候选。界面确认期间的后到输入使旧确认失效。
 
 原生 window close 先 preventDefault，重复请求共用一个待处理确认。取消、组合态、失败或未知另存保持窗口；明确放弃或经核验的新文件副本才可完成关闭。未知状态要求恢复，不能借打开另一份文档丢掉现场；teardown 失败保留引用并阻止继续堆积文档。该模块已执行真实预览、文件和 window.close 事件实验；统一 bridge/视图接线见下一段，正常应用与用户对话框仍待接入，详见 [文档生命周期](docs/WORKSPACE_LIFECYCLE.md)。
 
 ### HAE-005 第五段：统一窗口会话
 
-WorkspaceSession 让同一 current 服务于可信 IPC、输入/草稿、PreviewHost 和原生关闭。窗口接口 read/open/edit/onState 使用持续递增的窗口状态版本；每个 edit 显式携带操作时的 documentId，旧文档请求不能命中新文档的同值 revision。共用 transport 保持来源、schema、连接 token 与重放检查，Preview 无权限。
+WorkspaceSession 让同一 current 服务于可信 IPC、输入/草稿、PreviewHost 和原生关闭。窗口接口 read/open/openDirectory/switchEntry/edit/save/onState 使用持续递增的窗口状态版本；edit、switchEntry 与 save 显式携带操作时的 documentId，旧文档请求不能命中新文档的同值 revision。共用 transport 保持来源、schema、连接 token 与重放检查，Preview 无权限。
 
 视图激活是提交前的同步端口，挂载/尺寸/移除失败恢复旧视图，最终权限核验后才发布新 current。回滚或原生 resize 状态无法确定时保留输入并阻止后续应用、保存、打开和关闭。UI 导航/崩溃撤销连接、取消未返回的确认/另存选择器；Main 可为同一文档重建固定 UI 页面，不清空输入或自动写盘。真实 Electron 十组实验已执行；真实界面、对话框和持久化恢复仍待实现，见 [统一窗口会话](docs/WORKSPACE_SESSION.md)。
 
@@ -181,10 +181,12 @@ Main DirectoryGrant 固定实际目录身份与私有路径排除；ProjectGrant
 
 有界资源诊断汇合协议、webRequest 及现有安全 CDP 连接的 Network/Audits 事件；CSP 拒绝的 fetch 即使没有 Network 请求事件仍可记录。只收集失败目标/类型/原因，URL 去除凭据/查询/fragment、本机路径隐藏，超限标记截断。诊断通过 current.project 和生产可信 IPC 传输，没有新增 Preview bridge、bypassCSP 或联网例外。事件观察失败即拒绝本次预览，升级 Electron 时需重新验证实验性 Audits 接口。八组真实目录实验已执行；产品诊断面板及人工对话框仍待验收，见 [目录资源合同](docs/PROJECT_RESOURCES.md)。
 
-### HAE-010：私有准备与 Windows 提交实验
+### HAE-010：Windows 保存事务与会话接线
 
 平台层持有源文件路径链、完整字节、dev/ino 与纳秒时间戳；Main 准备服务以私有存储全局独占锁串行化合作实例，在不可覆写的独立文件中存原始备份、候选、intent 和准备/取消记录。每一步保持句柄写入、sync、回读 hash 和目录/文件复核。记录仅保存规范路径键及显示名称，没有可直接回放的绝对路径。
 
 Main 明确 commit 后，Windows 适配器独占创建同目录候选临时文件；来自可信安装目录的有限协议助手固定目录/源句柄，最后复核身份、正文及元数据。Main 先写 replacing 记录，助手用 ReplaceFileW 保留被替换的原文件，再保持结果读取句柄；Main 独立回读新 hash/身份，写入并验证 committed，才确认提交。成功后的清理只删除仍持有的原文件备份句柄和本调用的私有锁；失败/未知保留证据，不能取消或盲目重试已启动的提交。候选始终来自字节 Patch；C# 仅处理平台文件能力，没有 Preview/renderer 桥。
 
-重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选、已提交版本或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限，当前服务未接入 Workspace/UI。基线重建、恢复向导、持久化编辑意图与 Windows 10/macOS 验收仍待完成，完整协议与 OS 竞态边界见 [保存事务合同](docs/SAVE_PREPARATION.md)。
+Workspace 的可选 Main 保存端口把上述事务接入显式 save 命令，冻结已应用候选并互斥输入/打开/关闭。提交后沿原项目根重新准备文档，复核当前文件仍匹配 committed 版本，才发布新 documentId、基线和映射；清空 Text 不复用旧节点身份。重建失败保留旧草稿与事务，返回 rebase-required；已经提交后 UI 崩溃不撤销磁盘操作，Main 继续核对和重建。具体状态与窄接口见 [统一窗口会话](docs/WORKSPACE_SESSION.md)。
+
+重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选、已提交版本或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限。正常产品窗口、跨保存的逻辑历史、恢复向导、持久化编辑意图与 Windows 10/macOS 验收仍待完成，完整协议与 OS 竞态边界见 [保存事务合同](docs/SAVE_PREPARATION.md)。

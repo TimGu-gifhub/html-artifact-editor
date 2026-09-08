@@ -11,6 +11,7 @@ import type { ProjectChoices } from './project-choice.ts';
 const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUSY', 'INPUT_COMPOSING',
   'DOCUMENT_RECOVERY_REQUIRED', 'DOCUMENT_CLEANUP_REQUIRED', 'STALE_DOCUMENT_REVIEW', 'WORKSPACE_CANCELLED',
   'DOCUMENT_ACTIVATION_FAILED', 'DOCUMENT_ACTIVATION_UNKNOWN', 'STALE_DOCUMENT',
+  'SAVE_PLATFORM_UNSUPPORTED', 'UNAPPLIED_INPUT',
   'RESOURCE_BLOCKED',
   'COPY_FAILED', 'COPY_OUTCOME_UNKNOWN', 'INPUT_MAPPING_LOST', 'INVALID_TEXT_NUL', 'INVALID_UNICODE', 'TEXT_SIZE_LIMIT']);
 
@@ -25,7 +26,7 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         let code: string | null = null;
         let copy: WorkspaceResult['copy'] = null;
         let outcome: WorkspaceResult['outcome'] = null;
-        const documentId = command.kind === 'edit' || command.kind === 'switch-entry' ? command.documentId : null;
+        const documentId = command.kind === 'edit' || command.kind === 'switch-entry' || command.kind === 'save' ? command.documentId : null;
         try {
           if (command.kind === 'open') {
             const result = await workspace.open(command.stateRevision, async () => active() ? chooseOpen() : undefined);
@@ -40,10 +41,18 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
             const result = await workspace.open(command.stateRevision, (operationSignal) =>
               chooseProjectEntry(current.preview.grant, projectChoices.chooseEntry, operationSignal));
             outcome = result.status === 'opened' ? 'opened' : 'cancelled';
+          } else if (command.kind === 'save') {
+            const result = await workspace.save(command.stateRevision, command.documentId);
+            const report = result.state.lastSave;
+            // Cleanup warnings remain in lastSave. A verified file and new
+            // baseline are a successful Save even when evidence cleanup is pending.
+            code = ['failed', 'unknown', 'rebase-required'].includes(result.status) ? report?.code ?? 'SAVE_FAILED' : null;
+            outcome = result.status === 'saved' || result.status === 'unchanged' || result.status === 'cancelled' || result.status === 'rebase-required' ? result.status : null;
           } else if (command.kind === 'edit') {
             const current = workspace.current;
             if (!current || current.id !== command.documentId) throw new Error('STALE_DOCUMENT');
             if (workspace.snapshot().cleanupPending && command.value.kind !== 'change') throw new Error('DOCUMENT_CLEANUP_REQUIRED');
+            if (workspace.snapshot().phase === 'saving' && workspace.retainedSave !== null) throw new Error('WORKSPACE_BUSY');
             // Late input may arrive during open/review and invalidate its proof.
             // Draft mutations and saving must wait for the workspace to be idle.
             if (workspace.snapshot().phase !== 'idle' && command.value.kind !== 'change') throw new Error('WORKSPACE_BUSY');

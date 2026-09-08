@@ -187,3 +187,39 @@ test('failed copy preserves drafts for another destination; unknown or thrown wr
     }
   }
 });
+
+test('original Save exclusively freezes the current byte candidate and blocks Apply or duplicate Save', async () => {
+  const f = setup(); await f.session.apply(f.input('保存 🧪'));
+  const candidate = f.session.candidate; let release;
+  const pending = f.session.saveOriginal(async value => {
+    assert.equal(value, candidate); const bytes = value.bytes; bytes.fill(0); assert.notDeepEqual(value.bytes, bytes);
+    await new Promise(done => { release = done; });
+    return { status: 'failed', code: 'FILE_CHANGED', requiresReview: false };
+  });
+  assert.equal(f.session.phase, 'saving');
+  await assert.rejects(f.session.apply(f.input('late edit')), /DRAFT_UNAVAILABLE/);
+  await assert.rejects(f.session.saveOriginal(async () => { assert.fail('duplicate writer'); }), /DRAFT_UNAVAILABLE/);
+  release(); await pending; assert.equal(f.session.phase, 'idle'); assert.equal(f.session.candidate, candidate);
+});
+
+test('committed or uncertain original Save retains old baseline/candidate and forbids editing against obsolete offsets', async () => {
+  for (const [status, requiresReview, expectedPhase] of [['committed', false, 'uncertain'], ['unknown', false, 'uncertain'],
+    ['failed', true, 'uncertain'], ['failed', false, 'idle'], ['cancelled', false, 'idle']]) {
+    const f = setup(); await f.session.apply(f.input('保存 🧪')); const candidate = f.session.candidate;
+    const value = await f.session.saveOriginal(async () => ({ status, code: null, requiresReview }));
+    assert.equal(value.status, status); assert.equal(f.session.phase, expectedPhase); assert.equal(f.session.candidate, candidate);
+    assert.deepEqual(Buffer.from(f.mapping.source.bytes), baseline);
+    if (expectedPhase === 'uncertain') {
+      assert.equal(f.session.uncertainCandidate, candidate);
+      await assert.rejects(f.session.apply(f.input('late edit')), /DRAFT_UNAVAILABLE/);
+      f.session.close(); assert.equal(f.session.phase, 'uncertain');
+    }
+  }
+});
+
+test('an unexpected original-save exception is uncertain and cannot authorize a retry', async () => {
+  const f = setup(); await f.session.apply(f.input('保存 🧪')); const candidate = f.session.candidate;
+  const result = await f.session.saveOriginal(async () => { throw new Error('lost completion'); });
+  assert.equal(result.status, 'unknown'); assert.equal(result.requiresReview, true); assert.equal(f.session.candidate, candidate);
+  await assert.rejects(f.session.saveOriginal(async () => { assert.fail('blind retry'); }), /DRAFT_UNAVAILABLE/);
+});

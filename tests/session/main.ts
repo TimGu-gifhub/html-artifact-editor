@@ -114,7 +114,7 @@ async function run(): Promise<void> {
   try {
     await ui.loadURL(EDITOR_URL);
     assert.equal((await read()).current, null); assert.equal(runtime.connected, true);
-    assert.deepEqual(await ui.webContents.executeJavaScript('Object.keys(haeWorkspace).sort()'), ['edit', 'onState', 'open', 'openDirectory', 'read', 'switchEntry']);
+    assert.deepEqual(await ui.webContents.executeJavaScript('Object.keys(haeWorkspace).sort()'), ['edit', 'onState', 'open', 'openDirectory', 'read', 'save', 'switchEntry']);
     assert.deepEqual(await ui.webContents.executeJavaScript('[typeof require,typeof process,typeof ipcRenderer,typeof Buffer]'), Array(4).fill('undefined'));
     assert.equal((await open()).outcome, 'cancelled'); assert.equal(runtime.workspace.current, null);
     assert.equal(await ui.webContents.executeJavaScript('haeWorkspace.open(NaN).then(r=>r.code)'), 'INVALID_WORKSPACE_REQUEST');

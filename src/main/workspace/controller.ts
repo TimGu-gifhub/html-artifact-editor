@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { isLeaveDecision } from '../../contracts/workspace.ts';
-import type { LeaveReview, WorkspaceOutcome, WorkspacePhase, WorkspaceSnapshot } from '../../contracts/workspace.ts';
+import type { LeaveReview, WorkspaceOutcome, WorkspacePhase, WorkspaceSaveReport, WorkspaceSnapshot } from '../../contracts/workspace.ts';
 import type { InputSnapshot } from '../../contracts/input.ts';
 import type { OpenDocument, prepareDocument } from './document.ts';
 import type { ProjectSource } from '../protocol/project-files.ts';
+import type { OriginalSaver, OriginalSaveResult } from '../storage/original.ts';
 
 export type WorkspaceDecisions = Readonly<{
   review: (value: LeaveReview) => Promise<unknown>;
@@ -14,7 +15,7 @@ export type ActivateDocument = (next: OpenDocument | null, previous: OpenDocumen
 // The synchronous activation port must restore its prior state before throwing.
 // A successful activation returns a rollback for a failed final authority check.
 export function createWorkspace(outputRoot: string, decisions: WorkspaceDecisions, prepare: typeof prepareDocument,
-  activate: ActivateDocument = () => () => {}) {
+  activate: ActivateDocument = () => () => {}, saveOriginal?: OriginalSaver) {
   let current: OpenDocument | null = null;
   let phase: WorkspacePhase = 'idle';
   let revision = 1;
@@ -23,6 +24,9 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
   let disposal: Promise<void> | undefined;
   let review: LeaveReview | null = null;
   let pending: AbortController | null = null;
+  let rebuilding: AbortController | null = null;
+  let lastSave: WorkspaceSaveReport | null = null;
+  let retainedSave: OriginalSaveResult | null = null;
   const listeners = new Set<() => void>();
   // Keep objects whose teardown failed as evidence; block further opens instead
   // of accumulating unbounded views or pretending cleanup succeeded.
@@ -35,7 +39,10 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
   };
   const snapshot = (): WorkspaceSnapshot => Object.freeze({ stateRevision: revision, phase,
     current: current ? Object.freeze({ id: current.id, name: current.name, input: current.input.snapshot(), project: current.project() }) : null,
-    review, cleanupPending: activationUncertain || failedCleanup.size > 0 });
+    review, cleanupPending: activationUncertain || failedCleanup.size > 0, lastSave,
+    canSave: !!saveOriginal && phase === 'idle' && !disposed && !activationUncertain && !failedCleanup.size
+      && !lastSave?.requiresReview && !!current && current.input.snapshot().canSaveCopy
+      && current.mapping.status === 'ready' && current.draft.candidate.patches.length > 0 });
   const inputReady = (state: InputSnapshot | undefined): void => {
     if (!state) return;
     if (state.phase !== 'idle' || !['idle', 'uncertain'].includes(state.draftPhase)) throw new Error('DOCUMENT_BUSY');
@@ -113,12 +120,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     if (saved.candidateHash !== outcome.expectedHash || saved.hasUnappliedInput) throw new Error('STALE_DOCUMENT_REVIEW');
     inputReady(saved); return saved;
   };
-  const commit = (next: OpenDocument | null, proof: InputSnapshot | null, operation: AbortController): OpenDocument | null => {
-    const check = (): void => {
-      live(operation);
-      if (current ? !proof || !sameInput(proof, current.input.snapshot()) : proof !== null) throw new Error('STALE_DOCUMENT_REVIEW');
-      inputReady(current?.input.snapshot());
-    };
+  const install = (next: OpenDocument | null, check: () => void): OpenDocument | null => {
     check();
     const previous = current;
     const nextSubscription = next ? next.onState(notify) : () => {};
@@ -135,19 +137,74 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (activationUncertain) throw new Error('DOCUMENT_ACTIVATION_UNKNOWN');
       throw error;
     }
-    unsubscribe(); current = next; unsubscribe = nextSubscription;
+    unsubscribe(); current = next; unsubscribe = nextSubscription; lastSave = null; retainedSave = null;
     phase = 'committing'; review = null; notify();
     return previous;
   };
+  const commit = (next: OpenDocument | null, proof: InputSnapshot | null, operation: AbortController): OpenDocument | null => install(next, () => {
+    live(operation);
+    if (current ? !proof || !sameInput(proof, current.input.snapshot()) : proof !== null) throw new Error('STALE_DOCUMENT_REVIEW');
+    inputReady(current?.input.snapshot());
+  });
   const finish = (): void => { pending = null; review = null; phase = disposed ? 'disposed' : 'idle'; notify(); };
   return Object.freeze({
     snapshot,
     get current() { return current; },
+    get retainedSave() { return retainedSave; },
     onState(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
     // Main-only authority revocation. It settles chooser/review waits, but never
     // disposes the current input or interrupts a file write already in progress.
     cancelPending(): void { pending?.abort(); },
     invalidateActivation(): void { activationUncertain = true; pending?.abort(); notify(); },
+    async save(expectedRevision: number, documentId: string): Promise<Readonly<{ status: WorkspaceSaveReport['status']; state: WorkspaceSnapshot }>> {
+      const leaving = current;
+      if (!leaving || leaving.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (!saveOriginal) throw new Error('SAVE_PLATFORM_UNSUPPORTED');
+      if (lastSave?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
+      const before = leaving.input.snapshot();
+      if (before.hasUnappliedInput) throw new Error(before.input?.composing ? 'INPUT_COMPOSING' : 'UNAPPLIED_INPUT');
+      const operation = begin(expectedRevision, 'saving');
+      let next: OpenDocument | null = null;
+      const report = (status: WorkspaceSaveReport['status'], code: string | null, cleanupPending = false, requiresReview = false): void => {
+        lastSave = Object.freeze({ documentId: current?.id ?? documentId, status, code, cleanupPending, requiresReview }); notify();
+      };
+      let status: WorkspaceSaveReport['status'];
+      try {
+        status = await (async (): Promise<WorkspaceSaveReport['status']> => {
+          if (!before.changes.length) { report('unchanged', null); return 'unchanged'; }
+          const result = await leaving.input.saveOriginal(before.stateRevision, (candidate) => saveOriginal(leaving.saveSource, candidate, operation.signal));
+          retainedSave = result;
+          if (result.status !== 'committed') {
+            report(result.status, result.code, result.cleanupPending, result.requiresReview);
+            return result.status;
+          }
+          // Disk commit outlives renderer authority. Reconcile in Main even after
+          // UI revocation; only workspace disposal can stop this new preview.
+          // Stay in saving while rebuilding; do not flash a recovery error.
+          lastSave = null; notify();
+          try {
+            if (disposed || pending !== operation || current !== leaving) throw new Error('SAVE_REBASE_REQUIRED');
+            rebuilding = new AbortController();
+            next = await prepare(outputRoot, leaving.preview.grant, ++generation, rebuilding.signal);
+            if (!result.verifySaved || !await result.verifySaved(next.saveSource)) throw new Error('SAVE_REBASE_REQUIRED');
+            const previous = install(next, () => {
+              if (disposed || activationUncertain || pending !== operation || current !== leaving || rebuilding?.signal.aborted
+                || next?.mapping.status !== 'ready'
+                || leaving.draft.candidate.resultHash !== result.expectedHash || leaving.input.snapshot().hasUnappliedInput) throw new Error('SAVE_REBASE_REQUIRED');
+            });
+            next = null;
+            report('saved', result.code, result.cleanupPending, result.cleanupPending);
+            await retire(previous);
+            return 'saved';
+          } catch {
+            retainedSave = result;
+            report('rebase-required', 'SAVE_REBASE_REQUIRED', result.cleanupPending, true);
+            return 'rebase-required';
+          }
+        })();
+      } finally { await retire(next); rebuilding = null; finish(); }
+      return { status, state: snapshot() };
+    },
     async open(expectedRevision: number, choose: (signal: AbortSignal) => Promise<ProjectSource | undefined>): Promise<WorkspaceOutcome> {
       const operation = begin(expectedRevision, 'choosing');
       let candidate: OpenDocument | null = null;
@@ -180,7 +237,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     // current/evidence references and prohibit a later result from committing.
     async dispose(): Promise<void> {
       if (disposed) return disposal;
-      disposed = true; pending?.abort(); unsubscribe(); phase = 'disposed'; notify();
+      disposed = true; pending?.abort(); rebuilding?.abort(); unsubscribe(); phase = 'disposed'; notify();
       disposal = retire(current).finally(() => { listeners.clear(); });
       return disposal;
     },

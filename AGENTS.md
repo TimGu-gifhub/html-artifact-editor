@@ -6,7 +6,7 @@ This is HTML Artifact Editor, a local-first visual text correction tool for exis
 
 Human-readable project documentation is primarily Simplified Chinese. Keep identifiers and API contracts concise in English. Do not copy private conversations, user paths or unrelated project data into this public repository.
 
-HAE-010 now has an unconnected Main/platform save transaction: private cooperative lock, verified backup/candidate, explicit Windows ReplaceFileW commit with result verification/journal and read-only restart inspection. Preparing/cancelling never replaces HTML; prepared is not saved. Commit failure/unknown retains evidence and blocks blind retry. Read docs/SAVE_PREPARATION.md before extending it. `npm run test:storage` executes real filesystem/native helper tests under Electron's bundled Node, without a page or app window. The Windows helper builds from C# source with the local .NET Framework compiler; never commit its executable or generated sidecars.
+HAE-010 connects its Main/platform save transaction to an optional Workspace save port and narrow trusted IPC: private cooperative lock, verified backup/candidate, explicit Windows ReplaceFileW commit, result journal and fresh baseline/mapping. The file version is captured at document open. Preparing/cancelling never replaces HTML; prepared is not saved. Failure/unknown or failed rebind retains evidence and blocks blind retry; cleanup warnings do not turn a verified save into failure. Read docs/SAVE_PREPARATION.md and docs/WORKSPACE_SESSION.md before extending it. `npm run test:storage` runs real filesystem/native helper tests under Electron's bundled Node; `npm run test:save-session` exercises the production transport in real Electron windows on Windows. Neither is normal product UI or recovery acceptance. The Windows helper builds from C# source with the local .NET Framework compiler; never commit its executable or generated sidecars.
 
 ## Invariants
 
@@ -49,7 +49,7 @@ python tools/check_docs.py
 git diff --check
 ```
 
-Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. Electron test:smoke/security/mapping/patch/draft/editor/workspace/session/project cover the experiments in docs/implementation/HAE-001.md through HAE-005.md and HAE-008.md. These do not substitute for native-dialog, overwrite transaction, platform or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
+Use the Node/npm versions in docs/DEVELOPMENT.md and Python 3.10+ for documentation checks. Electron test:smoke/security/mapping/patch/draft/editor/workspace/session/project/storage/save-session cover the experiments recorded under docs/implementation/. Windows save tests do not substitute for native-dialog, recovery, unavailable-platform or product acceptance. Avoid adding tests that merely mirror low-impact documentation edits.
 
 For core/file changes, required evidence includes byte preservation, entity/Unicode handling, rejected ambiguous targets, save conflict, failure and recovery tests. For UI changes, also provide executed interaction evidence; screenshots alone do not prove functionality.
 

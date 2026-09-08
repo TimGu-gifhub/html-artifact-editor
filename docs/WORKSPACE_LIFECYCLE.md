@@ -22,6 +22,8 @@
 
 选择另存后再取消文件选择器，会保留此前明确应用的草稿并留在旧窗口；不会写 HTML。原文件或已有文件不允许覆盖。failed/unknown 结果保留旧会话，unknown 还阻止打开其他文档，等待后续恢复处理。新副本不改变原入口保存点，不能称为完成 M2 的覆盖保存。
 
+HAE-010 另经 [统一窗口会话](WORKSPACE_SESSION.md) 提供显式原文件保存。保存和新基线重建期间拒绝 Open/Close 与重复保存；重建成功发布新文档，失败保留旧源/候选及磁盘事务证据。上面的离开确认仍只提供另存，不隐式调用覆盖保存，也不跳过恢复状态。
+
 ## 原生窗口与关闭
 
 [bindWorkspaceWindow](../src/main/workspace/window.ts) 在 close 事件中同步 preventDefault，再请求 Workspace 检查。等待期间的重复关闭共用一个决定；取消、组合态、忙碌、失败或未知结果都保持窗口。Workspace 完成 closed 后才销毁原生窗口。

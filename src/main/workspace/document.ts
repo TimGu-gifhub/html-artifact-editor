@@ -6,6 +6,7 @@ import { createProjectPreview } from '../preview/project-preview.ts';
 import { createPreviewMapping } from '../preview/source-mapping.ts';
 import type { ProjectSource } from '../protocol/project-files.ts';
 import type { ProjectSummary } from '../../contracts/resources.ts';
+import { openSaveSource } from '../../platform/save-source.ts';
 
 // The Main-native chooser supplies the path. Nothing is exposed to the UI until
 // preview, mapping, draft and the authorized new-file writer have all succeeded.
@@ -16,7 +17,9 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
   let input: ReturnType<typeof createInputController> | undefined;
   try {
     mapping = await createPreviewMapping(outputRoot, preview, signal);
+    const saveSource = await openSaveSource(entry, mapping.source.bytes);
     const writer = await createNewFileWriter(dirname(entry));
+    await saveSource.verify();
     signal.throwIfAborted();
     const draft = createDraftSession(outputRoot, mapping);
     input = createInputController(mapping, draft);
@@ -37,7 +40,7 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
       return () => { stopInput(); stopResources(); };
     };
     return Object.freeze({ id: preview.identity.sessionId, name: basename(entry), entry, project, onState,
-      preview, mapping, draft, input, writer, close });
+      preview, mapping, draft, input, writer, saveSource, close });
   } catch (error) {
     input?.close(); mapping?.close();
     await preview.close();

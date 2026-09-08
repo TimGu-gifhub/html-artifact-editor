@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的私有准备和 Windows 保存事务实验。
+日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建实验。
 
 ## 固定版本
 
@@ -60,6 +60,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:session` | 同一窗口的可信 IPC/文档身份/预览/关闭，挂载回滚、旧请求拒绝、UI 崩溃重连与未返回选择器撤销；不是产品控件验收 |
 | `npm run test:project` | 生产 preload/IPC 上的目录授权、嵌套资源、CSP/API 诊断、入口切换/另存/撤销及根目录替换；选择器仍为 Main 测试回调 |
 | `npm run test:storage` | Electron 内嵌 Node 执行真实文件准备、Windows 原生替换、权限/占用、提交故障及进程强杀；仅覆盖自制临时 HTML，无产品窗口 |
+| `npm run test:save-session` | Windows 真实 Electron 窗口、生产 IPC、原文件保存/重建、崩溃/未知结果/外部冲突/清理警告；无产品控件或真实 IME |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run preview:directory` | 原生选择根目录及其中 HTML，保留嵌套相对资源路径；只读校稿预览，诊断输出到终端 |
@@ -67,7 +68,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 许可证 |
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
@@ -92,6 +93,8 @@ HAE-008 的 `test:project` 增加 8 组真实目录资源/诊断/入口切换实
 HAE-010 第一阶段增加 10 项真实存储/进程测试，当时共 151 单元、59 源文件边界。`test:storage` 在 Electron 内嵌 Node 下重跑同一存储文件，必须有明确的测试计数且无失败/跳过；报告 `test-results/storage-runtime.json` 与日志记录真实版本。仅测试子进程使用 ELECTRON_RUN_AS_NODE，正常应用仍使用既有启动器。基线/备份/准备记录、六个真实强杀点、重启只读检查和保留限制见 [保存事务合同](SAVE_PREPARATION.md) 与 [HAE-010](implementation/HAE-010.md)；第一阶段没有覆盖能力。
 
 第二阶段将明确的 Main commit 连到 Windows ReplaceFileW 和 committed 日志，新增 11 项事务测试；当前完整门槛的版本/数量见 [HAE-010 阶段记录](implementation/HAE-010.md)。内嵌测试在 Windows 运行两份存储测试文件，并记录 nativeReplacement=included；其他 OS 仅运行准备测试且标为 unsupported。实际只读/ACL/占用、旧式及保护 DACL、命名数据流、四处 Main 强杀、结果未知与清理失败均单独断言；正常应用接线和恢复界面仍待完成。
+
+第三阶段的 `test:save-session` 用实际 Main 会话与生产 UI preload 接通保存，十组实验通过，包括连续保存后旧 ID 拒绝、清空节点、同文外部改写、保存中关闭保护、实际 renderer 崩溃和重建/清理故障。`test-results/save-session.json` 记录系统/运行时、源提交与工作区差异、结果和完整文件 hash。无控件测试页面不代表产品 UI，接口 composing 标志不代表实际 IME；此命令当前要求 Windows，其他平台明确拒绝。全量及最后定向回归的分开计数见 [HAE-010](implementation/HAE-010.md)。
 
 单文件原生选择器以 HTML 父目录为根；目录入口先明确授权根，再选择根内 HTML，切换入口保留原根身份。两种方式都不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 

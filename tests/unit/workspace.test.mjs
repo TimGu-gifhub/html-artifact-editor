@@ -51,6 +51,39 @@ function setup() {
   return { workspace, controls, docs, open, add(name) { const value = source(name); docs.set(name, value); return value; } };
 }
 
+test('saved bytes do not publish a new baseline when mapping is invalid before or during native activation', async () => {
+  for (const timing of ['prepared', 'verified', 'activated']) {
+    const previous = source('previous'); const next = source('next'); const resultHash = 'b'.repeat(64);
+    previous.preview = { grant: 'authorized-project' }; previous.saveSource = {};
+    previous.mapping = { status: 'ready' }; previous.draft = { candidate: { resultHash, patches: [{}] } };
+    next.saveSource = {}; next.mapping = { status: timing === 'prepared' ? 'invalidated' : 'ready' };
+    previous.input.saveOriginal = async (_revision, write) => {
+      const result = await write(previous.draft.candidate); previous.update({ draftPhase: 'uncertain' }); return result;
+    };
+    const outcome = { status: 'committed', code: null, transactionId: randomUUID(), expectedHash: resultHash,
+      cleanupPending: false, requiresReview: false, verifySaved: async () => {
+        if (timing === 'verified') next.mapping.status = 'invalidated'; return true;
+      } };
+    let mounted = null; let activations = 0; let rollbacks = 0;
+    const workspace = createWorkspace('test-output', {
+      review: async () => { assert.fail('no leave dialog during Save'); }, chooseCopy: async () => undefined,
+    }, async (_root, grant) => grant === 'first' ? previous : next, value => {
+      const old = mounted; mounted = value;
+      if (value === next) { activations++; if (timing === 'activated') next.mapping.status = 'invalidated'; }
+      return () => { mounted = old; rollbacks++; };
+    }, async () => outcome);
+    await workspace.open(workspace.snapshot().stateRevision, async () => 'first');
+    previous.update({ changes: [{ nodeId: 'n1', oldText: 'base', newText: 'saved' }], canSaveCopy: true });
+    const result = await workspace.save(workspace.snapshot().stateRevision, previous.id);
+    assert.equal(result.status, 'rebase-required'); assert.equal(result.state.lastSave.requiresReview, true);
+    assert.equal(workspace.current, previous); assert.equal(mounted, previous); assert.equal(previous.calls.closed, 0);
+    assert.equal(next.calls.closed, 1); assert.equal(workspace.retainedSave, outcome);
+    assert.equal(activations, timing === 'activated' ? 1 : 0); assert.equal(rollbacks, activations);
+    await assert.rejects(workspace.save(workspace.snapshot().stateRevision, previous.id), /DOCUMENT_RECOVERY_REQUIRED/);
+    await workspace.dispose();
+  }
+});
+
 test('leave decision is exact, explicit and tied to a bounded review identity', () => {
   const reviewId = randomUUID();
   for (const decision of ['cancel', 'discard', 'save-copy']) assert.ok(isLeaveDecision({ reviewId, decision }));

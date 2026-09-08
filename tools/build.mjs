@@ -24,6 +24,7 @@ const entries = {
   session: ['tests/session/main.ts', 'out/session'],
   'session-probe': ['tests/session/probe.ts', 'out/session/probe'],
   project: ['tests/project/main.ts', 'out/project'],
+  'save-session': ['tests/save-session/main.ts', 'out/save-session'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'native'];
 const requested = process.argv.slice(2);

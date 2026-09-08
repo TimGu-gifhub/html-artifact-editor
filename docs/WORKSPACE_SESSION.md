@@ -1,6 +1,6 @@
 # 统一窗口会话
 
-日期：2026-09-09；HAE-005 第五阶段，包含 HAE-008 的目录/诊断扩展。Main 已把文档管理、可信 IPC、原生预览挂载和关闭保护组装成一个服务，由真实 Electron 自动实验驱动。正常应用入口仍只读，尚无产品校稿控件、诊断面板或覆盖保存；原生目录/入口选择器适配器已提供，人工操作仍待验收。此阶段不是 M2 验收。
+日期：2026-09-09；HAE-005 第五阶段，包含 HAE-008 的目录/诊断与 HAE-010 的显式保存扩展。Main 已把文档管理、可信 IPC、原生预览挂载、Windows 保存与基线重建、关闭保护组装成一个服务，由真实 Electron 自动实验驱动。正常应用入口仍只读，尚无产品校稿控件、诊断面板或保存/恢复界面；原生目录/入口选择器适配器已提供，人工操作仍待验收。此阶段不是 M2 验收。
 
 ## 单一文档身份
 
@@ -14,12 +14,13 @@
 | `open(stateRevision)` | 按窗口状态版本请求 Main 文件选择器，完整准备后处理旧文档离开确认 |
 | `openDirectory(stateRevision)` | Main 先选择并固定根目录身份，再选择根内 HTML；取消任一步保持当前文档 |
 | `switchEntry(documentId, stateRevision)` | 只在操作所属 current 文档的既有根内选择入口，不能自动重新授权或接受 UI 路径 |
+| `save(documentId, stateRevision)` | Main 显式保存该文档已应用的候选，核验提交并重建基线；未应用输入/组合态拒绝，不隐式 Apply |
 | `edit(documentId, value)` | documentId 必须是该操作所属快照的 current.id；value 只允许 begin/change/apply/resolve/save-copy 的既有精确 schema |
 | `onState(listener)` | 返回取消订阅函数；先订阅再 read；最多 32 个订阅，通知只含纯状态 |
 
 documentId 必须随用户操作一起捕获，不能在迟到回调中自动换成新文件 ID。即便新旧文档恰有相同输入 revision，旧 ID 也会以 STALE_DOCUMENT 拒绝，不调用新文件的输入或选择器。编辑值仍须通过 [输入合同](../src/contracts/input.ts)；文件身份不能替代 Text 身份、editToken 和版本核验。
 
-返回 `{ok, code, state, documentId, copy, outcome}`：state 是窗口最新快照；documentId 说明本次 edit/switchEntry 的目标，copy 说明本次编辑请求，outcome 说明本次打开/目录打开/入口切换的 opened/cancelled。状态可能已前进到另一份文档，不能把旧 copy 成功提示到新文档。只有本次 copy.status=created 表示副本核验成功，原入口保存点不变。授权拒绝返回 RESOURCE_BLOCKED；未列入公开错误集的内部异常使用固定 WORKSPACE_COMMAND_FAILED，不泄漏路径或原始错误。
+返回 `{ok, code, state, documentId, copy, outcome}`：state 是窗口最新快照；documentId 说明本次 edit/switchEntry/save 的目标，copy 说明本次编辑请求；outcome 包含 opened/cancelled，以及保存的 saved/unchanged/rebase-required。保存成功后，返回的 documentId 仍是请求的旧目标，state.current.id 已是新基线文档。状态可能已前进，不能把旧请求结果提示到另一份文档。只有本次 copy.status=created 表示副本核验成功，原入口保存点不变。授权拒绝返回 RESOURCE_BLOCKED；未列入公开错误集的内部异常使用固定 WORKSPACE_COMMAND_FAILED，不泄漏路径或原始错误。
 
 `current.project` 是只读显示摘要：根目录名称、根内相对 entry 和有界 resources 诊断。诊断变化也推进 Workspace 状态版本并经 onState 发送。它不含本机绝对路径、目录身份或授权对象；entry/诊断 target 不能回传为文件操作参数。具体类型、脱敏和截断规则见 [目录资源合同](PROJECT_RESOURCES.md)。
 
@@ -31,13 +32,31 @@ documentId 必须随用户操作一起捕获，不能在迟到回调中自动换
 
 [PreviewHost](../src/platform/preview-host.ts) 拥有原生子视图附着关系；Workspace 拥有输入、预览内容和清理。新增视图、设置尺寸或移除旧视图失败时，先恢复旧视图再拒绝提交。成功挂载后若最终权限核验失败，调用回滚；旧输入、候选及文档 ID 不改变。原生缩放/回滚无法确定结果时，设置 cleanupPending 并阻止 Apply、Save、Open 和 Close，保留现场。Main 可保留晚到的 change 输入；当前没有用户可操作的视图故障恢复流程。
 
-打开/确认期间允许当前文档的晚到 change，使旧离开决定失效；begin/apply/resolve/save-copy 在 Workspace 非 idle 时拒绝。InputController 自身的 busy、组合态和版本约束继续有效。HAE-008 的目录打开/入口切换复用同一路径；编辑窗口内的交互预览切换仍待接入。
+打开/确认期间允许当前文档的晚到 change，使旧离开决定失效；begin/apply/resolve/save-copy 在 Workspace 非 idle 时拒绝。原文件保存及重建期间也拒绝 change，防止冻结候选之后接受新输入。InputController 自身的 busy、组合态和版本约束继续有效。HAE-008 的目录打开/入口切换复用同一路径；编辑窗口内的交互预览切换仍待接入。
 
 导航、重载、renderer 崩溃和销毁撤销连接，取消未提交的打开/确认等待，不销毁 Main 当前输入。未返回的另存选择器也可结束等待；迟到路径或异常被消费，不启动后续写入。已经开始的文件写入不因 UI 失效而中断或重试。
 
 `reloadUI()` 仅供 Main 在旧 bridge 已撤销后使用，固定加载应用 UI 并建立新连接。它恢复同一文档的 Main 状态，不自动 Apply、Save、放弃输入或清除 composing；前端仍须保存未确认的本地文字并处理真实 IME/焦点。Main 崩溃、系统强杀或断电不受此内存保留机制保障，持久化恢复属于 HAE-010。
 
-原生关闭复用 [文档与窗口生命周期](WORKSPACE_LIFECYCLE.md)，同一 current 上处理取消、放弃或明确另存后关闭。退出尚未具有覆盖保存、备份和 journal，不开放绕过恢复的强制关闭命令。
+原生关闭复用 [文档与窗口生命周期](WORKSPACE_LIFECYCLE.md)，同一 current 上处理取消、放弃或明确另存后关闭。覆盖保存进行中拒绝关闭；离开确认尚未提供覆盖保存选项，不开放绕过恢复的强制关闭命令。
+
+## 原文件保存与新基线
+
+Main 创建 [OriginalSaver](../src/main/storage/original.ts) 并通过会话的可选 saveOriginal 端口安装；没有此端口时 canSave=false，显式请求返回 SAVE_PLATFORM_UNSUPPORTED。打开文档时就捕获 [SaveSource](../src/platform/save-source.ts) 的字节、目录链、文件身份与时间戳，不能等到保存时才取版本。外部程序改写后恢复相同字节也必须报告 FILE_CHANGED。
+
+WorkspaceSnapshot 新增 canSave 和 lastSave。canSave 仅在有效映射、存在已应用净变更、没有未应用输入/组合态、窗口空闲且无待处理故障时为 true；它不替代 Main 执行时的版本核验。无净变化的 save 返回 unchanged，不创建私有记录、不写 HTML。lastSave 包含 documentId/status/code/cleanupPending/requiresReview，不包含路径、候选字节、事务方法或可复用写权限。
+
+| 保存状态 | 含义与后续限制 |
+| --- | --- |
+| saved | 新文件 hash/身份、committed 记录、新文档映射均核验通过；新草稿无净变更，旧文档/Text 身份失效 |
+| rebase-required | 磁盘事务已提交，但重建或挂载失败/发现外部改写；旧源、候选与 Main 事务引用保留，不能用旧偏移再次保存 |
+| failed | 已知失败，保留输入/候选；requiresReview 决定是否等待恢复，准备前冲突仍可继续编辑草稿 |
+| unknown | 无法确定提交结果，保留证据并阻止再次覆盖，不自动重试 |
+| cancelled / unchanged | 未开始替换，或没有净变更；不更新基线 |
+
+InputController 与 DraftSession 在整个文件操作期间互斥；已提交或未知的旧草稿进入保护状态，只有成功安装新文档才结束旧会话。重建沿用原 Main 项目授权，保留上级共享资源范围；重新解析与 Chromium 静态树映射后，再检查新源版本和 committed 记录，原生挂载前后均确认新映射仍为 ready。正常重建期间保持 saving，不先发布临时的恢复错误。清空文字后若 Text 消失，选择清空，不复用旧节点 ID；跨保存的逻辑操作历史/撤销仍属后续 HAE-011，当前新基线不提供该能力。
+
+已核验 saved 但锁/sidecar 清理失败时，命令仍为 ok=true、outcome=saved；lastSave 显示 cleanupPending 和警告，下一次覆盖等待恢复。UI 撤销若发生在准备阶段，Main 取消尚未开始的替换；若已经开始 commit，则继续核对磁盘和重建，即便原 renderer Promise 无法返回。重载后的 UI 读取 Main 当前状态，不触发第二次写盘。Main/系统强杀后的恢复仍需持久化流程，不能用 renderer 崩溃重连代替。
 
 ## 执行证据
 
@@ -47,4 +66,6 @@ documentId 必须随用户操作一起捕获，不能在迟到回调中自动换
 
 报告在忽略的 `test-results/session.json`，包含实际系统/Electron 版本、源提交加工作区差异标记、十组结果和五份完整文件 SHA-256。另有四项 Workspace 激活/回滚/连接撤销单元反例与一项窗口命令 schema 测试。完整范围见 [HAE-005](implementation/HAE-005.md)。原生选择器、维护者点击系统关闭按钮、真实 IME、独立报告和产品体验仍待验收。
 
-HAE-008 另用生产 preload/IPC 执行八组目录/共享资源/诊断/输入保护/副本重开/只读脚本/撤销/根替换检查，见 [阶段记录](implementation/HAE-008.md)。`haeWorkspace` 从上述第五阶段的四个方法扩展为六个；权限仍由 Main 保留的授权与文档身份决定。
+HAE-008 另用生产 preload/IPC 执行八组目录/共享资源/诊断/输入保护/副本重开/只读脚本/撤销/根替换检查，见 [阶段记录](implementation/HAE-008.md)。`haeWorkspace` 当时从四个方法扩展为六个；HAE-010 新增 save 后为七个，权限仍由 Main 保留的授权与文档身份决定。
+
+`npm run test:save-session` 已在 Windows 11 / Electron 44.2.0 执行十组真实窗口、生产 preload/IPC 和原生替换测试：连续保存/清空节点/项目根保留、组合态及未应用输入、保存互斥/关闭、打开后同文外部改写、准备时和替换后 renderer 崩溃、未知结果、原生挂载失败、提交后外部改写、提交后的清理警告。报告为忽略的 `test-results/save-session.json`；完整文件 hash、实际版本、限制和全量门槛见 [HAE-010](implementation/HAE-010.md)。测试的空白可信页面不是产品界面，composing 标志不是实际中文 IME 验收。

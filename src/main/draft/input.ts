@@ -4,6 +4,8 @@ import type { ActiveInput, InputPhase, InputSnapshot, InputVersion } from '../..
 import type { NewFileWriter } from '../../platform/new-file.ts';
 import type { PreviewMapping } from '../preview/source-mapping.ts';
 import type { DraftSession } from './session.ts';
+import type { OriginalSaveResult } from '../storage/original.ts';
+import type { PatchCandidate } from '../../core/patch/engine.ts';
 
 // Main owns pending input as data. This module renders no controls and grants no
 // renderer direct access; a future trusted UI bridge must validate its sender.
@@ -116,6 +118,13 @@ export function createInputController(mapping: PreviewMapping, draft: DraftSessi
       }
       phase = 'saving'; notify();
       try { return await draft.saveCopy(choose, writer); } finally { finish(); }
+    },
+    async saveOriginal(expectedStateRevision: number, write: (candidate: PatchCandidate) => Promise<OriginalSaveResult>) {
+      idle();
+      if (expectedStateRevision !== stateRevision) throw new Error('STALE_INPUT_STATE');
+      if (input) { notComposing(input); if (input.text !== input.appliedText) throw new Error('UNAPPLIED_INPUT'); }
+      phase = 'saving'; notify();
+      try { return await draft.saveOriginal(write); } finally { finish(); }
     },
     close(): void {
       if (closed) return;
