@@ -1,8 +1,10 @@
 import { posix } from 'node:path';
 import type { PreviewMode } from '../../contracts/preview.ts';
+import type { ResourceFailure } from '../../contracts/resources.ts';
 
 export class ResourceDenied extends Error {
-  constructor() { super('RESOURCE_BLOCKED'); }
+  readonly reason: ResourceFailure;
+  constructor(reason: ResourceFailure = 'RESOURCE_BLOCKED') { super('RESOURCE_BLOCKED'); this.reason = reason; }
 }
 
 const privateNames = new Set([

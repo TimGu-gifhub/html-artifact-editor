@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "lib": ["ES2023"], "types": ["node"] },
-  "include": ["src/main/**/*.ts", "src/platform/**/*.ts", "tests/smoke/**/*.ts", "tests/security/**/*.ts", "tests/mapping/**/*.ts", "tests/patch/**/*.ts", "tests/draft/**/*.ts", "tests/editor/main.ts", "tests/workspace/**/*.ts", "tests/session/main.ts", "tools/preview-main.ts"]
+  "include": ["src/main/**/*.ts", "src/platform/**/*.ts", "tests/smoke/**/*.ts", "tests/security/**/*.ts", "tests/mapping/**/*.ts", "tests/patch/**/*.ts", "tests/draft/**/*.ts", "tests/editor/main.ts", "tests/workspace/**/*.ts", "tests/session/main.ts", "tests/project/**/*.ts", "tools/preview-main.ts"]
 }

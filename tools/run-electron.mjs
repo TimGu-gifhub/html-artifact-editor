@@ -14,8 +14,9 @@ const kind = process.argv.includes('--smoke') ? 'smoke'
           : process.argv.includes('--editor') ? 'editor'
             : process.argv.includes('--workspace') ? 'workspace'
               : process.argv.includes('--session') ? 'session'
+                : process.argv.includes('--project') ? 'project'
     : process.argv.includes('--preview') ? 'preview-tool' : 'main';
-const smoke = ['smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session'].includes(kind);
+const smoke = ['smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project'].includes(kind);
 const entry = resolve(root, `out/${kind}/index.cjs`);
 if (!existsSync(entry)) throw new Error('Build output missing. Run npm run build first.');
 const reportPath = resolve(root, `test-results/${kind}.json`);
@@ -28,6 +29,7 @@ const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 const args = [kind === 'main' ? root : entry];
 if (kind === 'preview-tool' && process.argv.includes('--interactive')) args.push('--interactive');
+if (kind === 'preview-tool' && process.argv.includes('--directory')) args.push('--directory');
 const child = spawn(electron, args, { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
 const timeout = smoke ? setTimeout(() => {
   console.error(`Electron ${kind} exceeded 45 seconds.`);

@@ -1,4 +1,5 @@
 import type { InputSnapshot } from './input.ts';
+import type { ProjectSummary } from './resources.ts';
 
 export type WorkspacePhase = 'idle' | 'choosing' | 'opening' | 'reviewing' | 'saving' | 'committing' | 'disposed';
 export type LeaveReview = Readonly<{
@@ -8,7 +9,7 @@ export type LeaveReview = Readonly<{
 export type LeaveDecision = Readonly<{ reviewId: string; decision: 'cancel' | 'discard' | 'save-copy' }>;
 export type WorkspaceSnapshot = Readonly<{
   stateRevision: number; phase: WorkspacePhase;
-  current: Readonly<{ id: string; name: string; input: InputSnapshot }> | null;
+  current: Readonly<{ id: string; name: string; input: InputSnapshot; project: ProjectSummary }> | null;
   review: LeaveReview | null; cleanupPending: boolean;
 }>;
 export type WorkspaceOutcome = Readonly<{

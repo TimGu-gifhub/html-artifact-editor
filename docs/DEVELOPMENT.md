@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，以及 HAE-005 的草稿、可信 IPC、另存与文档/窗口关闭保护。
+日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，以及 HAE-008 的目录入口、共享资源与离线诊断。
 
 ## 固定版本
 
@@ -54,12 +54,15 @@ npm run dev
 | `npm run test:editor` | 真实 UI preload/IPC、来源/参数/重复请求拒绝、逐次另存结果、主框架导航与 renderer 崩溃保留；不含产品控件或真实 IME |
 | `npm run test:workspace` | 新文档完整准备后替换、旧输入保留、window.close 事件、另存后关闭、取消/失败/未知结果；选择和确认仍为测试回调 |
 | `npm run test:session` | 同一窗口的可信 IPC/文档身份/预览/关闭，挂载回滚、旧请求拒绝、UI 崩溃重连与未返回选择器撤销；不是产品控件验收 |
+| `npm run test:project` | 生产 preload/IPC 上的目录授权、嵌套资源、CSP/API 诊断、入口切换/另存/撤销及根目录替换；选择器仍为 Main 测试回调 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
+| `npm run preview:directory` | 原生选择根目录及其中 HTML，保留嵌套相对资源路径；只读校稿预览，诊断输出到终端 |
+| `npm run preview:directory:interactive` | 同上，允许本地脚本；CSP 阻断的在线 API 也进入诊断，无编辑/保存能力 |
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 许可证 |
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
@@ -79,7 +82,9 @@ HAE-004 增加纯核心内存 Patch 候选：64 KiB UTF-8 新文字、1,000 个�
 
 HAE-005 的 `test:draft` 执行 20 组草稿/输入/另存断言，`test:editor` 执行 9 组真实 IPC 与 renderer 失效检查，`test:workspace` 执行 7 组文档替换、window.close 和保存结果检查，`test:session` 执行 10 组统一窗口/文档身份/视图回滚/崩溃重连与原生 resize 故障检查。报告在 `test-results/draft.json`、`editor.json`、`workspace.json` 和 `session.json`，均记录实际版本与文件 hash；135 项单元检查包含真实文件故障、协议和异步离开/激活反例。composing 标志不代表真实 IME；未知新文件或视图结果保留现场，尚无恢复界面。正常 `dev` / `preview` 入口仍只读；见 [阶段记录](implementation/HAE-005.md)、[编辑器接口](EDITOR_BRIDGE.md)、[文档生命周期](WORKSPACE_LIFECYCLE.md) 与 [统一窗口会话](WORKSPACE_SESSION.md)。
 
-原生选择器选中的 HTML 及其父目录为授权范围，不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
+HAE-008 的 `test:project` 增加 8 组真实目录资源/诊断/入口切换实验与 6 项单元检查，当前共 141 单元、55 源文件边界。`test-results/project.json` 记录实际版本、八组结果、0 次回环 TCP 连接与七份完整文件 hash。文件/对话框选择由 Main 测试回调控制，诊断面板和人工对话框操作未验收；详见 [阶段记录](implementation/HAE-008.md)。
+
+单文件原生选择器以 HTML 父目录为根；目录入口先明确授权根，再选择根内 HTML，切换入口保留原根身份。两种方式都不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 
 | 类型 / 行为 | 当前规则 |
 | --- | --- |
@@ -89,9 +94,9 @@ HAE-005 的 `test:draft` 执行 20 组草稿/输入/另存断言，`test:editor`
 | 网络与嵌入 | HTTP(S)/WebSocket、localhost/LAN、远程资源、frame、worker、data/blob、媒体和对象均拒绝；当前不会还原依赖这些能力的页面 |
 | 私有文件 / 路径 | 隐藏路径、backups/recovery/drafts/credentials/secrets、node_modules、非白名单扩展名拒绝；符号链接、junction、硬链接、ADS、UNC/设备路径、DOS 别名、尾部点/空格、二次编码拒绝 |
 | 大小与预算 | 入口 5 MiB、单资源 16 MiB、同时读取最多 8 项、每代累计响应字节 128 MiB；15 秒启动保护。属于初始保护值，尚非性能验收结论 |
-| 诊断 | Main 内最多 100 条阻断记录，只保留协议/主机摘要，不保留 URL 路径、查询或凭据；产品诊断界面留到 HAE-008 |
+| 诊断 | Main 内最多 100 项按类型/脱敏目标去重，超过标记 truncated；缺失/CSP 阻断等原因可经可信 IPC 读取。保留远程协议/主机/路径或允许的项目相对路径，移除查询/凭据/fragment，不含本机绝对路径；产品面板仍待完成 |
 
-两种模式均为只读验证，退出不保存。若依赖项被拒绝，保持源文件不变；不自动下载、改写或扩大根目录。取消/失败的打开保留控制器原会话，成功切换创建新 session 并撤销旧权限。原生选择器人工操作、Windows 10/macOS、网络盘和云同步目录尚未验收。
+两种模式的开发入口均为只读验证，退出不保存。若依赖项被拒绝，保持源文件不变；不自动下载、改写或扩大根目录。取消/失败的打开保留控制器原会话，成功切换创建新 session 并撤销旧权限。编辑集成实验的目录切换另受 Workspace 输入/确认规则约束。诊断的 CSP 事件源和隐私边界见 [目录资源合同](PROJECT_RESOURCES.md)。原生选择器人工操作、Windows 10/macOS、网络盘和云同步目录尚未验收。
 
 `test-results/security.json` 记录本次 commit/工作区、运行版本、自制样例 SHA-256、10 组已执行断言与零网络连接结果；`security-proofread.png` / `security-interactive.png` / `security-preview.png` 是忽略的渲染截图。预览原生文件输入被取消、下载事件被 preventDefault，以及主/子 frame 保存调用无 handler 均有执行断言；输出中的两条 `No handler registered for 'hae:save'` 是预期负向证据。详见 [HAE-002 记录](implementation/HAE-002.md)。
 
@@ -101,7 +106,7 @@ HAE-005 的 `test:draft` 执行 20 组草稿/输入/另存断言，`test:editor`
 
 | 目标环境 | 执行方式 | 当前验证状态 |
 | --- | --- | --- |
-| Windows 11 x64 | 本机运行相同锁文件和固定工具链的检查 | 已有 HAE-001 至 HAE-005 后台集成阶段记录，不能代替产品验收 |
+| Windows 11 x64 | 本机运行相同锁文件和固定工具链的检查 | 已有 HAE-001 至 HAE-005 及 HAE-008 后台集成阶段记录，不能代替产品验收 |
 | Windows 10 x64 | 对应实机或隔离 VM 运行同一检查和验收 | 待验证，不能由 Windows 11 结果代替 |
 | macOS 13+ arm64 | Apple Silicon Mac 本地构建、检查与人工验收 | 当前没有 Mac 实测结果 |
 

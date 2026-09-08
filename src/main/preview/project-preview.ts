@@ -1,24 +1,29 @@
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { app, ipcMain, session, WebContentsView } from 'electron';
 import type { IpcMainEvent } from 'electron';
 import type { PreviewIdentity, PreviewMode, PreviewReady } from '../../contracts/preview.ts';
 import { PREVIEW_ARGUMENT, PREVIEW_READY_CHANNEL } from '../../contracts/preview.ts';
 import { authorizeProject } from '../protocol/project-files.ts';
+import type { ProjectSource } from '../protocol/project-files.ts';
 import { registerProjectProtocol } from '../protocol/project-protocol.ts';
 import { acceptsPreviewReady } from './authority.ts';
 import { installDocumentGuard, verifyDocumentGuard, lockContents, lockSession, securePreferences } from './security.ts';
+import { observeResourceFailures } from './resource-observer.ts';
 
 export async function createProjectPreview(
-  outputRoot: string, entryPath: string, mode: PreviewMode = 'proofread', generation = 1,
+  outputRoot: string, source: ProjectSource, mode: PreviewMode = 'proofread', generation = 1,
   signal: AbortSignal = new AbortController().signal,
 ) {
   if (!['proofread', 'interactive'].includes(mode) || !Number.isSafeInteger(generation) || generation <= 0) {
     throw new Error('INVALID_PREVIEW_IDENTITY');
   }
   signal.throwIfAborted();
-  const grant = await authorizeProject(entryPath, [app.getPath('userData'), app.getPath('sessionData')]);
+  // Additional roots are granted only by Main; even supplied grants are checked
+  // against private application state and their original directory identity.
+  const grant = await authorizeProject(typeof source === 'string' ? source : join(source.root, ...source.entry.split('/')),
+    [app.getPath('userData'), app.getPath('sessionData')], typeof source === 'string' ? undefined : source);
   signal.throwIfAborted();
   const identity: PreviewIdentity = Object.freeze({ version: 1, sessionId: randomUUID(), generation, mode });
   const previewSession = session.fromPartition(`hae-project-${identity.sessionId}`, { cache: false });
@@ -31,10 +36,12 @@ export async function createProjectPreview(
     additionalArguments: [`${PREVIEW_ARGUMENT}${JSON.stringify(identity)}`],
   } });
   const contents = view.webContents;
+  let stopDiagnostics = (): void => {};
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
     if (closing) return closing;
     resources.revoke(); // Synchronous revocation before any destruction/cleanup await.
+    stopDiagnostics();
     const destroyed = contents.isDestroyed() ? Promise.resolve() : once(contents, 'destroyed');
     if (!contents.isDestroyed()) contents.close({ waitForBeforeUnload: false });
     closing = (async () => {
@@ -55,6 +62,7 @@ export async function createProjectPreview(
     // No project HTML is loaded until the guard has been installed successfully.
     await contents.loadURL('about:blank');
     await installDocumentGuard(contents, resources.revoke);
+    stopDiagnostics = await observeResourceFailures(contents, identity.sessionId, resources.collector);
     signal.throwIfAborted();
     const ready = new Promise<PreviewReady>((resolveReady, reject) => {
       const cleanup = (): void => {
@@ -80,8 +88,9 @@ export async function createProjectPreview(
     signal.throwIfAborted();
     if (!resources.isActive()) throw new Error('PREVIEW_CLOSED');
     signal.removeEventListener('abort', abort);
-    return { view, contents, session: previewSession, identity, url: resources.url,
+    return { view, contents, session: previewSession, identity, grant, url: resources.url,
       acknowledgement, sourceBytes: resources.snapshot, diagnostics: resources.diagnostics,
+      diagnosticState: resources.diagnosticState, onDiagnostics: resources.onDiagnostics,
       isActive: resources.isActive, close };
   } catch (error) {
     await close();
@@ -99,7 +108,7 @@ export class PreviewController {
   #closed = false;
   constructor(readonly outputRoot: string) {}
 
-  async open(entryPath: string, mode: PreviewMode = 'proofread'): Promise<ProjectPreview> {
+  async open(entryPath: ProjectSource, mode: PreviewMode = 'proofread'): Promise<ProjectPreview> {
     if (this.#closed) throw new Error('PREVIEW_CLOSED');
     this.#pending?.abort();
     const pending = new AbortController();

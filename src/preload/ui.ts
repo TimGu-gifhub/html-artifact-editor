@@ -101,7 +101,7 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
   const failure = (code: string, documentId: string | null): WorkspaceResult =>
     ({ ok: false, code, state: latest, documentId, copy: null, outcome: null });
   const request = async (command: WorkspaceCommand): Promise<WorkspaceResult> => {
-    const documentId = command.kind === 'edit' ? command.documentId : null;
+    const documentId = command.kind === 'edit' || command.kind === 'switch-entry' ? command.documentId : null;
     if (!isWorkspaceCommand(command)) return failure('INVALID_WORKSPACE_REQUEST', documentId);
     const connected = await connect();
     if (!connected || sequence >= Number.MAX_SAFE_INTEGER) return failure('EDITOR_DISCONNECTED', documentId);
@@ -118,6 +118,8 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
   const api: WorkspaceAPI = Object.freeze({
     read: () => request({ kind: 'read' }),
     open: (stateRevision) => request({ kind: 'open', stateRevision }),
+    openDirectory: (stateRevision) => request({ kind: 'open-directory', stateRevision }),
+    switchEntry: (documentId, stateRevision) => request({ kind: 'switch-entry', documentId, stateRevision }),
     edit: (documentId, value) => request({ kind: 'edit', documentId, value }),
     onState: (listener) => {
       if (typeof listener !== 'function' || listeners.size >= 32) throw new Error('INVALID_EDITOR_LISTENER');

@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；正常应用入口及产品保存流程仍待实现。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md) 与 [HAE-005 阶段记录](docs/implementation/HAE-005.md)。
+状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；HAE-008 为其增加明确目录授权、入口切换和资源诊断。正常应用入口、产品面板及覆盖保存流程仍待实现。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md)、[HAE-005](docs/implementation/HAE-005.md) 与 [HAE-008](docs/implementation/HAE-008.md)。
 
 ## 1. 技术选型
 
@@ -117,7 +117,7 @@ React/TypeScript/Vite 版本已在 HAE-001 锁定，使用 Node 自带测试运�
 
 ### HAE-001 验证壳的具体边界
 
-`npm run dev` 保留构建时自带的验证壳，通过各 session 内的精确 URL → 内存内容映射返回资源。`editor://app/` 与随机 `artifact://…/` 分离。UI 桥只有只读启动信息；Preview 页面没有桥，preload 只报告固定启动诊断，Main 校验 sender、session、主 frame、完整源 URL 和 payload，收到后撤销该监听器。
+`npm run dev` 保留构建时自带的验证壳，通过各 session 内的精确 URL → 内存内容映射返回资源。`editor://app/` 与随机 `artifact://…/` 分离。该默认入口只安装只读启动服务，后续编辑/目录 preload 方法没有对应 Main handler；Preview 页面没有桥，preload 报告启动诊断，Main 校验 sender、session、主 frame、完整源 URL 和 payload，收到后撤销该监听器。
 
 Electron 44.2.0 本地实验中 `javascript: false` 阻止了 Preview preload 初始化。因此保留隔离 preload 所需的引擎，使用响应头 `script-src 'none'` 禁止校稿页脚本；不启用 bypassCSP，沙箱、上下文隔离和 webSecurity 全部开启。HAE-002 已验证原 CSP 叠加、脚本入口与子 frame 拒绝；HAE-003 采用 scriptingEnabled=true 并通过 noscript 对照，不能把 CSP 禁止执行等同于解析器 scriptingEnabled=false。
 
@@ -174,3 +174,9 @@ Main prepareDocument 先独立准备新预览、源映射、草稿、输入及 w
 WorkspaceSession 让同一 current 服务于可信 IPC、输入/草稿、PreviewHost 和原生关闭。窗口接口 read/open/edit/onState 使用持续递增的窗口状态版本；每个 edit 显式携带操作时的 documentId，旧文档请求不能命中新文档的同值 revision。共用 transport 保持来源、schema、连接 token 与重放检查，Preview 无权限。
 
 视图激活是提交前的同步端口，挂载/尺寸/移除失败恢复旧视图，最终权限核验后才发布新 current。回滚或原生 resize 状态无法确定时保留输入并阻止后续应用、保存、打开和关闭。UI 导航/崩溃撤销连接、取消未返回的确认/另存选择器；Main 可为同一文档重建固定 UI 页面，不清空输入或自动写盘。真实 Electron 十组实验已执行；真实界面、对话框和持久化恢复仍待实现，见 [统一窗口会话](docs/WORKSPACE_SESSION.md)。
+
+### HAE-008 第一段：目录授权与诊断
+
+Main DirectoryGrant 固定实际目录身份与私有路径排除；ProjectGrant 加入根内相对 HTML 入口。两步原生选择器产生 Main 授权，switchEntry 复用原根身份并重新核验路径链，不能因目录被替换而重新授权。该根只扩大允许的预览资源范围，另存 writer 仍限入口所在文件夹的新 HTML。Workspace 在完整准备后处理离开确认、视图提交和旧会话撤销，迟到目录答复不能创建新操作。
+
+有界资源诊断汇合协议、webRequest 及现有安全 CDP 连接的 Network/Audits 事件；CSP 拒绝的 fetch 即使没有 Network 请求事件仍可记录。只收集失败目标/类型/原因，URL 去除凭据/查询/fragment、本机路径隐藏，超限标记截断。诊断通过 current.project 和生产可信 IPC 传输，没有新增 Preview bridge、bypassCSP 或联网例外。事件观察失败即拒绝本次预览，升级 Electron 时需重新验证实验性 Audits 接口。八组真实目录实验已执行；产品诊断面板及人工对话框仍待验收，见 [目录资源合同](docs/PROJECT_RESOURCES.md)。

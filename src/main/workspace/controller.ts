@@ -3,6 +3,7 @@ import { isLeaveDecision } from '../../contracts/workspace.ts';
 import type { LeaveReview, WorkspaceOutcome, WorkspacePhase, WorkspaceSnapshot } from '../../contracts/workspace.ts';
 import type { InputSnapshot } from '../../contracts/input.ts';
 import type { OpenDocument, prepareDocument } from './document.ts';
+import type { ProjectSource } from '../protocol/project-files.ts';
 
 export type WorkspaceDecisions = Readonly<{
   review: (value: LeaveReview) => Promise<unknown>;
@@ -33,7 +34,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     for (const listener of listeners) { try { listener(); } catch { /* State is owned by Main. */ } }
   };
   const snapshot = (): WorkspaceSnapshot => Object.freeze({ stateRevision: revision, phase,
-    current: current ? Object.freeze({ id: current.id, name: current.name, input: current.input.snapshot() }) : null,
+    current: current ? Object.freeze({ id: current.id, name: current.name, input: current.input.snapshot(), project: current.project() }) : null,
     review, cleanupPending: activationUncertain || failedCleanup.size > 0 });
   const inputReady = (state: InputSnapshot | undefined): void => {
     if (!state) return;
@@ -120,7 +121,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     };
     check();
     const previous = current;
-    const nextSubscription = next ? next.input.onState(notify) : () => {};
+    const nextSubscription = next ? next.onState(notify) : () => {};
     let rollback: (() => void) | undefined;
     try {
       rollback = activate(next, previous);
@@ -147,12 +148,12 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     // disposes the current input or interrupts a file write already in progress.
     cancelPending(): void { pending?.abort(); },
     invalidateActivation(): void { activationUncertain = true; pending?.abort(); notify(); },
-    async open(expectedRevision: number, choose: () => Promise<string | undefined>): Promise<WorkspaceOutcome> {
+    async open(expectedRevision: number, choose: (signal: AbortSignal) => Promise<ProjectSource | undefined>): Promise<WorkspaceOutcome> {
       const operation = begin(expectedRevision, 'choosing');
       let candidate: OpenDocument | null = null;
       let status: WorkspaceOutcome['status'] = 'cancelled';
       try {
-        const path = await ask(operation, choose); live(operation);
+        const path = await ask(operation, () => choose(operation.signal)); live(operation);
         if (path) {
           phase = 'opening'; notify();
           candidate = await prepare(outputRoot, path, ++generation, operation.signal); live(operation);

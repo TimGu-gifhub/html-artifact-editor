@@ -114,7 +114,7 @@ async function run(): Promise<void> {
   try {
     await ui.loadURL(EDITOR_URL);
     assert.equal((await read()).current, null); assert.equal(runtime.connected, true);
-    assert.deepEqual(await ui.webContents.executeJavaScript('Object.keys(haeWorkspace).sort()'), ['edit', 'onState', 'open', 'read']);
+    assert.deepEqual(await ui.webContents.executeJavaScript('Object.keys(haeWorkspace).sort()'), ['edit', 'onState', 'open', 'openDirectory', 'read', 'switchEntry']);
     assert.deepEqual(await ui.webContents.executeJavaScript('[typeof require,typeof process,typeof ipcRenderer,typeof Buffer]'), Array(4).fill('undefined'));
     assert.equal((await open()).outcome, 'cancelled'); assert.equal(runtime.workspace.current, null);
     assert.equal(await ui.webContents.executeJavaScript('haeWorkspace.open(NaN).then(r=>r.code)'), 'INVALID_WORKSPACE_REQUEST');
@@ -123,7 +123,7 @@ async function run(): Promise<void> {
     await peer.loadURL(EDITOR_URL);
     assert.equal(await peer.webContents.executeJavaScript('haeWorkspace.read().then(r=>r.code)'), 'EDITOR_DISCONNECTED');
     peer.destroy();
-    pass('one selected trusted window exposes four bounded workspace methods; empty/cancelled open has no document and same-session peer cannot call the scoped handler');
+    pass('one selected trusted window exposes six bounded workspace methods; empty/cancelled open has no document and same-session peer cannot call the scoped handler');
 
     choose = async () => entry;
     assert.equal((await open()).outcome, 'opened');

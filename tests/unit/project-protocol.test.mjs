@@ -74,11 +74,27 @@ test('revoking while a verified handle is reading prevents the response from ret
     assert.deepEqual(await f.network({ url: protocol.url, method: 'GET', resourceType: 'mainFrame' }), { cancel: true });
   } finally { release(); fs.open = originalOpen; syncBuiltinESMExports(); }
 });
-test('denial diagnostics are bounded and omit paths, credentials and query contents', async (t) => {
+test('denial diagnostics identify remote URL/type, remain bounded and omit credentials/query/fragment', async (t) => {
   const f = await fixture(t);
   const protocol = await registerProjectProtocol(f.session, f.grant, identity);
-  for (let i = 0; i < 150; i++) await f.network({ url: 'https://user:password@example.invalid/private?secret=value', method: 'GET', resourceType: 'xhr' });
+  for (let i = 0; i < 150; i++) await f.network({ url: `https://user:password@example.invalid/resource-${i}?secret=value#private`, method: 'GET', resourceType: 'xhr' });
   assert.equal(protocol.diagnostics().length, 100);
-  assert.ok(protocol.diagnostics().every(({ target }) => target === 'https://example.invalid'));
+  assert.equal(protocol.diagnosticState().truncated, true);
+  assert.ok(protocol.diagnostics().every(({ target, resourceType }) => /^https:\/\/example.invalid\/resource-\d+$/u.test(target) && resourceType === 'fetch'));
+  assert.ok(!JSON.stringify(protocol.diagnosticState()).includes('secret'));
   protocol.revoke();
+});
+
+test('missing local resources have display-only project paths and detailed Main reasons; denied responses stay opaque', async (t) => {
+  const f = await fixture(t);
+  const protocol = await registerProjectProtocol(f.session, f.grant, identity);
+  let events = 0; protocol.onDiagnostics(() => { events++; });
+  const response = await f.handle(new Request(`artifact://${identity.sessionId}/missing.css?private=value`));
+  assert.equal(response.status, 403); assert.equal(await response.text(), '');
+  assert.deepEqual(protocol.diagnostics().map(({ target, resourceType, reason }) => ({ target, resourceType, reason })),
+    [{ target: 'project:/missing.css', resourceType: 'stylesheet', reason: 'RESOURCE_MISSING' }]);
+  await f.network({ url: 'file:///C:/private/settings.css?secret=x', method: 'GET', resourceType: 'stylesheet' });
+  assert.equal(protocol.diagnostics()[1].target, 'file:[blocked]');
+  protocol.revoke(); const before = events;
+  protocol.reportBlocked('https://after.invalid'); assert.equal(events, before);
 });

@@ -4,7 +4,7 @@
 
 ## 打开与替换
 
-[prepareDocument](../src/main/workspace/document.ts) 接受 Main 选择器提供的路径，在独立会话中完成预览、映射检查、草稿、输入控制器和授权 writer 的初始化。任何一步失败都会关闭这个候选，不能先关闭当前编辑页。源映射检查拒绝的内容仍按现有只读规则处理，不因打开流程扩大支持范围。
+[prepareDocument](../src/main/workspace/document.ts) 接受 Main 选择器提供的路径，或 Main 已核验并保留根身份的项目授权，在独立会话中完成预览、映射检查、草稿、输入控制器和授权 writer 的初始化。任何一步失败都会关闭这个候选，不能先关闭当前编辑页。源映射检查拒绝的内容仍按现有只读规则处理，不因打开流程扩大支持范围。
 
 [Workspace](../src/main/workspace/controller.ts) 一次处理一个打开或关闭请求，持有递增状态版本。打开前检查版本、组合态、正在进行的应用/保存和未知结果；不符合条件就不打开选择器。取消选择不分配候选。新文档准备完成后，若旧文档有未应用输入或净变更，再发出离开确认。
 
@@ -32,7 +32,7 @@ dispose 仅用于进程/测试的强制清理，保留当前对象引用并取�
 
 纯类型与确认 schema 在 [workspace.ts](../src/contracts/workspace.ts)。Main 使用 open(expectedRevision, chooser)、requestClose(expectedRevision)、snapshot/onState；路径和选择器函数均留在 Main，不进入纯状态。review 与 chooseCopy 回调由后续应用层实现，真实 UI 仍须先同步未应用输入、结束 IME，并按当前 revision 作出决定。
 
-该阶段仅协调静态校稿文档的打开/关闭；第五阶段已验证 Main 重建失效 UI bridge 和视图挂载回滚，JS 模式切换、目录选择、资源诊断面板与用户操作入口仍待实现。不得直接用只读 PreviewController 替换正在编辑的文档；其预览成功即销毁旧页的语义不足以保护后续映射初始化。
+该阶段仅协调静态校稿文档的打开/关闭；第五阶段已验证 Main 重建失效 UI bridge 和视图挂载回滚。HAE-008 已加入 [目录授权、入口切换和诊断状态](PROJECT_RESOURCES.md)，复用相同准备/确认/激活规则；JS 模式切换、资源诊断面板与产品操作入口仍待实现。不得直接用只读 PreviewController 替换正在编辑的文档；其预览成功即销毁旧页的语义不足以保护后续映射初始化。
 
 ## 验证范围
 
