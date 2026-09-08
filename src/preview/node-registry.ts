@@ -2,13 +2,17 @@ import { HTML_NAMESPACE, MAX_TREE_DEPTH, MAX_TREE_NODES, orderedAttributes } fro
 import type { SourceTree, TreeNode } from '../contracts/source-tree.ts';
 import type { MappingApply, MappingApplyResult, MappingCheck, MappingEvent, MappingFailure, MappingIdentity } from '../contracts/mapping.ts';
 import { sameMapping } from '../contracts/mapping.ts';
+import type { MappingEditIntent, MappingEditRequest, MappingEditResult } from '../contracts/edit-guard.ts';
 
 // Called only from the isolated preload. There is no page-world bridge or marker.
 export function createNodeRegistry(root: Document, identity: MappingIdentity, expected: SourceTree,
-  emit: (event: MappingEvent) => void) {
+  emit: (event: MappingEvent) => void, emitIntent: (intent: MappingEditIntent) => void = () => {}) {
   let revision = 0;
   let active = true;
   let selected: string | null = null;
+  let editToken: string | null = null;
+  let intentSequence = 0;
+  let intent: MappingEditIntent | null = null;
   const byObject = new WeakMap<Text, string>();
   const byId = new Map<string, Text>();
   const valueById = new Map<string, string>();
@@ -17,6 +21,7 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
     if (!active) return;
     active = false;
     selected = null;
+    editToken = null; intent = null;
     observer.disconnect();
     byId.clear(); valueById.clear();
     root.removeEventListener('click', onClick, true);
@@ -29,6 +34,13 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
   };
   const select = (value: string | null): void => {
     if (!drain()) return;
+    if (editToken) {
+      // Keep the current edit owner until trusted UI resolves its input. Native
+      // clicks can propose a target, but cannot move that owner's authority.
+      if ((value === selected && !intent) || intent?.nodeId === value) return;
+      intent = Object.freeze({ identity, editToken, sequence: ++intentSequence, nodeId: value });
+      emitIntent(intent); return;
+    }
     selected = value;
     emit({ identity, kind: 'selection', revision: ++revision, nodeId: value });
   };
@@ -114,13 +126,38 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
     }
   } catch { invalidate('UNSUPPORTED_DOM'); }
   const check = (request: MappingCheck): boolean => {
-      if (!drain() || crossesText() || !sameMapping(request.identity, identity) || request.revision !== revision || request.nodeId !== selected) return false;
+      if (!drain() || (!editToken && crossesText()) || !sameMapping(request.identity, identity) || request.revision !== revision || request.nodeId !== selected) return false;
       const node = byId.get(request.nodeId);
       return !!node && node.isConnected && node.getRootNode() === root && byObject.get(node) === request.nodeId
         && node.data === valueById.get(request.nodeId) && !hasGeneratedContent(node);
   };
   return {
     check,
+    edit(request: MappingEditRequest): MappingEditResult {
+      const result = (accepted: boolean): MappingEditResult => ({
+        identity, requestId: request.requestId, nodeId: request.nodeId, revision: request.revision,
+        kind: request.kind, accepted, editToken, nextRevision: revision, nextNodeId: selected,
+      });
+      if (!check(request)) return result(false);
+      if (request.kind === 'begin') {
+        if (editToken) return result(false);
+        editToken = request.requestId; intent = null;
+        return result(true);
+      }
+      if (!editToken || request.editToken !== editToken || request.intentSequence !== (intent?.sequence ?? null)) return result(false);
+      if (request.decision === 'stay') { intent = null; return result(true); }
+      if (request.decision === 'accept') {
+        if (!intent) return result(false);
+        if (intent.nodeId !== null) {
+          const next = byId.get(intent.nodeId);
+          if (!next || !next.isConnected || next.getRootNode() !== root || byObject.get(next) !== intent.nodeId
+            || next.data !== valueById.get(intent.nodeId) || hasGeneratedContent(next)) return result(false);
+        }
+        selected = intent.nodeId;
+      }
+      editToken = null; intent = null; ++revision;
+      return result(true);
+    },
     apply(request: MappingApply): MappingApplyResult {
       const result = (outcome: MappingApplyResult['outcome']): MappingApplyResult => ({
         identity, requestId: request.requestId, nodeId: request.nodeId, revision: request.revision,

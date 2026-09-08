@@ -74,6 +74,8 @@ HAE-003 必须构造失败样例，验证“拒绝不确定定位”是否工作
 
 `validateSelection` 仅证明请求执行时的选择/对象状态，不是可跨异步步骤复用的写租约。HAE-005 第一段的 `applyText` 在 Main worker 验证完整候选后，要求隔离 registry 同步核对身份、当前选择版本、对象和旧值，再更新 Text.data。观察器始终连接，预先排空外部记录，赋值后只消费本次唯一的目标 characterData 记录。没有页面 bridge 或 registry 写盘方法；未知结果保留前后候选并禁止重试，见 [阶段记录](implementation/HAE-005.md)。
 
+第二段增加编辑目标固定：`beginEditing` 必须先通过当前选择核验并取得隔离 registry 确认，Main 才创建输入记录。持有 token 时原生点击只产生带递增 sequence 的目标切换意图，编辑器选择仍指向原 Text。应用继续同步核验这个对象、旧值和当前 revision；接受新目标必须显式结束 token 并匹配最新意图。浏览器跨节点选区可成为只读的待切换目标，不能把跨节点文字当成写范围。目标变化不自动迁移未应用输入，失效或确认丢失保留数据，详见 [编辑合同](../src/contracts/edit-guard.ts)。
+
 ### JS 交互预览
 
 首版 JS 模式只读。MutationObserver 和文字相等不能单独证明原文来源；观察器看不到完整脚本所有权，重新渲染会更换对象，脚本可以生成与源码相同的文本。动态页可写需单独的源关联、生命周期、重载后持久性证明；本计划不假设该问题已解决。
@@ -129,6 +131,8 @@ Main 从权威索引生成 TextPatch，并重新校验上下文、范围、旧�
 HAE-004 的实际纯核心入口为 [createPatchEngine / buildPatchCandidate](../src/core/patch/engine.ts)。上面的 ApplyTextDraft 是规划形式；HAE-005 第一段实际 Main 命令为精确三个字段的 `DraftApply { selection: MappingSelection, draftRevision, newText }`，其 selection 包含完整映射身份、revision 和 nodeId。核心 `TextChange` 精确包含 `identity`、`baseHash`、`nodeId`、`expectedText` 和 `newText`。其中 expectedText 是当前内存候选文字，用来拒绝过期输入；TextPatch.expectedText 则始终是原始基线的解码文字。Main 验证选择版本/来源，从自身状态获取旧值，不能直接向页面开放核心 API。
 
 engine 初始重新解析并核对源索引；apply 在全部候选校验成功后才更新内存状态。无变化返回原候选，同节点改回基线文字移除净 Patch 并保留原实体拼写。失败保留上一候选。`PatchCandidate` 包含冻结身份、baseHash/resultHash、只读 patches 与返回副本的 bytes；没有文件 I/O、DOM 操作、历史或保存点。限制为每节点 64 KiB UTF-8 新文字、1,000 个净 Patch 和 5 MiB 输出，替换字节总预算也受限。后续交互接入应在可取消任务中运行这些同步核心计算。
+
+HAE-005 的 [Main InputController](../src/main/draft/input.ts) 单独保存未应用文本、composing、输入 revision 与已应用值。输入更新不产生 Patch；Apply/取消/处理切换请求绑定 editToken 和输入版本。composing=true 时拒绝应用、放弃输入及另存；尚未应用的文字也阻止打开保存选择器。校验失败保持原输入；确认已应用后再接受目标意图，新意图使旧确认失效。纯数据 [InputSnapshot](../src/contracts/input.ts) 可供后续可信 UI bridge 使用，当前没有 renderer 文件权限或实际 UI 输入法事件接线。
 
 ## 6. 结果构造与验证
 

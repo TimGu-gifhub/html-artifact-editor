@@ -2,7 +2,7 @@
 
 ## Current scope
 
-This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001/002 add the toolchain and read-only project previews; HAE-003/004 verify static mapping and byte patches. The first HAE-005 slice connects Main-owned drafts, isolated live Text changes and exclusive new-file copies in an automated experiment. The normal app still has no product editing UI, overwrite saving or recovery. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
+This is HTML Artifact Editor, a local-first visual text correction tool for existing HTML. HAE-001/002 add the toolchain and read-only project previews; HAE-003/004 verify static mapping and byte patches. HAE-005 experiments connect Main-owned drafts, isolated Text changes, exclusive new-file copies, editing ownership and pending input state. The normal app still has no product editing UI, overwrite saving or recovery. Read README.md, PRD.md, ARCHITECTURE.md, docs/PATCH_SPEC.md and the target Issue before implementation.
 
 Human-readable project documentation is primarily Simplified Chinese. Keep identifiers and API contracts concise in English. Do not copy private conversations, user paths or unrelated project data into this public repository.
 

@@ -150,3 +150,9 @@ DOMContentLoaded 后即观察变化，takeRecords 防止同一任务里的变更
 Main 的 DraftSession 独占调度准备、应用和另存；输入只含选择身份/版本、草稿版本与新文字。后台 worker 重新核验旧净 Patch 和当前结果，再生成新候选。隔离 registry 同步检查和 Text.data 赋值，保持观察器连接，只消费本次目标唯一的 characterData 记录。Main 收到精确来源和版本的确认后才发布候选；丢失确认时保留前后版本并停止重试。
 
 新文件平台适配器只接受授权目录中的新 HTML 兄弟文件，O_EXCL 保证不截断已有文件。写入使用冻结候选和保留句柄，经 flush、回读 hash、目录链及文件身份核验后返回 created；创建后异常保留文件并返回 unknown。该副本不改变原入口保存点，也没有覆盖备份/journal。自动实验及独立 Edge 复核已执行，可信 UI 接线、真实对话框和恢复仍待实现，见 [阶段记录](docs/implementation/HAE-005.md)。
+
+### HAE-005 第二段：编辑目标与未应用输入
+
+beginEditing 在隔离 registry 核验当前选择后建立 token，目标固定到原 Text；后续原生点击仅发回递增 sequence 的切换意图。Main 要求匹配最新意图才能释放或接受新目标，失效/确认丢失撤销编辑权限。应用仍同步核验原对象、旧值和 revision，不能把浏览器的新选区作为旧输入的目标。
+
+Main InputController 持有未应用文本、composing、输入版本与已应用值；begin/change/apply/resolve/saveCopy 输出纯 InputSnapshot，不暴露文件路径或字节范围。组合态阻止应用级动作，过期和忙碌请求拒绝，失败保留输入；当前只接入自动实验，UI bridge 和真实输入法事件仍待前端阶段。原生窗口关闭保护、历史及持久化恢复不由这个内存控制器代替。

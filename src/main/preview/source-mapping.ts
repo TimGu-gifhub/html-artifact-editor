@@ -6,6 +6,7 @@ import type { MappingApply, MappingApplyOutcome, MappingCheck, MappingEvent, Map
 import { parseSource } from '../parser/parse-source.ts';
 import { acceptsPreviewSender } from './authority.ts';
 import type { ProjectPreview } from './project-preview.ts';
+import { createEditGuard } from './edit-guard.ts';
 
 const installed = new WeakSet<object>();
 
@@ -36,12 +37,14 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
   const listeners = new Set<(event: MappingEvent) => void>();
   const checks = new Map<string, { request: MappingCheck; finish: (valid: boolean) => void }>();
   let mutation: { request: MappingApply; finish: (outcome: MappingApplyOutcome) => void } | undefined;
+  let editGuard: ReturnType<typeof createEditGuard> | undefined;
   let finishBinding: () => void = () => {};
   const bound = new Promise<void>((resolveBound) => { finishBinding = resolveBound; });
   const fail = (failure: string): void => {
     status = 'invalidated'; reason = failure; selection = null;
     for (const pending of checks.values()) pending.finish(false);
     mutation?.finish('unknown');
+    editGuard?.reset();
     finishBinding();
   };
   const active = (): boolean => preview.isActive() && !preview.contents.isDestroyed() && !signal.aborted && status !== 'closed';
@@ -86,6 +89,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
   const close = (): void => {
     if (status === 'closed') return;
     fail('CLOSED'); status = 'closed';
+    editGuard?.close();
     clearTimeout(timeout);
     listeners.clear();
     ipcMain.removeListener(MAPPING_EVENT, onEvent);
@@ -97,6 +101,17 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     catch { /* A gone renderer cannot receive revocation; Main cleanup is already complete. */ }
   };
   const timeout = setTimeout(() => fail('MAPPING_BIND_TIMEOUT'), 3000);
+  editGuard = createEditGuard(preview, identity, {
+    ready: () => active() && status === 'ready', mutating: () => !!mutation,
+    knownId: (nodeId) => editableIds.has(nodeId),
+    selection: () => selection, revision: () => revision, fail,
+    transition: (nodeId, nextRevision) => {
+      if (nodeId !== null && !editableIds.has(nodeId)) { fail('EDIT_STATE_UNKNOWN'); return; }
+      revision = nextRevision;
+      selection = nodeId === null ? null : Object.freeze({ identity, revision, nodeId });
+      for (const listener of listeners) listener({ kind: 'selection', identity, revision, nodeId });
+    },
+  });
   ipcMain.on(MAPPING_EVENT, onEvent);
   ipcMain.on(MAPPING_CHECK_RESULT, onCheck);
   ipcMain.on(MAPPING_APPLY_RESULT, onApply);
@@ -112,6 +127,8 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     get status() { return status; },
     get reason() { return reason; },
     get selection(): MappingSelection | null { return active() && status === 'ready' ? selection : null; },
+    get editing() { return editGuard!.state; },
+    beginEditing: editGuard.begin, finishEditing: editGuard.finish, onEditState: editGuard.onState,
     onEvent(listener: (event: MappingEvent) => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
     // A point-in-time identity check, not a write lease. applyText performs its own
     // synchronous registry check after Main has prepared a verified byte candidate.
@@ -128,7 +145,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     },
     applyText(candidate: MappingSelection, expectedText: string, newText: string): Promise<MappingApplyOutcome> {
       const request = Object.freeze({ ...candidate, requestId: randomUUID(), expectedText, newText });
-      if (!active() || status !== 'ready' || mutation || !isMappingApply(request) || !sameMapping(candidate.identity, identity)
+      if (!active() || status !== 'ready' || mutation || editGuard?.busy || !isMappingApply(request) || !sameMapping(candidate.identity, identity)
         || candidate.nodeId !== selection?.nodeId || candidate.revision !== selection.revision) return Promise.resolve('rejected');
       return new Promise((resolveApply) => {
         const deadline = setTimeout(() => fail('DRAFT_OUTCOME_UNKNOWN'), 2000);
