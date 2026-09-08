@@ -51,7 +51,7 @@ AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日�
 
 ## 参与项目
 
-从 [GitHub Issues](https://github.com/TimGu-gifhub/html-artifact-editor/issues) 或 [本地任务清单](docs/BACKLOG.md) 领取一个边界清晰的任务。提交前阅读 [贡献指南](CONTRIBUTING.md)；AI 开发工具还需阅读 [AGENTS.md](AGENTS.md)。
+已建立 [5 个里程碑](https://github.com/TimGu-gifhub/html-artifact-editor/milestones) 和 [20 个实施 Issues](https://github.com/TimGu-gifhub/html-artifact-editor/issues)。从 [本地任务清单](docs/BACKLOG.md) 选择一个依赖已满足的任务；首次实施从 [HAE-001](https://github.com/TimGu-gifhub/html-artifact-editor/issues/1) 开始。提交前阅读 [贡献指南](CONTRIBUTING.md)；AI 开发工具还需阅读 [AGENTS.md](AGENTS.md)。
 
 当前仓库可运行的检查只有文档与任务完整性检查，需 Python 3.10+：
 
@@ -59,7 +59,7 @@ AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日�
 python tools/check_docs.py
 ```
 
-应用启动、构建和测试命令将在 HAE-001 完成后加入；此时没有 `npm start` 或桌面程序可运行。
+应用启动、构建和测试命令将在 HAE-001 完成后加入；此时没有 `npm start` 或桌面程序可运行。[GitHub 文档检查](https://github.com/TimGu-gifhub/html-artifact-editor/actions/workflows/docs.yml) 仅验证文档和任务完整性。
 
 ## License
 

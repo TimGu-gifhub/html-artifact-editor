@@ -103,6 +103,8 @@ HTTP(S)、WebSocket、远程字体、在线 API、`file://`、外部协议、表
 
 每个文件只允许一个保存事务；保存时冻结提交快照并暂时禁止新编辑，页面仍可滚动。外部监听只是提示，保存前必须重新读取和校验磁盘。应用内多窗口/多进程写入需协调锁；对不合作的外部写入者仍有文件系统竞态，不能把 read-hash-rename 宣称为完整 CAS。
 
+大文档解析与 Diff 计算应放入有资源上限、可超时终止的工作线程，避免阻塞主进程；只传入冻结字节与纯核心参数，不执行页面脚本。工作线程用于计算隔离和取消，不等同于浏览器权限沙箱。预览无响应时 Main 能销毁该 WebContentsView 并保留编辑草稿。
+
 结构化错误码至少包含 `UNSUPPORTED_ENCODING`、`UNMAPPABLE_NODE`、`STALE_SELECTION`、`FILE_CHANGED`、`BACKUP_FAILED`、`WRITE_FAILED`、`SAVE_OUTCOME_UNKNOWN`、`RESOURCE_BLOCKED`。面向用户的短提示和动作见交互文档；日志默认不包含完整页面文字或绝对路径。
 
 ## 6. 验证和待决策项

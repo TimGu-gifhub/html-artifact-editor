@@ -8,26 +8,26 @@
 
 | ID | 任务 | 里程碑 | 优先级 | 依赖 | GitHub |
 | --- | --- | --- | --- | --- | --- |
-| HAE-001 | 初始化 Electron 工具链与模块边界 | M1 | P0 | 无 | 待创建 |
-| HAE-002 | 实现隔离预览、项目资源协议与离线策略 | M1 | P0 | HAE-001 | 待创建 |
-| HAE-003 | 验证静态 DOM 到源码文本的唯一映射 | M1 | P0 | HAE-001、HAE-002 | 待创建 |
-| HAE-004 | 实现保留原始字节的纯文本 Patch 引擎 | M1 | P0 | HAE-001 | 待创建 |
-| HAE-005 | 串起 Windows 最小校稿闭环 | M1 | P0 | HAE-002、HAE-003、HAE-004 | 待创建 |
-| HAE-006 | 执行 Apple Silicon Mac 早期可行性冒烟 | M1 | P1 | HAE-001、HAE-004 | 待创建 |
-| HAE-007 | 确定产品视觉方案与完整交互状态 | M2 | P1 | HAE-001 | 待创建 |
-| HAE-008 | 实现目录入口、相对资源与离线诊断 | M2 | P1 | HAE-002、HAE-005 | 待创建 |
-| HAE-009 | 实现文本草稿、中文输入与选择交互 | M2 | P0 | HAE-003、HAE-007 | 待创建 |
-| HAE-010 | 实现安全保存、冲突、备份与崩溃恢复 | M2 | P0 | HAE-004、HAE-008 | 待创建 |
-| HAE-011 | 实现历史、保存点、源码 Diff 与草稿持久化 | M2 | P0 | HAE-004、HAE-009、HAE-010 | 待创建 |
-| HAE-012 | 完成 Windows 可用 MVP 验收 | M2 | P0 | HAE-005、HAE-008、HAE-009、HAE-010、HAE-011 | 待创建 |
-| HAE-013 | 扩充兼容性、安全语料与性能基准 | M3 | P0 | HAE-002、HAE-003、HAE-004、HAE-010 | 待创建 |
-| HAE-014 | 完成 macOS 交互对齐与跨平台可访问性 | M3 | P1 | HAE-006、HAE-009、HAE-010、HAE-011 | 待创建 |
-| HAE-015 | 准备 Windows/Mac 打包、许可与签名流程 | M3 | P1 | HAE-001、HAE-012、HAE-014 | 待创建 |
-| HAE-016 | 执行双平台 Alpha 发布验收 | M3 | P0 | HAE-012、HAE-013、HAE-014、HAE-015 | 待创建 |
-| HAE-017 | 基于真实校稿任务完成 v1.0 稳定化 | M4 | P1 | HAE-016 | 待创建 |
-| HAE-018 | 提案：受控 CSS 变量修改 | M5 | P2 | HAE-017 | 待创建 |
-| HAE-019 | 提案：本地图片替换与资源事务 | M5 | P2 | HAE-017 | 待创建 |
-| HAE-020 | 提案：外部 AI 的局部修改建议 | M5 | P2 | HAE-017 | 待创建 |
+| HAE-001 | 初始化 Electron 工具链与模块边界 | M1 | P0 | 无 | [#1](https://github.com/TimGu-gifhub/html-artifact-editor/issues/1) |
+| HAE-002 | 实现隔离预览、项目资源协议与离线策略 | M1 | P0 | HAE-001 | [#2](https://github.com/TimGu-gifhub/html-artifact-editor/issues/2) |
+| HAE-003 | 验证静态 DOM 到源码文本的唯一映射 | M1 | P0 | HAE-001、HAE-002 | [#3](https://github.com/TimGu-gifhub/html-artifact-editor/issues/3) |
+| HAE-004 | 实现保留原始字节的纯文本 Patch 引擎 | M1 | P0 | HAE-001 | [#4](https://github.com/TimGu-gifhub/html-artifact-editor/issues/4) |
+| HAE-005 | 串起 Windows 最小校稿闭环 | M1 | P0 | HAE-002、HAE-003、HAE-004 | [#5](https://github.com/TimGu-gifhub/html-artifact-editor/issues/5) |
+| HAE-006 | 执行 Apple Silicon Mac 早期可行性冒烟 | M1 | P1 | HAE-001、HAE-004 | [#6](https://github.com/TimGu-gifhub/html-artifact-editor/issues/6) |
+| HAE-007 | 确定产品视觉方案与完整交互状态 | M2 | P1 | HAE-001 | [#7](https://github.com/TimGu-gifhub/html-artifact-editor/issues/7) |
+| HAE-008 | 实现目录入口、相对资源与离线诊断 | M2 | P1 | HAE-002、HAE-005 | [#8](https://github.com/TimGu-gifhub/html-artifact-editor/issues/8) |
+| HAE-009 | 实现文本草稿、中文输入与选择交互 | M2 | P0 | HAE-003、HAE-007 | [#9](https://github.com/TimGu-gifhub/html-artifact-editor/issues/9) |
+| HAE-010 | 实现安全保存、冲突、备份与崩溃恢复 | M2 | P0 | HAE-004、HAE-008 | [#10](https://github.com/TimGu-gifhub/html-artifact-editor/issues/10) |
+| HAE-011 | 实现历史、保存点、源码 Diff 与草稿持久化 | M2 | P0 | HAE-004、HAE-009、HAE-010 | [#11](https://github.com/TimGu-gifhub/html-artifact-editor/issues/11) |
+| HAE-012 | 完成 Windows 可用 MVP 验收 | M2 | P0 | HAE-005、HAE-008、HAE-009、HAE-010、HAE-011 | [#12](https://github.com/TimGu-gifhub/html-artifact-editor/issues/12) |
+| HAE-013 | 扩充兼容性、安全语料与性能基准 | M3 | P0 | HAE-002、HAE-003、HAE-004、HAE-010 | [#13](https://github.com/TimGu-gifhub/html-artifact-editor/issues/13) |
+| HAE-014 | 完成 macOS 交互对齐与跨平台可访问性 | M3 | P1 | HAE-006、HAE-009、HAE-010、HAE-011 | [#14](https://github.com/TimGu-gifhub/html-artifact-editor/issues/14) |
+| HAE-015 | 准备 Windows/Mac 打包、许可与签名流程 | M3 | P1 | HAE-001、HAE-012、HAE-014 | [#15](https://github.com/TimGu-gifhub/html-artifact-editor/issues/15) |
+| HAE-016 | 执行双平台 Alpha 发布验收 | M3 | P0 | HAE-012、HAE-013、HAE-014、HAE-015 | [#16](https://github.com/TimGu-gifhub/html-artifact-editor/issues/16) |
+| HAE-017 | 基于真实校稿任务完成 v1.0 稳定化 | M4 | P1 | HAE-016 | [#17](https://github.com/TimGu-gifhub/html-artifact-editor/issues/17) |
+| HAE-018 | 提案：受控 CSS 变量修改 | M5 | P2 | HAE-017 | [#18](https://github.com/TimGu-gifhub/html-artifact-editor/issues/18) |
+| HAE-019 | 提案：本地图片替换与资源事务 | M5 | P2 | HAE-017 | [#19](https://github.com/TimGu-gifhub/html-artifact-editor/issues/19) |
+| HAE-020 | 提案：外部 AI 的局部修改建议 | M5 | P2 | HAE-017 | [#20](https://github.com/TimGu-gifhub/html-artifact-editor/issues/20) |
 
 ## M1 · 可行性验证
 
@@ -38,6 +38,8 @@
 建立单包、单锁文件的可复现开发基础，验证可信 UI 与预览可以独立构建。
 
 优先级：P0；领域：platform；依赖：无。
+
+[打开 GitHub Issue #1](https://github.com/TimGu-gifhub/html-artifact-editor/issues/1)
 
 **范围**
 
@@ -66,6 +68,8 @@
 
 优先级：P0；领域：security；依赖：HAE-001。
 
+[打开 GitHub Issue #2](https://github.com/TimGu-gifhub/html-artifact-editor/issues/2)
+
 **范围**
 
 - src/main/protocol 与 session 生命周期
@@ -92,6 +96,8 @@
 证明被点击 Text 节点可以关联唯一、连续的源码范围；失败样例明确只读。
 
 优先级：P0；领域：core；依赖：HAE-001、HAE-002。
+
+[打开 GitHub Issue #3](https://github.com/TimGu-gifhub/html-artifact-editor/issues/3)
 
 **范围**
 
@@ -120,6 +126,8 @@
 
 优先级：P0；领域：core；依赖：HAE-001。
 
+[打开 GitHub Issue #4](https://github.com/TimGu-gifhub/html-artifact-editor/issues/4)
+
 **范围**
 
 - src/core/parser 的 UTF-8/UTF-16 映射
@@ -147,6 +155,8 @@
 
 优先级：P0；领域：platform；依赖：HAE-002、HAE-003、HAE-004。
 
+[打开 GitHub Issue #5](https://github.com/TimGu-gifhub/html-artifact-editor/issues/5)
+
 **范围**
 
 - 跨模块接线与自制静态报告
@@ -173,6 +183,8 @@
 在核心阶段暴露 Mac 构建、架构与文件行为问题，不等待 Windows 全部完成。
 
 优先级：P1；领域：platform；依赖：HAE-001、HAE-004。
+
+[打开 GitHub Issue #6](https://github.com/TimGu-gifhub/html-artifact-editor/issues/6)
 
 **范围**
 
@@ -205,6 +217,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 优先级：P1；领域：design；依赖：HAE-001。
 
+[打开 GitHub Issue #7](https://github.com/TimGu-gifhub/html-artifact-editor/issues/7)
+
 **范围**
 
 - 工具栏、预览、校稿侧栏、变更面板
@@ -231,6 +245,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 用户能够打开实际 HTML 项目并理解资源缺失，所有资源仍受授权根限制。
 
 优先级：P1；领域：platform；依赖：HAE-002、HAE-005。
+
+[打开 GitHub Issue #8](https://github.com/TimGu-gifhub/html-artifact-editor/issues/8)
 
 **范围**
 
@@ -259,6 +275,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 优先级：P0；领域：ui；依赖：HAE-003、HAE-007。
 
+[打开 GitHub Issue #9](https://github.com/TimGu-gifhub/html-artifact-editor/issues/9)
+
 **范围**
 
 - src/ui 校稿输入、选择高亮与焦点
@@ -285,6 +303,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 源文件覆盖可验证、可恢复，失败和结果不确定时绝不静默丢弃草稿或重复覆盖。
 
 优先级：P0；领域：storage；依赖：HAE-004、HAE-008。
+
+[打开 GitHub Issue #10](https://github.com/TimGu-gifhub/html-artifact-editor/issues/10)
 
 **范围**
 
@@ -313,6 +333,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 优先级：P0；领域：core；依赖：HAE-004、HAE-009、HAE-010。
 
+[打开 GitHub Issue #11](https://github.com/TimGu-gifhub/html-artifact-editor/issues/11)
+
 **范围**
 
 - src/core/history 与变更面板
@@ -339,6 +361,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 让维护者独立完成真实脱敏报告的完整校稿任务，并区分自动检查与产品验收。
 
 优先级：P0；领域：qa；依赖：HAE-005、HAE-008、HAE-009、HAE-010、HAE-011。
+
+[打开 GitHub Issue #12](https://github.com/TimGu-gifhub/html-artifact-editor/issues/12)
 
 **范围**
 
@@ -371,6 +395,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 优先级：P0；领域：qa；依赖：HAE-002、HAE-003、HAE-004、HAE-010。
 
+[打开 GitHub Issue #13](https://github.com/TimGu-gifhub/html-artifact-editor/issues/13)
+
 **范围**
 
 - 自制/合法许可 fixtures
@@ -397,6 +423,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 在 Apple Silicon Mac 验证同一核心流程，修复平台输入、窗口、权限和展示问题。
 
 优先级：P1；领域：platform；依赖：HAE-006、HAE-009、HAE-010、HAE-011。
+
+[打开 GitHub Issue #14](https://github.com/TimGu-gifhub/html-artifact-editor/issues/14)
 
 **范围**
 
@@ -425,6 +453,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 优先级：P1；领域：release；依赖：HAE-001、HAE-012、HAE-014。
 
+[打开 GitHub Issue #15](https://github.com/TimGu-gifhub/html-artifact-editor/issues/15)
+
 **范围**
 
 - Forge/打包配置、发布工作流
@@ -451,6 +481,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 只对已有完整证据的平台发布 Alpha，保持能力与限制声明准确。
 
 优先级：P0；领域：qa；依赖：HAE-012、HAE-013、HAE-014、HAE-015。
+
+[打开 GitHub Issue #16](https://github.com/TimGu-gifhub/html-artifact-editor/issues/16)
 
 **范围**
 
@@ -483,6 +515,8 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 优先级：P1；领域：qa；依赖：HAE-016。
 
+[打开 GitHub Issue #17](https://github.com/TimGu-gifhub/html-artifact-editor/issues/17)
+
 **范围**
 
 - 真实任务反馈、缺陷和性能
@@ -514,6 +548,8 @@ CSS 变量、图片替换与外部 AI Patch 的独立提案；不属于 MVP 承�
 
 优先级：P2；领域：design；依赖：HAE-017。
 
+[打开 GitHub Issue #18](https://github.com/TimGu-gifhub/html-artifact-editor/issues/18)
+
 **范围**
 
 - 独立 PRD/ADR 与最小实验
@@ -540,6 +576,8 @@ CSS 变量、图片替换与外部 AI Patch 的独立提案；不属于 MVP 承�
 
 优先级：P2；领域：storage；依赖：HAE-017。
 
+[打开 GitHub Issue #19](https://github.com/TimGu-gifhub/html-artifact-editor/issues/19)
+
 **范围**
 
 - 资源引用与多文件事务 ADR
@@ -565,6 +603,8 @@ CSS 变量、图片替换与外部 AI Patch 的独立提案；不属于 MVP 承�
 探索外部 AI 只提出修改意图，由相同验证链路和用户决定是否应用。
 
 优先级：P2；领域：design；依赖：HAE-017。
+
+[打开 GitHub Issue #20](https://github.com/TimGu-gifhub/html-artifact-editor/issues/20)
 
 **范围**
 

@@ -6,27 +6,37 @@
     {
       "id": "M1",
       "title": "M1 · 可行性验证",
-      "description": "验证静态源码映射、字节 Patch 与隔离预览；最小闭环目标 1–3 天，M1 累计 2–4 个工作日。全部为条件估算。"
+      "description": "验证静态源码映射、字节 Patch 与隔离预览；最小闭环目标 1–3 天，M1 累计 2–4 个工作日。全部为条件估算。",
+      "number": 1,
+      "url": "https://github.com/TimGu-gifhub/html-artifact-editor/milestone/1"
     },
     {
       "id": "M2",
       "title": "M2 · 可用 MVP",
-      "description": "Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、撤销与恢复。累计目标 5–10 个工作日，须有真实用户验收。"
+      "description": "Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、撤销与恢复。累计目标 5–10 个工作日，须有真实用户验收。",
+      "number": 2,
+      "url": "https://github.com/TimGu-gifhub/html-artifact-editor/milestone/2"
     },
     {
       "id": "M3",
       "title": "M3 · 双平台 Alpha",
-      "description": "固定语料回归、Windows x64 与 macOS arm64 实机、打包与签名准备。累计目标 2–4 周；未测平台保持未验收。"
+      "description": "固定语料回归、Windows x64 与 macOS arm64 实机、打包与签名准备。累计目标 2–4 周；未测平台保持未验收。",
+      "number": 3,
+      "url": "https://github.com/TimGu-gifhub/html-artifact-editor/milestone/3"
     },
     {
       "id": "M4",
       "title": "M4 · v1.0 稳定化",
-      "description": "固定版本真实校稿试用、故障恢复、性能和正式分发证据。累计目标 4–8 周，依赖真实反馈与发布条件。"
+      "description": "固定版本真实校稿试用、故障恢复、性能和正式分发证据。累计目标 4–8 周，依赖真实反馈与发布条件。",
+      "number": 4,
+      "url": "https://github.com/TimGu-gifhub/html-artifact-editor/milestone/4"
     },
     {
       "id": "M5",
       "title": "M5 · 后续探索",
-      "description": "CSS 变量、图片替换与外部 AI Patch 的独立提案；不属于 MVP 承诺，不设置截止日期。"
+      "description": "CSS 变量、图片替换与外部 AI Patch 的独立提案；不属于 MVP 承诺，不设置截止日期。",
+      "number": 5,
+      "url": "https://github.com/TimGu-gifhub/html-artifact-editor/milestone/5"
     }
   ],
   "tasks": [
@@ -58,7 +68,9 @@
       "docs": [
         "ARCHITECTURE.md",
         "docs/DECISIONS.md"
-      ]
+      ],
+      "issueNumber": 1,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/1"
     },
     {
       "id": "HAE-002",
@@ -95,7 +107,9 @@
       "docs": [
         "ARCHITECTURE.md",
         "PRD.md"
-      ]
+      ],
+      "issueNumber": 2,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/2"
     },
     {
       "id": "HAE-003",
@@ -132,7 +146,9 @@
         "docs/PATCH_SPEC.md",
         "docs/RISKS.md",
         "docs/DECISIONS.md"
-      ]
+      ],
+      "issueNumber": 3,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/3"
     },
     {
       "id": "HAE-004",
@@ -167,7 +183,9 @@
       ],
       "docs": [
         "docs/PATCH_SPEC.md"
-      ]
+      ],
+      "issueNumber": 4,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/4"
     },
     {
       "id": "HAE-005",
@@ -204,7 +222,9 @@
       "docs": [
         "ROADMAP.md",
         "docs/TEST_PLAN.md"
-      ]
+      ],
+      "issueNumber": 5,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/5"
     },
     {
       "id": "HAE-006",
@@ -239,7 +259,9 @@
       "docs": [
         "docs/TEST_PLAN.md",
         "docs/RELEASE.md"
-      ]
+      ],
+      "issueNumber": 6,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/6"
     },
     {
       "id": "HAE-007",
@@ -273,7 +295,9 @@
       ],
       "docs": [
         "docs/PRODUCT_DESIGN.md"
-      ]
+      ],
+      "issueNumber": 7,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/7"
     },
     {
       "id": "HAE-008",
@@ -311,7 +335,9 @@
       "docs": [
         "PRD.md",
         "ARCHITECTURE.md"
-      ]
+      ],
+      "issueNumber": 8,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/8"
     },
     {
       "id": "HAE-009",
@@ -348,7 +374,9 @@
       "docs": [
         "docs/PRODUCT_DESIGN.md",
         "docs/PATCH_SPEC.md"
-      ]
+      ],
+      "issueNumber": 9,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/9"
     },
     {
       "id": "HAE-010",
@@ -388,7 +416,9 @@
       "docs": [
         "docs/PATCH_SPEC.md",
         "docs/RISKS.md"
-      ]
+      ],
+      "issueNumber": 10,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/10"
     },
     {
       "id": "HAE-011",
@@ -427,7 +457,9 @@
       "docs": [
         "docs/PATCH_SPEC.md",
         "docs/PRODUCT_DESIGN.md"
-      ]
+      ],
+      "issueNumber": 11,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/11"
     },
     {
       "id": "HAE-012",
@@ -470,7 +502,9 @@
       "docs": [
         "docs/TEST_PLAN.md",
         "ROADMAP.md"
-      ]
+      ],
+      "issueNumber": 12,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/12"
     },
     {
       "id": "HAE-013",
@@ -515,7 +549,9 @@
       "docs": [
         "docs/TEST_PLAN.md",
         "docs/REFERENCES.md"
-      ]
+      ],
+      "issueNumber": 13,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/13"
     },
     {
       "id": "HAE-014",
@@ -557,7 +593,9 @@
       "docs": [
         "docs/PRODUCT_DESIGN.md",
         "docs/TEST_PLAN.md"
-      ]
+      ],
+      "issueNumber": 14,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/14"
     },
     {
       "id": "HAE-015",
@@ -595,7 +633,9 @@
       "docs": [
         "docs/RELEASE.md",
         "SECURITY.md"
-      ]
+      ],
+      "issueNumber": 15,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/15"
     },
     {
       "id": "HAE-016",
@@ -636,7 +676,9 @@
       "docs": [
         "docs/RELEASE.md",
         "docs/TEST_PLAN.md"
-      ]
+      ],
+      "issueNumber": 16,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/16"
     },
     {
       "id": "HAE-017",
@@ -673,7 +715,9 @@
       "docs": [
         "PRD.md",
         "docs/RELEASE.md"
-      ]
+      ],
+      "issueNumber": 17,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/17"
     },
     {
       "id": "HAE-018",
@@ -702,7 +746,9 @@
       "docs": [
         "ROADMAP.md",
         "docs/DECISIONS.md"
-      ]
+      ],
+      "issueNumber": 18,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/18"
     },
     {
       "id": "HAE-019",
@@ -731,7 +777,9 @@
       "docs": [
         "ROADMAP.md",
         "docs/PATCH_SPEC.md"
-      ]
+      ],
+      "issueNumber": 19,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/19"
     },
     {
       "id": "HAE-020",
@@ -760,7 +808,9 @@
       "docs": [
         "ROADMAP.md",
         "docs/DECISIONS.md"
-      ]
+      ],
+      "issueNumber": 20,
+      "issueUrl": "https://github.com/TimGu-gifhub/html-artifact-editor/issues/20"
     }
   ]
 }
