@@ -1,0 +1,38 @@
+# Application dependencies and generated output
+node_modules/
+dist/
+out/
+release/
+coverage/
+test-results/
+playwright-report/
+
+# Local data, credentials and recovery material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+.editor/
+.local-html-editor/
+.artifact-editor/
+backups/
+recovery/
+
+# Python and editor state
+__pycache__/
+*.pyc
+.venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Installers belong to releases, not source control
+*.exe
+*.dmg
+*.msi
+*.zip

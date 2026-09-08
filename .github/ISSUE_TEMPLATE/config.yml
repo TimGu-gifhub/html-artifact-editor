@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Private security report / 私密安全报告
+    url: https://github.com/TimGu-gifhub/html-artifact-editor/security/advisories/new
+    about: Do not post exploit details or sensitive files in public issues.
