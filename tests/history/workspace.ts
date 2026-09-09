@@ -338,4 +338,26 @@ export async function runHistoryWorkspace(outputRoot: string, results: string, p
   } finally { await restarted.stop(); }
   assert.deepEqual(await readFile(location.entry), original); assert.deepEqual(await readFile(join(resolutionRoot, 'keep.css')), css);
   pass('a live Electron profile blocks a competing compaction resolver; after actual process termination a new Main explicitly resolves the interrupted cleanup and restores/undoes/redoes the latest full history without writing HTML');
+  if (process.platform === 'win32') for (const committed of [true, false]) {
+    const root = await mkdtemp(join(results, 'save-lock-restart-'));
+    const location = { profile: join(root, 'profile'), privateRoot: join(root, 'profile/private'), entry: join(root, 'report.html') };
+    await mkdir(location.privateRoot, { recursive: true }); await writeFile(location.entry, original); await writeFile(join(root, 'keep.css'), css);
+    const seed = start(committed ? 'seed-save-lock' : 'seed-unknown-save', undefined, location); let sessionId: string;
+    try {
+      const message = await seed.ready(); assert.equal(message.state, 'save-interrupted'); sessionId = message.sessionId!;
+      const competitor = start('probe-save-lock', undefined, location);
+      try { assert.equal((await competitor.ready()).state, 'save-profile-blocked'); assert.equal(await competitor.exited, 0); }
+      finally { await competitor.stop(); }
+    } finally { await seed.stop(); }
+    const baseline = Buffer.from(original.toString().replace('A &#38; 😀', '')); assert.deepEqual(await readFile(location.entry), baseline);
+    const resumed = start(committed ? 'restore-save-lock' : 'restore-unknown-save', sessionId, location);
+    try {
+      const message = await resumed.ready(); assert.equal(message.state, committed ? 'save-lock-restored' : 'unknown-save-retained');
+      assert.equal(await resumed.exited, 0);
+    } finally { await resumed.stop(); }
+    assert.deepEqual(await readFile(location.entry), committed ? baseline : original); assert.deepEqual(await readFile(join(root, 'keep.css')), css);
+    pass(committed
+      ? 'an actual process killed with a verified committed Save and retained lock is explicitly resolved under its reacquired profile, then production recovery rebuilds the clean empty Text and confirms durable Undo without writing HTML'
+      : 'candidate bytes without a committed journal stay unconfirmed after an explicit keep-current decision; production recovery refuses old history replay, and a separate native backup restoration first protects the accepted current bytes');
+  }
 }

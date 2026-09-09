@@ -92,6 +92,8 @@ HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoint
 
 ## 历史命令与保存后的恢复
 
+完整保存事务留下的锁也可在重启后由 Main [明确处置](SAVE_RECOVERY.md)：新授权的当前文件在 Windows 只读 guard 下保持固定，先保留决定和原事务证明，再结束旧锁。verified commit 可继续既有干净历史恢复；candidate-on-disk/conflict 保持原分类，不能借审查记录回放旧历史。此方法不解冻原活动窗口，也没有可信 IPC/产品控件；单独恢复旧备份仍需新的显式事务。
+
 文档清理中断的旧锁现在有 [独立 Main 恢复合同](COMPACTION_RECOVERY.md)，仅在同一 profile 的全部文档与存储事务已经结束后接受明确审查。原窗口仍有内存输入时不能调用它释放占用；取消不写盘，确认完成后可再通过现有 restore/重新授权安装最新草稿。此 Main 方法没有可信 UI/Preview 入口，产品恢复面板、活动窗口暂停/解冻和未持久化输入的处置仍待实现。
 
 `edit` 的 history 值严格为 `{stateRevision, draftRevision, direction}`；direction 为 undo/redo。它绑定调用时的文档、输入及已确认草稿版本，不接受目标 Text 或源码位置。InputSnapshot.history 为 null 表示旧 v1 恢复会话没有完整历史；否则仅提供 undoCount/redoCount/canUndo/canRedo。

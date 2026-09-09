@@ -82,6 +82,8 @@ Main 在全部文档与存储事务结束后，可按 [清理中断恢复](COMPA
 
 ## 执行证据与下一步
 
+完整 Save 留下的旧锁可通过 [新的 keep-current 决定](SAVE_RECOVERY.md) 处置。审查记录不提升原事务证据：精确 committed 仍可通过既有流程建立干净历史，只有 candidate 字节或外部冲突时继续拒绝旧历史回放。真实 Electron 新进程分别覆盖这两条分支，后一条可独立恢复备份并先备份当前文件。
+
 [来源测试](../tests/unit/history-source.test.mjs) 与 [历史测试](../tests/unit/text-history.test.mjs) 覆盖重复文字、多个空目标、Unicode/BOM/实体、pre 与混合行尾、一万行来源、变长后的新范围、保存点/分支、迟到/伪造准备、损坏记录及容量。新历史候选由既有 Draft/Diff Worker 重建；[Electron 保存实验](../tests/history/main.ts) 验证显式保存、取消、外部冲突、未知结果，以及 Chromium 重开后的字节/文字安全。[预览实验](../tests/history/preview.ts) 验证缺席 Text 的安装、反向文字确认、原生选择与编辑锁、确认丢失、来源/DOM 变化及外来确认拒绝。新增 [窗口/进程实验](../tests/history/workspace.ts) 通过真实 Workspace IPC 调用历史、验证未应用/组合标志保护、Windows 保存/空 Text/干净及脏检查点恢复、确认丢失，并强杀独立 Electron 进程后用新进程恢复 Redo。它们使用自制文件和空白可信传输页面，没有产品控件。具体命令、结果及首次失败证据见 [HAE-011](implementation/HAE-011.md)。
 
 下一步处理恢复失败后的明确决策、遗留锁与跨会话/备份/失败证据的安全清理。产品界面仍须由 Kimi 在选稿后实施。真实 IME/对话框/报告、Windows 10/macOS、全尺寸性能、实际磁盘满和断电均未验收；HAE-011 与 M2 保持未完成。

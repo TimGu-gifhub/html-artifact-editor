@@ -13,12 +13,15 @@ import { digest } from '../../src/platform/storage-files.ts';
 import { createSavePreparationStore } from '../../src/main/storage/preparation.ts';
 import { createWindowsReplacer } from '../../src/platform/windows-replacement.ts';
 import { prepareCompactionRecovery } from '../../src/main/storage/compaction-recovery.ts';
+import { runSaveRecoveryChild } from './save-recovery-child.ts';
 
 const [mode, profile, entry, privateRoot, recoveryId] = process.argv.slice(2);
-if (!profile || !entry || !privateRoot || !['seed', 'restore', 'seed-saved', 'restore-saved', 'seed-compaction', 'probe-compaction', 'restore-compaction'].includes(mode ?? '')) throw Error('Invalid history child arguments');
+if (!profile || !entry || !privateRoot || !['seed', 'restore', 'seed-saved', 'restore-saved', 'seed-compaction', 'probe-compaction', 'restore-compaction',
+  'seed-save-lock', 'probe-save-lock', 'restore-save-lock', 'seed-unknown-save', 'restore-unknown-save'].includes(mode ?? '')) throw Error('Invalid history child arguments');
 registerSchemes(); app.enableSandbox(); app.setPath('userData', profile);
 app.on('before-quit', event => event.preventDefault());
 void app.whenReady().then(async () => {
+  if (await runSaveRecoveryChild(mode!, resolve(__dirname, '..'), entry, privateRoot, recoveryId)) return;
   const report = (value: unknown): void => { process.stdout.write(`${JSON.stringify(value)}\n`); };
   if (mode === 'probe-compaction') {
     const source = await openSaveSource(entry, await readFile(entry));

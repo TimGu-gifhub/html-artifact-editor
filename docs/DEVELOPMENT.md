@@ -129,6 +129,8 @@ HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重
 
 ## 本地检查和平台待验项
 
+HAE-010 第五阶段把 [七项保存中断处置实验](../tests/unit/save-resolution.test.mjs) 加入 Windows 存储门槛，并将 `test:history` 扩为 31 组：真实 profile 竞争、原生提交/未确认处的进程强杀、Main 明确处置、干净历史恢复/Undo 和单独备份恢复。助手的 review 分支由同一 C# 源构建；仍只提交源码，不提交 exe、profile 或恢复记录。本节点没有增大现有测试时限；产品 UI、原生 IME/对话框与其他平台继续单独验收。
+
 按维护者要求，不使用 GitHub Actions/CI；仓库 Actions 已关闭，工作流配置已从本地源文件中移除。上述检查保留为本地命令，结果与截图存入被忽略的 `test-results/`，不自动上传。`npm ci` 用于按锁文件安装依赖，并非启用 GitHub CI。
 
 | 目标环境 | 执行方式 | 当前验证状态 |

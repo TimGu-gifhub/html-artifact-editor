@@ -156,8 +156,33 @@ internal static class ReplaceHelper
             if (!String.Equals(FinalPath(file).TrimEnd('\\'), paths[i].TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) throw new Exception("NATIVE_LOCATION_CHANGED");
         }
     }
+    static void Review(Dictionary<string, object> request) {
+        Map(request, 7);
+        if (Convert.ToInt32(request["version"], CultureInfo.InvariantCulture) != 1 || Field(request, "mode") != "review") throw new Exception("NATIVE_INVALID_REQUEST");
+        token = Field(request, "transactionId"); if (!Regex.IsMatch(token, "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$")) throw new Exception("NATIVE_INVALID_REQUEST");
+        string path = Field(request, "path"), hash = Field(request, "hash");
+        if (path.Length > 1024 || !Regex.IsMatch(path, "^[A-Za-z]:\\\\") || Regex.IsMatch(path.Substring(3), "[\\x00-\\x1f<>:\"|?*/%~]")
+            || !Regex.IsMatch(path, "\\.html?$", RegexOptions.IgnoreCase) || !Regex.IsMatch(hash, "^[a-f0-9]{64}$")) throw new Exception("NATIVE_INVALID_REQUEST");
+        foreach (string part in path.Substring(3).Split('\\')) if (part.Length == 0 || part == "." || part == ".." || part.EndsWith(".") || part.EndsWith(" ")) throw new Exception("NATIVE_INVALID_REQUEST");
+        int split = path.LastIndexOf('\\'); LockDirectories(split == 2 ? path.Substring(0, 3) : path.Substring(0, split), request["directories"]);
+        var expected = Map(request["source"], 4);
+        // No replacement, metadata update, sidecar creation or deletion exists in
+        // review mode. Share-read excludes a still-writable old helper/other app.
+        using (var handle = Open(path, Read, 1, false, false))
+        using (var file = new FileStream(handle, FileAccess.Read)) {
+            Verify(handle, expected, true);
+            if (Hash(file) != hash || !String.Equals(FinalPath(handle), path, StringComparison.OrdinalIgnoreCase)) throw new Exception("NATIVE_FILE_CHANGED");
+            Emit("guarded", new { hash = hash, identity = Identity(handle) });
+            if (!Command("finish-review")) throw new Exception("NATIVE_DISCONNECTED");
+            Verify(handle, expected, true);
+            if (Hash(file) != hash || !String.Equals(FinalPath(handle), path, StringComparison.OrdinalIgnoreCase)) throw new Exception("NATIVE_FILE_CHANGED");
+            Emit("reviewed", new { hash = hash, identity = Identity(handle) });
+        }
+    }
     static void Run() {
-        var request = Message(); Map(request, 8);
+        var request = Message();
+        if (request != null && request.ContainsKey("mode")) { Review(request); return; }
+        Map(request, 8);
         if (Convert.ToInt32(request["version"], CultureInfo.InvariantCulture) != 1) throw new Exception("NATIVE_INVALID_REQUEST");
         token = Field(request, "transactionId"); if (!Regex.IsMatch(token, "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$")) throw new Exception("NATIVE_INVALID_REQUEST");
         string path = Field(request, "path"), oldHash = Field(request, "oldHash"), newHash = Field(request, "newHash");

@@ -20,6 +20,8 @@ HAE-011 已实现 [私有草稿检查点与会话持久化实验](docs/implement
 
 第十二阶段加入 [清理中断后的显式恢复](docs/COMPACTION_RECOVERY.md)：Main 在确认 profile、文件版本、保留点和存储空闲后，保存恢复记录、继续清理并释放准确匹配的旧锁；随后可恢复最新已持久化草稿、撤销并显式保存。正常入口与恢复控件仍待接入。
 
+HAE-010 第五阶段加入 [保存中断后的明确处置](docs/SAVE_RECOVERY.md)：重新授权并明确保留当前文件后，Main 在原生只读占用保护下保存审查记录、解除准确匹配的旧保存锁。原备份和候选保留，未确认结果不会被改成已保存；另行恢复备份仍先保护当前文件。
+
 [HAE-007 视觉候选](docs/design/hae-007/README.md) 已提供三种可运行布局，用同一份自制报告演示校稿和状态切换，等待维护者选稿。它们只修改内存中的演示数据，不代表桌面应用已实现编辑或保存；实际检查见 [候选稿交付记录](docs/implementation/HAE-007.md)。
 
 ## 计划中的核心流程
@@ -101,7 +103,7 @@ git diff --check
 
 本项目在需求梳理、架构设计、代码实现、测试和文档编写过程中，使用了 **ChatGPT / Codex** 与 **Kimi / Kimi Code** 辅助开发。感谢以下公司及其研究、产品与工程团队提供的模型和工具：
 
-- **[OpenAI](https://openai.com/)**：感谢 **ChatGPT、Codex 和 GPT 系列模型（含本阶段实际使用的 GPT-6）**，为项目规划、核心实现、代码审查与文档完善提供帮助；本阶段 Codex（GPT-6）参与 Main 历史、持久化、提交后的恢复协调、检查点清理及其中断恢复、集成测试与合同更新。
+- **[OpenAI](https://openai.com/)**：感谢 **ChatGPT、Codex 和 GPT 系列模型（含本阶段实际使用的 GPT-6）**，为项目规划、核心实现、代码审查与文档完善提供帮助；本阶段 Codex（GPT-6）参与 Main 历史、持久化、提交后的恢复协调、检查点清理及其中断恢复、保存锁审查与原生占用保护、集成测试与合同更新。
 - **[月之暗面（Moonshot AI）](https://www.moonshot.ai/)**：感谢 **Kimi、Kimi Code 和 [Kimi K3 模型](https://www.kimi.ai/blog/kimi-k3)**，支持了[前端视觉候选的设计、实现与修正](docs/implementation/HAE-007.md)。
 
 AI 用于开发辅助，应用本身保持本地离线，不依赖云端模型或 AI API。开发分工、实际调用记录与人工复核要求见 [AI 开发流程](docs/AI_WORKFLOW.md)。

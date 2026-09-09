@@ -22,6 +22,8 @@ import { compactCheckpoints } from './checkpoint-compaction.ts';
 import { COMPACTION_LIMIT } from '../../contracts/checkpoint-compaction.ts';
 import { resolutionFile } from '../../contracts/compaction-resolution.ts';
 import { readCompactionResolutions } from './compaction-resolutions.ts';
+import { saveResolutionFile } from '../../contracts/save-resolution.ts';
+import { readSaveResolutions } from './save-resolutions.ts';
 
 const STORE_LIMIT = 200 * 1024 * 1024;
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.stringify(value)}\n`);
@@ -120,9 +122,10 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
   const inventory = async () => {
     const items = await root.entries(512); let used = 0;
     const resolutions = await readCompactionResolutions(root, items.map(item => item.name));
+    const saveResolutions = await readSaveResolutions(root, items.map(item => item.name));
     const entries: { name: string; type: 'draft' | 'save' | 'unknown' | 'lock' | 'compaction' | 'resolution' }[] = [];
     for (const item of items) {
-      if (resolutionFile(item.name)) { used += item.size; entries.push({ name: item.name, type: 'resolution' }); continue; }
+      if (resolutionFile(item.name) || saveResolutionFile(item.name)) { used += item.size; entries.push({ name: item.name, type: 'resolution' }); continue; }
       if (item.name === 'active.lock' && item.kind === 'file') { used += item.size; entries.push({ name: item.name, type: 'lock' }); continue; }
       if (item.name === 'compaction.json' && item.kind === 'file') {
         if (item.size > COMPACTION_LIMIT) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
@@ -142,7 +145,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       if (used > STORE_LIMIT) throw new Error('DRAFT_STORAGE_LIMIT');
     }
     if (used > STORE_LIMIT) throw new Error('DRAFT_STORAGE_LIMIT');
-    return { entries, used, resolutions };
+    return { entries, used, resolutions: [...resolutions, ...saveResolutions] };
   };
   const records = async () => {
     const { entries, used, resolutions } = await inventory(); const known = [];

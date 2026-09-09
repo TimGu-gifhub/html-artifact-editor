@@ -11,6 +11,8 @@ import { isDraftCheckpoint, MAX_DRAFT_RECORD_BYTES } from '../../contracts/draft
 import { resolutionFile } from '../../contracts/compaction-resolution.ts';
 import { readCompactionResolutions } from './compaction-resolutions.ts';
 import { draftOwnership } from './draft-ownership.ts';
+import { saveResolutionFile } from '../../contracts/save-resolution.ts';
+import { readSaveResolutions } from './save-resolutions.ts';
 
 const JSON_LIMIT = 16 * 1024;
 const STORE_LIMIT = 200 * 1024 * 1024;
@@ -49,8 +51,9 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
   const checkQuota = async (source: SaveSource, candidateSize: number): Promise<void> => {
     const entries = await root.entries(512); let used = 0; let count = 0;
     if ((await readCompactionResolutions(root, entries.map(item => item.name))).some(row => !row.seal)) throw new Error('STORAGE_REVIEW_REQUIRED');
+    if ((await readSaveResolutions(root, entries.map(item => item.name))).some(row => !row.seal)) throw new Error('STORAGE_REVIEW_REQUIRED');
     for (const item of entries) {
-      if (resolutionFile(item.name)) { used += item.size; continue; }
+      if (resolutionFile(item.name) || saveResolutionFile(item.name)) { used += item.size; continue; }
       if (item.name === 'active.lock' && item.kind === 'file') { used += item.size; continue; }
       if (item.kind !== 'directory' || !isTransactionId(item.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
       const folder = await root.directory(item.name);
@@ -81,6 +84,8 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
     try {
       if (!isTransactionId(transactionId)) return result('invalid', 'invalid');
       const folder = await root.directory(transactionId);
+      const files = await folder.entries(7);
+      if (files.some(file => file.kind !== 'file' || !['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json'].includes(file.name))) return result('invalid', 'invalid');
       const header = await optionalRead(folder, 'intent.json', JSON_LIMIT);
       if (!header) return result('incomplete', 'incomplete');
       const decoded = decode(header.bytes);
@@ -147,8 +152,9 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       let locked = false; let unrecognized = false;
       const resolutions = await readCompactionResolutions(root, entries.map(item => item.name));
       if (resolutions.some(row => !row.seal)) unrecognized = true;
+      if ((await readSaveResolutions(root, entries.map(item => item.name))).some(row => !row.seal)) unrecognized = true;
       for (const item of entries) {
-        if (resolutionFile(item.name)) continue;
+        if (resolutionFile(item.name) || saveResolutionFile(item.name)) continue;
         if (item.name === 'active.lock') { locked = true; continue; }
         if (item.kind === 'directory' && isTransactionId(item.name)) {
           const files = await (await root.directory(item.name)).entries(7);
