@@ -73,6 +73,8 @@ The initial public MIT repository creation was explicitly requested. Later publi
 
 Fetch current refs, check branch/worktree state, stage only intended paths, inspect staged diff, run applicable gates, and verify remote/local commit parity after an authorized push. Do not force-push, disable certificate validation, or use broad staging to sweep unrelated work.
 
+Before every GitHub push, PR or release, check the AI tools, models and providers actually used for the change. If a new tool, model/version or provider has participated, update README.md's "AI 辅助开发与致谢" in the same change with verified names/versions, the corresponding company and contribution scope, thanking the company and models. Retain prior acknowledgements; configuration or planned use alone is not actual participation, and unknown model versions must not be guessed. Follow the attribution rules in docs/AI_WORKFLOW.md.
+
 Never commit secrets, user documents, private snapshots, backups, recovery logs, signing certificates or generated installers. Keep LICENSE notices and third-party license obligations intact.
 
 ## Task source
