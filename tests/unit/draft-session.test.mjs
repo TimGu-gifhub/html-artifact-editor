@@ -15,7 +15,7 @@ const prepare = async (_out, source, current, change) => {
   assert.equal(engine.candidate.resultHash, current.resultHash);
   return freezeCandidate(engine.apply(change));
 };
-function setup(runPrepare = prepare) {
+function setup(runPrepare = prepare, persistence) {
   const source = createSourceIndex(baseline, sourceIdentity, hash);
   const target = source.nodes.find((node) => node.decodedText === 'A & 😀');
   const identity = { preview: { version: 1, sessionId: sourceIdentity.projectId, generation: 1, mode: 'proofread' },
@@ -32,7 +32,7 @@ function setup(runPrepare = prepare) {
       return 'applied';
     },
   };
-  const session = createDraftSession('unused', mapping, runPrepare);
+  const session = createDraftSession('unused', mapping, runPrepare, persistence);
   const input = (newText) => ({ selection: mapping.selection, draftRevision: session.revision, newText });
   return { session, mapping, input, target, get text() { return text; }, get calls() { return calls; } };
 }
@@ -56,6 +56,18 @@ test('drafts publish only after acknowledged mutation; no-op, merging, empty/ref
   assert.deepEqual(Buffer.from(f.session.candidate.bytes), baseline);
   assert.deepEqual(Buffer.from(f.mapping.source.bytes), baseline);
 });
+test('only acknowledged changed Apply requests enqueue persistence, including return to baseline; rejected/unknown edits never masquerade as confirmed', async () => {
+  const writes = []; const f = setup(undefined, { enqueue: (value, revision) => { writes.push({ value, revision }); } });
+  await f.session.apply(f.input('A & 😀')); assert.equal(writes.length, 0);
+  await f.session.apply(f.input('B')); await f.session.apply(f.input('A & 😀'));
+  assert.deepEqual(writes.map(write => write.revision), [2, 3]); assert.deepEqual(Buffer.from(writes[1].value.bytes), baseline);
+  await assert.rejects(f.session.apply(f.input('\0'))); assert.equal(writes.length, 2);
+  f.mapping.applyText = async () => 'rejected'; await assert.rejects(f.session.apply(f.input('C')));
+  assert.equal(writes.length, 2); f.mapping.applyText = async () => 'unknown';
+  await assert.rejects(f.session.apply(f.input('C')), /DRAFT_OUTCOME_UNKNOWN/);
+  assert.equal(writes.length, 2); assert.equal(f.session.revision, 3); assert.ok(f.session.uncertainCandidate); f.session.close();
+});
+
 test('invalid text, schema, identities and stale draft/selection reject without publishing or mutating', async () => {
   const f = setup();
   const initial = f.session.candidate;

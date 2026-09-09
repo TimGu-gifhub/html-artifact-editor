@@ -15,12 +15,13 @@
 | `openDirectory(stateRevision)` | Main 先选择并固定根目录身份，再选择根内 HTML；取消任一步保持当前文档 |
 | `switchEntry(documentId, stateRevision)` | 只在操作所属 current 文档的既有根内选择入口，不能自动重新授权或接受 UI 路径 |
 | `save(documentId, stateRevision)` | Main 显式保存该文档已应用的候选，核验提交并重建基线；未应用输入/组合态拒绝，不隐式 Apply |
+| `retryPersistence(documentId, draftRevision)` | 只重试当前文档最新已应用草稿的私有检查点；不接受路径/候选、不写 HTML，完成状态经 read/onState 读取 |
 | `edit(documentId, value)` | documentId 必须是该操作所属快照的 current.id；value 只允许 begin/change/apply/resolve/save-copy 的既有精确 schema |
 | `onState(listener)` | 返回取消订阅函数；先订阅再 read；最多 32 个订阅，通知只含纯状态 |
 
 documentId 必须随用户操作一起捕获，不能在迟到回调中自动换成新文件 ID。即便新旧文档恰有相同输入 revision，旧 ID 也会以 STALE_DOCUMENT 拒绝，不调用新文件的输入或选择器。编辑值仍须通过 [输入合同](../src/contracts/input.ts)；文件身份不能替代 Text 身份、editToken 和版本核验。
 
-返回 `{ok, code, state, documentId, copy, outcome}`：state 是窗口最新快照；documentId 说明本次 edit/switchEntry/save 的目标，copy 说明本次编辑请求；outcome 包含 opened/cancelled，以及保存的 saved/unchanged/rebase-required。保存成功后，返回的 documentId 仍是请求的旧目标，state.current.id 已是新基线文档。状态可能已前进，不能把旧请求结果提示到另一份文档。只有本次 copy.status=created 表示副本核验成功，原入口保存点不变。授权拒绝返回 RESOURCE_BLOCKED；未列入公开错误集的内部异常使用固定 WORKSPACE_COMMAND_FAILED，不泄漏路径或原始错误。
+返回 `{ok, code, state, documentId, copy, outcome}`：state 是窗口最新快照；documentId 说明本次 edit/switchEntry/save/retryPersistence 的目标，copy 说明本次编辑请求；outcome 包含 opened/cancelled，以及保存的 saved/unchanged/rebase-required。保存成功后，返回的 documentId 仍是请求的旧目标，state.current.id 已是新基线文档。状态可能已前进，不能把旧请求结果提示到另一份文档。只有本次 copy.status=created 表示副本核验成功，原入口保存点不变。授权拒绝返回 RESOURCE_BLOCKED；未列入公开错误集的内部异常使用固定 WORKSPACE_COMMAND_FAILED，不泄漏路径或原始错误。
 
 `current.project` 是只读显示摘要：根目录名称、根内相对 entry 和有界 resources 诊断。诊断变化也推进 Workspace 状态版本并经 onState 发送。它不含本机绝对路径、目录身份或授权对象；entry/诊断 target 不能回传为文件操作参数。具体类型、脱敏和截断规则见 [目录资源合同](PROJECT_RESOURCES.md)。
 
@@ -60,12 +61,16 @@ InputController 与 DraftSession 在整个文件操作期间互斥；已提交�
 
 ## 执行证据
 
+HAE-011 的可选 Main checkpoints 端口为每份文档建立一个独立持久化队列；确认改变文字的 Apply 自动排队，失败保留输入并停止自动重试。current.persistence 传递准确的最新/写入中/待写/已持久化修订和错误，后台变化不推进输入版本。Save 在输入互斥期间等待私有写入结束，关闭文档等待队列排空；UI 崩溃不终止 Main 写入。没有配置端口时状态为 null，正常应用尚未安装端口。完整语义与记录退役、恢复列表等限制见 [草稿检查点](DRAFT_CHECKPOINTS.md)。
+
 `npm run test:session` 使用真实 BrowserWindow、WebContentsView、生产 preload/IPC 与 Main 会话；测试专用 probe 只发送反例请求，不进入默认八目标构建。自制无控件的可信页面不代表产品 UI，也没有 Kimi 前端实现声明。
 
 已执行十组检查：空会话/来源拒绝；标题与重复单元格修改及独立字节副本；三处真实视图操作故障；确认与晚到 IPC 输入竞争；换文档后旧请求拒绝及副本重开；实际 renderer 崩溃后重连；未返回另存选择器撤销；状态/schema/重放反例；同会话 window.close 取消和另存关闭；原生 resize 事件的尺寸故障保留与阻止操作。
 
 报告在忽略的 `test-results/session.json`，包含实际系统/Electron 版本、源提交加工作区差异标记、十组结果和五份完整文件 SHA-256。另有四项 Workspace 激活/回滚/连接撤销单元反例与一项窗口命令 schema 测试。完整范围见 [HAE-005](implementation/HAE-005.md)。原生选择器、维护者点击系统关闭按钮、真实 IME、独立报告和产品体验仍待验收。
 
-HAE-008 另用生产 preload/IPC 执行八组目录/共享资源/诊断/输入保护/副本重开/只读脚本/撤销/根替换检查，见 [阶段记录](implementation/HAE-008.md)。`haeWorkspace` 当时从四个方法扩展为六个；HAE-010 新增 save 后为七个，权限仍由 Main 保留的授权与文档身份决定。
+HAE-008 另用生产 preload/IPC 执行八组目录/共享资源/诊断/输入保护/副本重开/只读脚本/撤销/根替换检查，见 [阶段记录](implementation/HAE-008.md)。`haeWorkspace` 当时从四个方法扩展为六个；HAE-010 新增 save 后为七个，HAE-011 增加 retryPersistence 后为八个，权限仍由 Main 保留的授权与文档身份决定。
 
 `npm run test:save-session` 已在 Windows 11 / Electron 44.2.0 执行十组真实窗口、生产 preload/IPC 和原生替换测试：连续保存/清空节点/项目根保留、组合态及未应用输入、保存互斥/关闭、打开后同文外部改写、准备时和替换后 renderer 崩溃、未知结果、原生挂载失败、提交后外部改写、提交后的清理警告。报告为忽略的 `test-results/save-session.json`；完整文件 hash、实际版本、限制和全量门槛见 [HAE-010](implementation/HAE-010.md)。测试的空白可信页面不是产品界面，composing 标志不是实际中文 IME 验收。
+
+HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoints 端口的实验：连续 Apply 与慢写合并、精确持久化状态、Save 共用锁等待与新基线、失败/显式重试、实际 renderer 崩溃后继续写入、归零后原生关闭等待，以及检查点失败后显式保存。完整证据和未实现的生命周期/恢复范围见 [HAE-011](implementation/HAE-011.md)。

@@ -1,5 +1,6 @@
 import type { InputSnapshot } from './input.ts';
 import type { ProjectSummary } from './resources.ts';
+import type { DraftPersistenceState } from './persistence.ts';
 
 export type WorkspacePhase = 'idle' | 'choosing' | 'opening' | 'reviewing' | 'saving' | 'committing' | 'disposed';
 export type LeaveReview = Readonly<{
@@ -13,7 +14,7 @@ export type WorkspaceSaveReport = Readonly<{
 }>;
 export type WorkspaceSnapshot = Readonly<{
   stateRevision: number; phase: WorkspacePhase;
-  current: Readonly<{ id: string; name: string; input: InputSnapshot; project: ProjectSummary }> | null;
+  current: Readonly<{ id: string; name: string; input: InputSnapshot; project: ProjectSummary; persistence: DraftPersistenceState | null }> | null;
   review: LeaveReview | null; cleanupPending: boolean; lastSave: WorkspaceSaveReport | null; canSave: boolean;
 }>;
 export type WorkspaceOutcome = Readonly<{

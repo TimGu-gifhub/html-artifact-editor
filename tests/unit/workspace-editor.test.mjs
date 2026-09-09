@@ -7,6 +7,7 @@ test('workspace requests require a specific document identity for every edit and
   const documentId = randomUUID(); const sessionId = randomUUID();
   const valid = [ { kind: 'read' }, { kind: 'open', stateRevision: 1 }, { kind: 'open-directory', stateRevision: 1 },
     { kind: 'switch-entry', stateRevision: 1, documentId }, { kind: 'save', stateRevision: 1, documentId },
+    { kind: 'retry-persistence', draftRevision: 2, documentId },
     { kind: 'edit', documentId, value: { kind: 'save-copy', stateRevision: 1 } },
     { kind: 'edit', documentId, value: { kind: 'change', value: { editToken: randomUUID(), inputRevision: 2, newText: '中文😀', composing: true } } } ];
   for (const command of valid) {
@@ -16,6 +17,9 @@ test('workspace requests require a specific document identity for every edit and
     { kind: 'save', stateRevision: 1 }, { kind: 'save', stateRevision: 0, documentId },
     { kind: 'save', stateRevision: 1, documentId, path: 'outside.html' },
     { kind: 'save', stateRevision: 1, documentId, candidate: 'injected bytes' },
+    { kind: 'retry-persistence', draftRevision: 2 }, { kind: 'retry-persistence', draftRevision: 0, documentId },
+    { kind: 'retry-persistence', draftRevision: 2, documentId, path: 'outside' },
+    { kind: 'retry-persistence', draftRevision: 2, documentId, candidate: 'untrusted' },
     { kind: 'open-directory', stateRevision: 1, root: 'outside' },
     { kind: 'switch-entry', stateRevision: 1, documentId, entry: 'outside.html' },
     { kind: 'open', stateRevision: 1, path: 'report.html' }, { kind: 'open', stateRevision: NaN },

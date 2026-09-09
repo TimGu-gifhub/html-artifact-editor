@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isLeaveDecision } from '../../contracts/workspace.ts';
 import type { LeaveReview, WorkspaceOutcome, WorkspacePhase, WorkspaceSaveReport, WorkspaceSnapshot } from '../../contracts/workspace.ts';
 import type { InputSnapshot } from '../../contracts/input.ts';
-import type { OpenDocument, prepareDocument } from './document.ts';
+import type { DraftStore, OpenDocument, prepareDocument } from './document.ts';
 import type { ProjectSource } from '../protocol/project-files.ts';
 import type { OriginalSaver, OriginalSaveResult } from '../storage/original.ts';
 
@@ -15,7 +15,7 @@ export type ActivateDocument = (next: OpenDocument | null, previous: OpenDocumen
 // The synchronous activation port must restore its prior state before throwing.
 // A successful activation returns a rollback for a failed final authority check.
 export function createWorkspace(outputRoot: string, decisions: WorkspaceDecisions, prepare: typeof prepareDocument,
-  activate: ActivateDocument = () => () => {}, saveOriginal?: OriginalSaver) {
+  activate: ActivateDocument = () => () => {}, saveOriginal?: OriginalSaver, checkpoints?: DraftStore) {
   let current: OpenDocument | null = null;
   let phase: WorkspacePhase = 'idle';
   let revision = 1;
@@ -38,7 +38,8 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     for (const listener of listeners) { try { listener(); } catch { /* State is owned by Main. */ } }
   };
   const snapshot = (): WorkspaceSnapshot => Object.freeze({ stateRevision: revision, phase,
-    current: current ? Object.freeze({ id: current.id, name: current.name, input: current.input.snapshot(), project: current.project() }) : null,
+    current: current ? Object.freeze({ id: current.id, name: current.name, input: current.input.snapshot(), project: current.project(),
+      persistence: current.persistence?.snapshot() ?? null }) : null,
     review, cleanupPending: activationUncertain || failedCleanup.size > 0, lastSave,
     canSave: !!saveOriginal && phase === 'idle' && !disposed && !activationUncertain && !failedCleanup.size
       && !lastSave?.requiresReview && !!current && current.input.snapshot().canSaveCopy
@@ -156,6 +157,13 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     // disposes the current input or interrupts a file write already in progress.
     cancelPending(): void { pending?.abort(); },
     invalidateActivation(): void { activationUncertain = true; pending?.abort(); notify(); },
+    retryPersistence(documentId: string, draftRevision: number): void {
+      if (disposed || phase !== 'idle') throw new Error('WORKSPACE_BUSY');
+      if (!current || current.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (!current.persistence) throw new Error('DRAFT_PERSISTENCE_UNAVAILABLE');
+      inputReady(current.input.snapshot());
+      current.persistence.retry(draftRevision);
+    },
     async save(expectedRevision: number, documentId: string): Promise<Readonly<{ status: WorkspaceSaveReport['status']; state: WorkspaceSnapshot }>> {
       const leaving = current;
       if (!leaving || leaving.id !== documentId) throw new Error('STALE_DOCUMENT');
@@ -172,7 +180,10 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       try {
         status = await (async (): Promise<WorkspaceSaveReport['status']> => {
           if (!before.changes.length) { report('unchanged', null); return 'unchanged'; }
-          const result = await leaving.input.saveOriginal(before.stateRevision, (candidate) => saveOriginal(leaving.saveSource, candidate, operation.signal));
+          const result = await leaving.input.saveOriginal(before.stateRevision, async (candidate) => {
+            await leaving.persistence?.settle();
+            return saveOriginal(leaving.saveSource, candidate, operation.signal);
+          });
           retainedSave = result;
           if (result.status !== 'committed') {
             report(result.status, result.code, result.cleanupPending, result.requiresReview);
@@ -185,7 +196,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
           try {
             if (disposed || pending !== operation || current !== leaving) throw new Error('SAVE_REBASE_REQUIRED');
             rebuilding = new AbortController();
-            next = await prepare(outputRoot, leaving.preview.grant, ++generation, rebuilding.signal);
+            next = await prepare(outputRoot, leaving.preview.grant, ++generation, rebuilding.signal, checkpoints);
             if (!result.verifySaved || !await result.verifySaved(next.saveSource)) throw new Error('SAVE_REBASE_REQUIRED');
             const previous = install(next, () => {
               if (disposed || activationUncertain || pending !== operation || current !== leaving || rebuilding?.signal.aborted
@@ -213,7 +224,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
         const path = await ask(operation, () => choose(operation.signal)); live(operation);
         if (path) {
           phase = 'opening'; notify();
-          candidate = await prepare(outputRoot, path, ++generation, operation.signal); live(operation);
+          candidate = await prepare(outputRoot, path, ++generation, operation.signal, checkpoints); live(operation);
           const proof = await permission('open', candidate, operation);
           if (proof !== false) {
             const previous = commit(candidate, proof, operation);

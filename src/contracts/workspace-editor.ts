@@ -9,6 +9,7 @@ export type DocumentCommand = Exclude<EditorCommand, Readonly<{ kind: 'read' }>>
 export type WorkspaceCommand = Readonly<{ kind: 'read' }>
   | Readonly<{ kind: 'open' | 'open-directory'; stateRevision: number }>
   | Readonly<{ kind: 'switch-entry' | 'save'; stateRevision: number; documentId: string }>
+  | Readonly<{ kind: 'retry-persistence'; draftRevision: number; documentId: string }>
   | Readonly<{ kind: 'edit'; documentId: string; value: DocumentCommand }>;
 export type WorkspaceRequest = Readonly<{ sessionId: string; sequence: number; command: WorkspaceCommand }>;
 export type WorkspaceResult = Readonly<{
@@ -23,6 +24,7 @@ export type WorkspaceAPI = Readonly<{
   openDirectory: (stateRevision: number) => Promise<WorkspaceResult>;
   switchEntry: (documentId: string, stateRevision: number) => Promise<WorkspaceResult>;
   save: (documentId: string, stateRevision: number) => Promise<WorkspaceResult>;
+  retryPersistence: (documentId: string, draftRevision: number) => Promise<WorkspaceResult>;
   edit: (documentId: string, value: DocumentCommand) => Promise<WorkspaceResult>;
   onState: (listener: (state: WorkspaceSnapshot) => void) => () => void;
 }>;
@@ -38,6 +40,8 @@ export function isWorkspaceCommand(value: unknown): value is WorkspaceCommand {
     case 'save':
     case 'switch-entry': return count === 3 && identity(value.documentId)
       && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
+    case 'retry-persistence': return count === 3 && identity(value.documentId)
+      && Number.isSafeInteger(value.draftRevision) && (value.draftRevision as number) > 0;
     case 'edit': return count === 3 && identity(value.documentId) && isEditorCommand(value.value) && value.value.kind !== 'read';
     default: return false;
   }

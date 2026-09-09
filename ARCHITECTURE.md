@@ -159,7 +159,7 @@ Main InputController 持有未应用文本、composing、输入版本与已应�
 
 ### HAE-005 第三段：可信编辑器 IPC
 
-Main 将 bridge 安装到指定 WebContents 的局部 IPC，首次握手固定实际主框架和随机会话。每条命令同时核对 contents/session/frame/精确 editor URL、完整 schema 和递增 sequence。UI preload 只暴露七个固定方法和纯状态，Preview 无此 bridge；用户页面、同源其他窗口、子框架与旧会话均不能获得权限。
+Main 将 bridge 安装到指定 WebContents 的局部 IPC，首次握手固定实际主框架和随机会话。每条命令同时核对 contents/session/frame/精确 editor URL、完整 schema 和递增 sequence。单文档 haeEditor 接口只暴露七个固定方法和纯状态，Preview 无此 bridge；用户页面、同源其他窗口、子框架与旧会话均不能获得权限。统一窗口使用下述独立 haeWorkspace 接口。
 
 重载、主框架导航或 renderer 崩溃撤销 bridge，但不销毁 Main 输入/候选。选择器返回后再次检查 bridge，防止界面已离开却开始写文件；已开始的写入继续按原事务返回结果。本次另存的取消/创建/失败/未知结果单独返回，不能用历史 lastCopy 判断本次成功。真实 IPC 和 renderer 崩溃实验已执行；原生对话框和 Kimi 前端接入仍待完成，合同见 [可信编辑器接口](docs/EDITOR_BRIDGE.md)。
 
@@ -197,4 +197,4 @@ Main 的 prepareRestore 读取完整有效事务中的 backup.bin，绑定记录
 
 纯 core/history 从经过验证的候选导出逻辑 Text 意图，不存可执行 offset。Main 将原始基线、严格 v1 记录和最后的完整 seal 写入独立检查点；重新读取时重建源码索引并验证节点、上下文及完整候选 hash。真正恢复候选还需重新授权当前源文件并匹配版本；不会由检查点名称取得文件权限。
 
-草稿与保存共用私有目录、active.lock、每目标合计 20 项和总计 200 MiB 配额；不自动删除证据或解除遗留锁。重启只有对应 committed 记录及精确新文件版本均成立，才阻止已保存草稿的重复应用。当前提供 Main 存储与候选重建方法，尚无每次 Apply 持久化、恢复安装、退役、历史或 Diff 接线。协议及执行范围见 [草稿检查点](docs/DRAFT_CHECKPOINTS.md) 与 [HAE-011](docs/implementation/HAE-011.md)。
+草稿与保存共用私有目录、active.lock、每目标合计 20 项和总计 200 MiB 配额；不自动删除证据或解除遗留锁。重启只有对应 committed 记录及精确新文件版本均成立，才阻止已保存草稿的重复应用。Workspace 可选端口已把确认变化的 Apply 接入异步队列，只保留一个活动写入和一个最新待写候选；持久化状态独立于输入版本，失败停止自动写入，显式重试绑定当前文档/修订。Save 先冻结输入并等待队列，关闭也等待已经开始的写入。正常产品入口、恢复安装、退役、历史与 Diff 仍待接入。协议及执行范围见 [草稿检查点](docs/DRAFT_CHECKPOINTS.md) 与 [HAE-011](docs/implementation/HAE-011.md)。

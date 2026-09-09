@@ -13,6 +13,7 @@ import { registerSchemes } from '../../src/main/application.ts';
 import { registerBundledContent } from '../../src/main/bundled-content.ts';
 import { lockContents, securePreferences } from '../../src/main/preview/security.ts';
 import { createSavePreparationStore } from '../../src/main/storage/preparation.ts';
+import { createDraftCheckpointStore } from '../../src/main/storage/checkpoints.ts';
 import { createOriginalSaver } from '../../src/main/storage/original.ts';
 import { createWorkspaceSession } from '../../src/main/workspace/session.ts';
 import { createWindowsReplacer } from '../../src/platform/windows-replacement.ts';
@@ -32,7 +33,7 @@ async function until(check: () => boolean, label: string): Promise<void> {
   while (!check()) { if (Date.now() > deadline) throw new Error(`TIMEOUT: ${label}`); await delay(10); }
 }
 function barrier() { let release!: () => void; const wait = new Promise<void>(done => { release = done; }); return { wait, release }; }
-async function fixture() {
+async function fixture(persistDrafts = false) {
   const root = await mkdtemp(join(results, 'save-window-')); const project = join(root, '项目 🧪');
   await mkdir(project); await mkdir(join(project, 'pages')); const entry = join(project, 'pages', '报告 😀.html');
   await writeFile(entry, original); await writeFile(join(project, 'keep.css'), css);
@@ -44,8 +45,10 @@ async function fixture() {
   const ui = new BrowserWindow({ show: false, width: 960, height: 640, webPreferences: {
     ...securePreferences, session: uiSession, preload: join(outputRoot, 'preload/ui/index.cjs'),
   } }); lockContents(ui.webContents);
-  const control: { step: (step: string) => Promise<void>; hostFault: PreviewHostStep | null } = { step: async () => {}, hostFault: null };
+  const control: { step: (step: string) => Promise<void>; draftStep: (step: string) => Promise<void>; hostFault: PreviewHostStep | null } = {
+    step: async () => {}, draftStep: async () => {}, hostFault: null };
   const store = await createSavePreparationStore(privateRoot, step => control.step(step), await createWindowsReplacer(join(outputRoot, 'native/ReplaceHelper.exe')));
+  const checkpoints = await createDraftCheckpointStore(privateRoot, step => control.draftStep(step), store);
   const errors: string[] = [];
   const runtime = createWorkspaceSession(ui, outputRoot, {
     chooseOpen: async () => entry, chooseCopy: async () => undefined,
@@ -54,6 +57,7 @@ async function fixture() {
     bounds: () => { const { width, height } = ui.getContentBounds(); return { x: 0, y: 0, width, height }; },
     onHostStep: step => { if (control.hostFault === step) { control.hostFault = null; throw new Error('test attachment failure'); } },
     saveOriginal: createOriginalSaver(store),
+    ...(persistDrafts ? { checkpoints } : {}),
   });
   const call = (expression: string): Promise<WorkspaceResult> => ui.webContents.executeJavaScript(expression);
   const read = async () => { const value = await call('haeWorkspace.read()'); assert.ok(value.ok); assert.ok(value.state); return value.state; };
@@ -82,15 +86,115 @@ async function fixture() {
   try {
     await ui.loadURL(EDITOR_URL); const start = await read();
     assert.equal((await call(`haeWorkspace.openDirectory(${start.stateRevision})`)).outcome, 'opened'); ui.showInactive();
-    return { root, project, entry, privateRoot, store, ui, control, runtime, errors, call, read, current, edit, save, select, change, apply, dirty, close };
+    return { root, project, entry, privateRoot, store, checkpoints, ui, control, runtime, errors, call, read, current, edit, save, select, change, apply, dirty, close };
   } catch (error) { await close(); throw error; }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
-async function use(run: (f: Fixture) => Promise<void>): Promise<void> { const f = await fixture(); try { await run(f); } finally { await f.close(); } }
+async function use(run: (f: Fixture) => Promise<void>, persistDrafts = false): Promise<void> { const f = await fixture(persistDrafts); try { await run(f); } finally { await f.close(); } }
 
 async function run(): Promise<void> {
   if (process.platform !== 'win32') throw new Error('SAVE_SESSION_PLATFORM_UNSUPPORTED');
   await mkdir(results, { recursive: true }); await mkdir(app.getPath('userData'), { recursive: true }); await app.whenReady();
+  await use(async f => {
+    const hold = barrier(); let writing = false;
+    f.control.draftStep = async step => { if (step === 'baseline-synced' && !writing) { writing = true; await hold.wait; } };
+    try {
+      await f.dirty(); await until(() => writing, 'checkpoint writer barrier');
+      const doc = f.current(); const queue = doc.persistence!;
+      await f.change('第二稿'); await f.apply(); await f.change('第三稿 <&> 🧪'); await f.apply();
+      const before = (await f.read()).current!;
+      assert.equal(before.persistence!.writingRevision, 2); assert.equal(before.persistence!.queuedRevision, 4);
+      assert.equal(before.persistence!.persisted, null); assert.equal(before.input.canApply, true);
+      hold.release(); const finished = await queue.settle(); const after = (await f.read()).current!;
+      assert.equal(finished.persisted!.draftRevision, 4); assert.equal(after.persistence!.status, 'persisted');
+      assert.equal(after.input.stateRevision, before.input.stateRevision, 'storage updates must not invalidate an edit proof');
+      assert.equal(after.input.input!.text, '第三稿 <&> 🧪');
+      const records = (await f.checkpoints.scan()).records.map(record => record.summary!).sort((a, b) => a.draftRevision - b.draftRevision);
+      assert.deepEqual(records.map(record => record.draftRevision), [2, 4]);
+      const reopened = await createDraftCheckpointStore(f.privateRoot);
+      const recovered = await reopened.restoreCandidate(records[1]!.checkpointId, doc.saveSource, doc.mapping.source);
+      assert.deepEqual(Buffer.from(recovered.bytes), Buffer.from(original.toString().replace('A &amp; 😀', '第三稿 &lt;&amp;&gt; 🧪')));
+      assert.deepEqual(await readFile(f.entry), original); assert.deepEqual(await readFile(join(f.project, 'keep.css')), css);
+    } finally { hold.release(); }
+    pass('real IPC Apply persists asynchronously, coalesces slow writes to the latest revision, publishes accurate durable status and preserves input proof plus original HTML/resources');
+  }, true);
+  await use(async f => {
+    const hold = barrier(); let writing = false;
+    f.control.draftStep = async step => { if (step === 'baseline-synced' && !writing) { writing = true; await hold.wait; } };
+    let pendingSave: Promise<WorkspaceResult> | undefined;
+    try {
+      await f.dirty(); await until(() => writing, 'checkpoint before Save'); const old = f.current();
+      pendingSave = f.save(); await until(() => old.input.snapshot().phase === 'saving', 'Save waiting for checkpoint');
+      assert.equal((await f.store.scan()).records.length, 0); assert.deepEqual(await readFile(f.entry), original);
+      assert.equal((await f.change('late text')).ok, false);
+      assert.equal((await f.call(`haeWorkspace.retryPersistence(${JSON.stringify(old.id)},2)`)).code, 'WORKSPACE_BUSY');
+      f.ui.close(); await delay(20); assert.equal(f.ui.isDestroyed(), false);
+      hold.release(); const saved = await pendingSave; assert.ok(saved.ok, saved.code ?? 'Save failed'); assert.equal(saved.outcome, 'saved');
+      assert.deepEqual(await readFile(f.entry), expected); assert.notEqual(f.current().id, old.id);
+      assert.equal(f.current().persistence!.snapshot().status, 'idle');
+      const checkpoint = (await f.checkpoints.scan()).records[0]!;
+      assert.equal((await f.checkpoints.inspect(checkpoint.checkpointId, f.current().saveSource.current)).state, 'committed-matches');
+      await f.select('#date'); await f.change('2026-09-09'); await f.apply(); await f.current().persistence!.settle();
+      const next = (await f.checkpoints.scan()).records.find(record => record.summary?.sessionId === f.current().id)!;
+      assert.equal(next.summary!.baseHash, hash(expected)); assert.equal(next.summary!.draftRevision, 2);
+      assert.deepEqual(await readFile(f.entry), expected, 'post-save Apply only writes private evidence');
+    } finally { hold.release(); await pendingSave; }
+    pass('Save waits for the checkpoint writer before taking its shared lock, freezes edits/close, deduplicates the saved checkpoint and persists subsequent edits against the new baseline');
+  }, true);
+  await use(async f => {
+    f.control.draftStep = async step => { if (step === 'baseline-created') throw Object.assign(new Error('injected disk full'), { code: 'ENOSPC' }); };
+    await f.dirty(); await f.current().persistence!.settle();
+    let state = (await f.read()).current!; assert.equal(state.persistence!.status, 'failed'); assert.equal(state.persistence!.code, 'DRAFT_STORAGE_FULL');
+    assert.equal(state.persistence!.persisted, null); assert.equal(state.input.input!.appliedText, '已修订 <&> 🧪');
+    assert.equal(await f.current().preview.contents.executeJavaScript('document.querySelector("h1").textContent'), '已修订 <&> 🧪');
+    await f.change('重试时的最新稿'); await f.apply(); state = (await f.read()).current!;
+    assert.equal(state.persistence!.draftRevision, 3); assert.equal((await f.checkpoints.scan()).records.length, 1);
+    assert.equal((await f.call(`haeWorkspace.retryPersistence(${JSON.stringify(state.id)},2)`)).code, 'STALE_DRAFT_REQUEST');
+    assert.equal((await f.call(`haeWorkspace.retryPersistence(${JSON.stringify(randomUUID())},3)`)).code, 'STALE_DOCUMENT');
+    f.control.draftStep = async () => {};
+    assert.equal((await f.call(`haeWorkspace.retryPersistence(${JSON.stringify(state.id)},3)`)).ok, true);
+    await f.current().persistence!.settle(); state = (await f.read()).current!;
+    assert.equal(state.persistence!.status, 'persisted'); assert.equal(state.persistence!.persisted!.draftRevision, 3);
+    assert.equal(state.input.input!.text, '重试时的最新稿'); assert.deepEqual(await readFile(f.entry), original);
+    pass('private storage failure retains applied text and the exact durable status; later Apply does not auto-retry, and trusted retry rejects stale/wrong documents then persists only the newest candidate');
+  }, true);
+  await use(async f => {
+    const hold = barrier(); let writing = false;
+    f.control.draftStep = async step => { if (step === 'baseline-synced') { writing = true; await hold.wait; } };
+    try {
+      await f.dirty(); await until(() => writing, 'checkpoint during renderer crash'); const doc = f.current();
+      f.ui.webContents.forcefullyCrashRenderer(); await until(() => !f.runtime.connected, 'renderer authority revoked');
+      hold.release(); await doc.persistence!.settle(); await f.runtime.reloadUI();
+      const state = (await f.read()).current!; assert.equal(state.id, doc.id); assert.equal(state.persistence!.persisted!.draftRevision, 2);
+      assert.equal(state.input.input!.appliedText, '已修订 <&> 🧪'); assert.deepEqual(await readFile(f.entry), original);
+    } finally { hold.release(); }
+    pass('actual UI renderer crash does not cancel Main checkpoint persistence; reloaded production transport reads the same applied draft and confirmed durable revision');
+  }, true);
+  await use(async f => {
+    const hold = barrier(); let writing = false;
+    f.control.draftStep = async step => { if (step === 'baseline-synced' && !writing) { writing = true; await hold.wait; } };
+    try {
+      await f.dirty(); await until(() => writing, 'checkpoint before close');
+      await f.change('A & 😀'); await f.apply(); const doc = f.current(); assert.equal(doc.draft.candidate.patches.length, 0);
+      f.ui.close(); await until(() => f.runtime.closing, 'native close waits'); assert.equal(f.ui.isDestroyed(), false);
+      hold.release(); await until(() => f.ui.isDestroyed(), 'native close after checkpoint drain');
+      const records = (await f.checkpoints.scan()).records.map(record => record.summary!).sort((a, b) => b.draftRevision - a.draftRevision);
+      assert.equal(records[0]!.draftRevision, 3); assert.equal(records[0]!.changeCount, 0); assert.equal(records[0]!.resultHash, hash(original));
+      assert.deepEqual(await readFile(f.entry), original);
+    } finally { hold.release(); }
+    pass('native close of a clean document drains the last queued return-to-baseline checkpoint before destroying the window');
+  }, true);
+  await use(async f => {
+    f.control.draftStep = async step => { if (step === 'baseline-created') throw Object.assign(new Error('injected checkpoint failure'), { code: 'ENOSPC' }); };
+    await f.dirty(); await f.current().persistence!.settle();
+    assert.equal(f.current().persistence!.snapshot().status, 'failed');
+    await f.change('仍可显式保存 <&>'); await f.apply();
+    const saved = await f.save(); assert.equal(saved.outcome, 'saved'); assert.equal(saved.ok, true);
+    assert.deepEqual(await readFile(f.entry), Buffer.from(original.toString().replace('A &amp; 😀', '仍可显式保存 &lt;&amp;&gt;')));
+    assert.equal((await f.store.scan()).records[0]!.phase, 'committed');
+    const evidence = await f.checkpoints.scan(); assert.equal(evidence.records.length, 1); assert.notEqual(evidence.records[0]!.phase, 'complete');
+    pass('failed checkpoint persistence does not disable an explicit verified Save; the latest applied bytes are saved while incomplete private evidence remains intact');
+  }, true);
   await use(async f => {
     assert.equal((await f.read()).canSave, false); assert.equal((await f.save()).outcome, 'unchanged'); assert.deepEqual(await readdir(f.privateRoot), []);
     assert.deepEqual(await f.ui.webContents.executeJavaScript('[typeof require,typeof process,typeof ipcRenderer]'), ['undefined', 'undefined', 'undefined']);

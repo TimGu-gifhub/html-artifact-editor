@@ -8,7 +8,8 @@ import type { OriginalSaveResult } from '../storage/original.ts';
 
 type MappingPort = Pick<PreviewMapping, 'source' | 'identity' | 'status' | 'selection' | 'applyText'>;
 type Phase = 'idle' | 'preparing' | 'applying' | 'saving' | 'uncertain' | 'closed';
-export function createDraftSession(outputRoot: string, mapping: MappingPort, prepare = prepareDraft) {
+export function createDraftSession(outputRoot: string, mapping: MappingPort, prepare = prepareDraft,
+  persistence?: Readonly<{ enqueue: (candidate: PatchCandidate, revision: number) => void }>) {
   const source = mapping.source;
   let current = freezeCandidate({ identity: source.identity, baseHash: source.baseHash, resultHash: source.baseHash,
     patches: [], bytes: source.bytes });
@@ -54,7 +55,7 @@ export function createDraftSession(outputRoot: string, mapping: MappingPort, pre
         }
         if (outcome !== 'applied') throw new Error('STALE_SELECTION');
         const changed = prepared.resultHash !== current.resultHash;
-        if (changed) { current = prepared; ++revision; }
+        if (changed) { current = prepared; ++revision; persistence?.enqueue(current, revision); }
         return Object.freeze({ changed, draftRevision: revision });
       } finally {
         if (!uncertain) phase = closed ? 'closed' : 'idle';

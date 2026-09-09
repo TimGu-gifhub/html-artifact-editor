@@ -12,6 +12,7 @@ const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUS
   'DOCUMENT_RECOVERY_REQUIRED', 'DOCUMENT_CLEANUP_REQUIRED', 'STALE_DOCUMENT_REVIEW', 'WORKSPACE_CANCELLED',
   'DOCUMENT_ACTIVATION_FAILED', 'DOCUMENT_ACTIVATION_UNKNOWN', 'STALE_DOCUMENT',
   'SAVE_PLATFORM_UNSUPPORTED', 'UNAPPLIED_INPUT',
+  'DRAFT_PERSISTENCE_UNAVAILABLE', 'DRAFT_PERSISTENCE_RETRY_UNAVAILABLE', 'STALE_DRAFT_REQUEST',
   'RESOURCE_BLOCKED',
   'COPY_FAILED', 'COPY_OUTCOME_UNKNOWN', 'INPUT_MAPPING_LOST', 'INVALID_TEXT_NUL', 'INVALID_UNICODE', 'TEXT_SIZE_LIMIT']);
 
@@ -26,7 +27,7 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         let code: string | null = null;
         let copy: WorkspaceResult['copy'] = null;
         let outcome: WorkspaceResult['outcome'] = null;
-        const documentId = command.kind === 'edit' || command.kind === 'switch-entry' || command.kind === 'save' ? command.documentId : null;
+        const documentId = 'documentId' in command ? command.documentId : null;
         try {
           if (command.kind === 'open') {
             const result = await workspace.open(command.stateRevision, async () => active() ? chooseOpen() : undefined);
@@ -48,6 +49,8 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
             // baseline are a successful Save even when evidence cleanup is pending.
             code = ['failed', 'unknown', 'rebase-required'].includes(result.status) ? report?.code ?? 'SAVE_FAILED' : null;
             outcome = result.status === 'saved' || result.status === 'unchanged' || result.status === 'cancelled' || result.status === 'rebase-required' ? result.status : null;
+          } else if (command.kind === 'retry-persistence') {
+            workspace.retryPersistence(command.documentId, command.draftRevision);
           } else if (command.kind === 'edit') {
             const current = workspace.current;
             if (!current || current.id !== command.documentId) throw new Error('STALE_DOCUMENT');

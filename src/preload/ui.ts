@@ -101,7 +101,7 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
   const failure = (code: string, documentId: string | null): WorkspaceResult =>
     ({ ok: false, code, state: latest, documentId, copy: null, outcome: null });
   const request = async (command: WorkspaceCommand): Promise<WorkspaceResult> => {
-    const documentId = command.kind === 'edit' || command.kind === 'switch-entry' || command.kind === 'save' ? command.documentId : null;
+    const documentId = command && typeof command === 'object' && 'documentId' in command ? command.documentId : null;
     if (!isWorkspaceCommand(command)) return failure('INVALID_WORKSPACE_REQUEST', documentId);
     const connected = await connect();
     if (!connected || sequence >= Number.MAX_SAFE_INTEGER) return failure('EDITOR_DISCONNECTED', documentId);
@@ -121,6 +121,7 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
     openDirectory: (stateRevision) => request({ kind: 'open-directory', stateRevision }),
     switchEntry: (documentId, stateRevision) => request({ kind: 'switch-entry', documentId, stateRevision }),
     save: (documentId, stateRevision) => request({ kind: 'save', documentId, stateRevision }),
+    retryPersistence: (documentId, draftRevision) => request({ kind: 'retry-persistence', documentId, draftRevision }),
     edit: (documentId, value) => request({ kind: 'edit', documentId, value }),
     onState: (listener) => {
       if (typeof listener !== 'function' || listeners.size >= 32) throw new Error('INVALID_EDITOR_LISTENER');

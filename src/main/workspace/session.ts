@@ -10,6 +10,7 @@ import { prepareDocument } from './document.ts';
 import { bindWorkspaceWindow } from './window.ts';
 import type { ProjectChoices } from './project-choice.ts';
 import type { OriginalSaver } from '../storage/original.ts';
+import type { DraftStore } from './document.ts';
 
 type SessionPorts = WorkspaceDecisions & Readonly<{
   chooseOpen: () => Promise<string | undefined>;
@@ -18,6 +19,7 @@ type SessionPorts = WorkspaceDecisions & Readonly<{
   onHostStep?: (step: PreviewHostStep) => void;
   projectChoices?: ProjectChoices;
   saveOriginal?: OriginalSaver;
+  checkpoints?: DraftStore;
 }>;
 
 // Install before loading the trusted UI. A single workspace owns the current
@@ -32,7 +34,7 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
   workspace = createWorkspace(outputRoot, ports, prepareDocument, (next, previous) => {
     if (host.current !== (previous?.preview.view ?? null)) throw new Error('DOCUMENT_ACTIVATION_UNKNOWN');
     return host.swap(next?.preview.view ?? null);
-  }, ports.saveOriginal);
+  }, ports.saveOriginal, ports.checkpoints);
   let bridge: ReturnType<typeof createWorkspaceBridge>;
   let guard: ReturnType<typeof bindWorkspaceWindow>;
   try {
