@@ -63,6 +63,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:save-session` | Windows 真实 Electron 窗口、生产 IPC、原文件保存/重建、崩溃/未知结果/外部冲突/清理警告；无产品控件或真实 IME |
 | `npm run test:recovery` | 真实 Electron 的恢复列表/重新授权/新映射安装、进程所有权、恢复后编辑与 Windows 保存去重；自制空白 transport 页面，无产品验收 |
 | `npm run test:source-diff` | 真实 Electron 生产接口读取完整源码 Diff、拒绝旧确认、重连及 Windows 保存字节/冲突检查；无产品 Diff 面板 |
+| `npm run test:history` | 逻辑历史通过真实 Draft/Diff Worker、Main Windows 保存端口和 Chromium 重开，验证空 Text 恢复、保存点/分支及失败；未接 Workspace 历史命令或历史磁盘存储 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run preview:directory` | 原生选择根目录及其中 HTML，保留嵌套相对资源路径；只读校稿预览，诊断输出到终端 |
@@ -70,9 +71,11 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 草稿恢复 → 源码 Diff → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 草稿恢复 → 源码 Diff → 逻辑历史/保存重开 → 许可证 |
 
 开发 Node 的单元套件使用 `--test-concurrency=4`，避免随主机 CPU 数量增加而同时启动过多原生文件/子进程实验。此限制只控制测试文件调度，不改变用例内部的并发竞态、故障断言和单项期限。超时或取消仍使门槛失败，须保留日志并定位后重跑。
+
+HAE-011 第七阶段增加来源重建与历史单元检查，完整逻辑记录的内存往返不代表磁盘持久化。`test:history` 的报告位于 test-results/history.json，使用独立实验入口和自制文件；Windows 原生 Save 成功、取消、冲突、未知结果分别断言，其他 OS 对未执行的 Windows 路径标记 pending。候选中的空 Text 来源证明由 Worker 重新核验，但窗口命令和 Preview 空节点安装尚未接通；见 [逻辑历史合同](HISTORY.md) 与 [执行记录](implementation/HAE-011.md)。
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 

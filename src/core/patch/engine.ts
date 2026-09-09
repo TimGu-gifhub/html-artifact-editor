@@ -6,6 +6,7 @@ import { chooseLineEnding, defaultLineEnding, encodeText, normalizeText } from '
 import type { LineEnding } from './encoding.ts';
 import { isStoredTextIntent, MAX_DRAFT_INTENTS } from '../../contracts/draft-checkpoint.ts';
 import type { StoredTextIntent } from '../../contracts/draft-checkpoint.ts';
+import { verifySourceIndex } from '../history/source.ts';
 
 export const MAX_PATCHES = MAX_DRAFT_INTENTS;
 export type TextChange = Readonly<{
@@ -31,12 +32,7 @@ const patchKeys = ['schemaVersion', 'identity', 'baseHash', 'nodeId', 'startByte
   'contextFingerprint', 'expectedText', 'newText', 'lineEnding', 'mixedLineEndings', 'leadingLfCompensation', 'replacementBytes'];
 
 function verifySource(source: SourceIndex, hash: HashBytes): SourceIndex {
-  const verified = createSourceIndex(source.bytes, source.identity, hash);
-  if (source.schemaVersion !== 1 || source.baseHash !== verified.baseHash || source.text !== verified.text
-    || source.hasBom !== verified.hasBom || JSON.stringify(source.tree) !== JSON.stringify(verified.tree)
-    || JSON.stringify(source.nodes) !== JSON.stringify(verified.nodes)
-    || JSON.stringify(source.parseErrors) !== JSON.stringify(verified.parseErrors)) throw new Error('SOURCE_INDEX_MISMATCH');
-  return verified;
+  return verifySourceIndex(source, hash);
 }
 function makePatch(source: SourceIndex, node: TextSource, text: string, fallback: LineEnding): TextPatch {
   const { ending, mixed } = chooseLineEnding(source.text.slice(node.startCodeUnit, node.endCodeUnit), fallback);
@@ -102,7 +98,8 @@ function compile(source: SourceIndex, input: readonly TextPatch[], hash: HashByt
   let cursor = 0;
   let size = bytes.length;
   for (const patch of patches) {
-    if (patch.startByte < cursor || patch.startByte >= patch.endByte || patch.endByte > bytes.length) throw new Error('OVERLAPPING_PATCHES');
+    if (patch.startByte < cursor || patch.startByte > patch.endByte || patch.endByte > bytes.length
+      || (patch.startByte === patch.endByte && (!source.lineage || patch.expectedText !== ''))) throw new Error('OVERLAPPING_PATCHES');
     cursor = patch.endByte;
     size += patch.replacementBytes.length - (patch.endByte - patch.startByte);
   }
@@ -137,7 +134,7 @@ function compile(source: SourceIndex, input: readonly TextPatch[], hash: HashByt
     let removed = 0;
     for (const [position, node] of source.tree.entries()) {
       if (node.kind !== 'text') continue;
-      if (changes.get(node.nodeId) === '') { removed++; continue; }
+      if ((changes.get(node.nodeId) ?? node.value) === '') { removed++; continue; }
       if (changes.has(node.nodeId)) {
         const target = reparsed.tree[position - removed];
         if (target?.kind !== 'text' || !target.editable) throw new Error('CANDIDATE_TARGET_UNMAPPABLE');
@@ -162,7 +159,14 @@ export function buildTextIntentCandidate(input: SourceIndex, intents: readonly S
   const nodes = new Map(source.nodes.map(node => [node.nodeId, node]));
   const fallback = defaultLineEnding(source.text);
   const patches = intents.map(intent => {
-    if (!isStoredTextIntent(intent)) throw new Error('DRAFT_INTENT_INVALID');
+    // A proven history source can contain fresh ids for emptied Text nodes.
+    // Keep the old persisted v1 id format unchanged; private history intents
+    // instead bind every field to the newly reconstructed source below.
+    const fields = ['nodeId', 'expectedText', 'newText', 'rawSliceHash', 'contextFingerprint'];
+    const valid = source.lineage
+      ? keys(intent, fields) && fields.every(field => typeof intent[field] === 'string')
+      : isStoredTextIntent(intent);
+    if (!valid) throw new Error('DRAFT_INTENT_INVALID');
     const node = nodes.get(intent.nodeId);
     if (!node?.editable || node.decodedText !== intent.expectedText || node.rawSliceHash !== intent.rawSliceHash
       || node.contextFingerprint !== intent.contextFingerprint) throw new Error('DRAFT_INTENT_MISMATCH');

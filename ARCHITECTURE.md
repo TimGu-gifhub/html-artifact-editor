@@ -206,3 +206,5 @@ Main catalog 以最大修订归类会话，不按时间戳排序或越过较新�
 Workspace 可列出脱敏恢复元数据，并经 Main 重新授权文件或目录后准备新 Preview/SourceIndex。最新记录经重建和完整候选核验，以一次仅允许新映射的隔离 Text 批量操作装入尚未发布的视图；所有目标先验证，应用失败或未知关闭候选视图、保留私有检查点。原生挂载前后再检查源文件和同一最新记录，才发布新 current。恢复沿用 checkpointSessionId 和 draftRevision，UI/映射身份独立更新；队列用已核验版本初始化，不重复写入检查点。进程 profile 所有权与 Main 会话所有权分别排除重复进程和窗口，文件写入仍须共用 active.lock。正常入口、故障恢复与清理、历史和产品 Diff 面板仍待接入。协议及执行范围见 [草稿检查点](docs/DRAFT_CHECKPOINTS.md) 与 [HAE-011](docs/implementation/HAE-011.md)。
 
 源码 Diff 已单独接入有限 Worker 与 Workspace 读取路径。Core 校验完整候选后从同一冻结字节取得实际 before/after 源码，Main 再核对返回范围和切片；缓存及异步结果绑定文档、修订与候选，避免迟到数据替代新草稿。Save 可携带所显示 Diff 的修订/hash，过期确认在事务开始前拒绝，磁盘冲突和备份流程继续独立验证。只读范围不作为写入权限，正常产品面板和历史仍待接入，详见 [源码 Diff 合同](docs/SOURCE_DIFF.md)。
+
+纯核心逻辑历史已将准备与确认分开，按操作游标计算净候选并独立保留保存点；Main 后续须在 Preview 确认后推进历史，在已验证的磁盘提交后建立新实例。内部 SourceIndex.lineage 只携带最初来源和逻辑值，每次重建核对完整当前树、Text 外的所有字面字节及新 UTF-8 边界，才能为已消失的 Text 生成空范围。原始来源不是页面输入能力，普通零长度 Patch 仍拒绝；候选继续通过完整字节/语义校验。Worker 与实际 Windows 保存重开已有实验，Workspace 历史命令、隔离 Preview 空 Text 安装和历史磁盘格式尚未接入；现有 v1 检查点会在写入前拒绝此类型。详见 [逻辑历史](docs/HISTORY.md)。

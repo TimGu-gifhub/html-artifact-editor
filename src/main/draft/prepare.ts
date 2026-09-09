@@ -19,7 +19,7 @@ export function prepareDraft(outputRoot: string, source: SourceIndex, current: P
   if (signal.aborted) return Promise.reject(new Error('DRAFT_PREPARE_CANCELLED'));
   return new Promise((resolveCandidate, reject) => {
     const worker = new Worker(resolve(outputRoot, 'draft-worker/index.cjs'), {
-      workerData: { bytes: source.bytes, identity: source.identity, patches: current.patches, resultHash: current.resultHash, change },
+      workerData: { bytes: source.bytes, identity: source.identity, lineage: source.lineage, patches: current.patches, resultHash: current.resultHash, change },
       resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32, stackSizeMb: 8 },
     });
     let finished = false;

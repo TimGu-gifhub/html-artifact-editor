@@ -21,6 +21,8 @@
 
 before/after 的范围各自针对 baseHash/candidateHash；较早修改变长后，下游 after 位置会变化，不能把它当作原文件位置。清空 Text 的 after 范围可以为空；无净变更时 changes 为空、两个 hash 相同、所有字节均为 unchangedBytes。A→B→C 展示 A→C，回到基线恢复原实体拼写。
 
+HAE-011 第七阶段也允许已证明的历史 Text 恢复产生空 before、非空 after；仅插入该 Text 时 unchangedBytes 等于完整基线大小。证明来自 Main 保留的最初来源与新基线的完整结构/字节核验，不能由显示范围本身授权。Draft/Diff Worker 会重建该证明；窗口历史命令仍待接入，见 [逻辑历史](HISTORY.md)。
+
 每个完整目标片段中的词法变化均保留，例如数字实体转为实际 Unicode 字符、`<` 重新编码为 `&lt;`、CRLF 改为目标换行风格。片段内开头的 U+FEFF 不会被误当作文件 BOM 删除。用原始文件未修改片段与所有 after.text 按 UTF-8 编码拼接，必须能重建完整候选字节。
 
 这些内容是可信 UI 的只读显示数据。渲染 text 必须使用文字节点，不能作为 HTML 执行；换行/不可见字符应按实际源码显示。所有文件操作仍只接受 Main 保留的权限与版本，任何写入命令均不接收 Diff 的路径、范围或替换字节。Preview、同源其他窗口、子框架和旧连接均无此读取权限。
@@ -62,4 +64,4 @@ save 的第三个参数 review 可选，用于把“确认这份 Diff”的操�
 
 [纯核心与协议测试](../tests/unit/source-diff.test.mjs) 用独立期望值核验实体、Unicode/BOM、混合行尾、pre 首行 LF、长度变化/清空、1000 项完整输出，以及用 Diff 重建全部候选字节。[读取器测试](../tests/unit/source-diff-reader.test.mjs) 验证合并、缓存、取消、修订竞争与终止失败；[Worker 测试](../tests/unit/source-diff-worker.test.mjs) 验证同长度伪造、遗漏、缺失/崩溃和实际 5 秒超时终止。
 
-`npm run test:source-diff` 用真实 Electron 的生产 preload/IPC 与自制空白可信页面验证读取、恢复草稿、未应用/组合标志、旧确认拒绝、归零、renderer 重连/旧文档拒绝，以及 Windows 显式保存的完整字节和外部冲突。它不是产品面板、真实 IME、原生对话框或人工接受结果；Windows 10/macOS、满尺寸性能、真实磁盘满和断电仍未验收。历史/撤销/跨保存反向来源证明另行实现，HAE-011 与 M2 保持未完成。
+`npm run test:source-diff` 用真实 Electron 的生产 preload/IPC 与自制空白可信页面验证读取、恢复草稿、未应用/组合标志、旧确认拒绝、归零、renderer 重连/旧文档拒绝，以及 Windows 显式保存的完整字节和外部冲突。它不是产品面板、真实 IME、原生对话框或人工接受结果；Windows 10/macOS、满尺寸性能、真实磁盘满和断电仍未验收。窗口历史/撤销接线与完整历史存储仍待实现，HAE-011 与 M2 保持未完成。

@@ -5,6 +5,11 @@ import type { SourceTree, TreeNode } from '../../contracts/source-tree.ts';
 import { byteBoundary, decodeUtf8, encodeUtf8 } from './utf8.ts';
 
 export type SourceIdentity = Readonly<{ projectId: string; documentId: string; generation: number }>;
+// Main/private history only. Logical values refer to Texts in originBytes, never
+// to executable locations. Rebuilding this proof must reparse the current bytes.
+export type SourceLineage = Readonly<{
+  originBytes: Uint8Array; values: readonly Readonly<{ nodeId: string; text: string }>[];
+}>;
 export type TextSource = Readonly<{
   nodeId: string; treeIndex: number; startCodeUnit: number; endCodeUnit: number;
   startByte: number; endByte: number; rawSliceHash: string; decodedText: string;
@@ -16,6 +21,7 @@ export type SourceIndex = Readonly<{
   schemaVersion: 1; identity: SourceIdentity; baseHash: string; hasBom: boolean;
   bytes: Uint8Array; text: string; tree: SourceTree; nodes: readonly TextSource[];
   parseErrors: readonly string[];
+  lineage?: SourceLineage;
 }>;
 export type HashBytes = (bytes: Uint8Array) => string;
 const restricted = new Set(['script', 'style', 'noscript', 'title', 'textarea', 'xmp', 'plaintext',

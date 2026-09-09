@@ -29,6 +29,7 @@ const entries = {
   recovery: ['tests/draft-restore/main.ts', 'out/recovery'],
   'recovery-child': ['tests/draft-restore/child.ts', 'out/recovery-child'],
   'source-diff': ['tests/source-diff/main.ts', 'out/source-diff'],
+  history: ['tests/history/main.ts', 'out/history'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'diff-worker', 'native'];
 const requested = process.argv.slice(2);

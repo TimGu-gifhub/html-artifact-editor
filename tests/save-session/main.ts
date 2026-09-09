@@ -89,7 +89,8 @@ async function fixture(persistDrafts = false) {
   const close = async () => { await runtime.dispose(); if (!ui.isDestroyed()) ui.destroy(); };
   try {
     await ui.loadURL(EDITOR_URL); const start = await read();
-    assert.equal((await call(`haeWorkspace.openDirectory(${start.stateRevision})`)).outcome, 'opened'); ui.showInactive();
+    const opened = await call(`haeWorkspace.openDirectory(${start.stateRevision})`);
+    assert.equal(opened.outcome, 'opened', JSON.stringify({ code: opened.code, state: opened.state })); ui.showInactive();
     return { root, project, entry, privateRoot, store, checkpoints, ui, control, runtime, errors, call, read, current, edit, save, select, change, apply, dirty, close };
   } catch (error) { await close(); throw error; }
 }

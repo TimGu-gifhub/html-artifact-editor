@@ -24,7 +24,7 @@ export function prepareSourceDiff(outputRoot: string, source: SourceIndex, candi
       && Buffer.from(change.after.text).equals(bytes.subarray(change.after.startByte, change.after.endByte)));
   return new Promise((resolveDiff, reject) => {
     const worker = new Worker(resolve(outputRoot, 'diff-worker/index.cjs'), {
-      workerData: { bytes: original, identity: source.identity, candidate: { ...candidate, bytes } },
+      workerData: { bytes: original, identity: source.identity, lineage: source.lineage, candidate: { ...candidate, bytes } },
       resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32, stackSizeMb: 8 },
     });
     let finished = false;

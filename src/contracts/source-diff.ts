@@ -37,7 +37,7 @@ export function isSourceDiff(value: unknown): value is SourceDiff {
   let oldEnd = 0; let newEnd = 0; let unchanged = 0; const ids = new Set<string>();
   for (const change of value.changes) {
     if (!object(change) || Object.keys(change).length !== 6 || typeof change.nodeId !== 'string' || !/^n[0-9]{1,6}$/u.test(change.nodeId)
-      || ids.has(change.nodeId) || !slice(change.before) || !slice(change.after) || change.before.startByte === change.before.endByte
+      || ids.has(change.nodeId) || !slice(change.before) || !slice(change.after)
       || change.before.text === change.after.text || change.before.startByte < oldEnd || change.after.startByte !== newEnd + change.before.startByte - oldEnd
       || change.before.endByte > value.baseSize || change.after.endByte > value.candidateSize
       || !['lf', 'crlf', 'cr'].includes(change.lineEnding as string) || typeof change.mixedLineEndings !== 'boolean'
