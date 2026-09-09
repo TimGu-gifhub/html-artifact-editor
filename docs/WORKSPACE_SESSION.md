@@ -1,6 +1,6 @@
 # 统一窗口会话
 
-日期：2026-09-09；HAE-005 第五阶段，包含 HAE-008 的目录/诊断与 HAE-010 的显式保存扩展。Main 已把文档管理、可信 IPC、原生预览挂载、Windows 保存与基线重建、关闭保护组装成一个服务，由真实 Electron 自动实验驱动。正常应用入口仍只读，尚无产品校稿控件、诊断面板或保存/恢复界面；原生目录/入口选择器适配器已提供，人工操作仍待验收。此阶段不是 M2 验收。
+日期：2026-09-10；HAE-005 第五阶段，包含 HAE-008 的目录/诊断与 HAE-010 的显式保存、备份恢复扩展。Main 已把文档管理、可信 IPC、原生预览挂载、Windows 保存与基线重建、关闭保护组装成一个服务，由真实 Electron 自动实验驱动。正常应用入口仍只读，尚无产品校稿控件、诊断面板或保存/恢复界面；原生目录/入口选择器适配器已提供，人工操作仍待验收。此阶段不是 M2 验收。
 
 ## 单一文档身份
 
@@ -18,13 +18,17 @@
 | `switchEntry(documentId, stateRevision)` | 只在操作所属 current 文档的既有根内选择入口，不能自动重新授权或接受 UI 路径 |
 | `readDiff(documentId, draftRevision, candidateHash)` | 读取指定已应用候选的完整源码 Diff；不改变输入、不写检查点或 HTML，过期结果拒绝 |
 | `save(documentId, stateRevision, review?)` | Main 显式保存已应用候选并重建基线；review 绑定所显示 Diff 的 draftRevision/candidateHash，过期确认拒绝；未应用输入/组合态拒绝，不隐式 Apply |
+| `listBackups(documentId)` | 只读列出当前目标的完整备份元数据，绑定 documentId，不返回私有字节/路径；并发列表读取有界 |
+| `restoreBackup(documentId, stateRevision, reference)` | Main 固定 transactionId/intentHash 所指备份并单独询问确认；拒绝组合态、未应用/未保存变化，排空干净点后执行恢复及新基线核验 |
 | `retryPersistence(documentId, draftRevision)` | 只重试当前文档最新已应用草稿的私有检查点；不接受路径/候选、不写 HTML，完成状态经 read/onState 读取 |
 | `edit(documentId, value)` | documentId 必须是该操作所属快照的 current.id；value 只允许 begin/change/apply/resolve/history/save-copy 的精确 schema |
 | `onState(listener)` | 返回取消订阅函数；先订阅再 read；最多 32 个订阅，通知只含纯状态 |
 
 documentId 必须随用户操作一起捕获，不能在迟到回调中自动换成新文件 ID。即便新旧文档恰有相同输入 revision，旧 ID 也会以 STALE_DOCUMENT 拒绝，不调用新文件的输入或选择器。编辑值仍须通过 [输入合同](../src/contracts/input.ts)；文件身份不能替代 Text 身份、editToken 和版本核验。
 
-返回 `{ok, code, state, documentId, copy, outcome, recovery, diff}`：state 是窗口最新快照；documentId 说明本次 edit/switchEntry/save/retryPersistence/readDiff 的目标，copy 说明本次编辑请求；outcome 包含 opened/restored/cancelled，以及保存的 saved/unchanged/rebase-required。recovery 仅在列表成功时返回摘要；diff 仅在读取成功时返回所请求的文档/修订/候选及完整源码切片，其余为 null 或未提供。保存成功后，返回的 documentId 仍是请求的旧目标，state.current.id 已是新基线文档。状态可能已前进，不能把旧请求结果提示到另一份文档。只有本次 copy.status=created 表示副本核验成功，原入口保存点不变。授权拒绝返回 RESOURCE_BLOCKED；未列入公开错误集的内部异常使用固定 WORKSPACE_COMMAND_FAILED，不泄漏路径或原始错误。
+返回 `{ok, code, state, documentId, copy, outcome, recovery, diff, backups}`：state 是窗口最新快照；documentId 说明本次文档命令的目标，copy 说明本次编辑请求；outcome 包含 opened/restored/cancelled，以及保存的 saved/unchanged/rebase-required 和整份备份恢复的 backup-restored。recovery/backups 仅在对应列表成功时返回摘要；diff 仅在读取成功时返回所请求的文档/修订/候选及完整源码切片，其余为 null 或未提供。保存或备份恢复成功后，返回的 documentId 仍是请求的旧目标，state.current.id 已是新基线文档。状态可能已前进，不能把旧请求结果提示到另一份文档。只有本次 copy.status=created 表示副本核验成功，原入口保存点不变。授权拒绝返回 RESOURCE_BLOCKED；未列入公开错误集的内部异常使用固定 WORKSPACE_COMMAND_FAILED，不泄漏路径或原始错误。
+
+备份恢复使用独立的 backupReview 与 Main reviewBackup 回调，精确确认、版本固定和冻结/新历史合同见 [窗口备份恢复](BACKUP_RESTORE.md)。成功值 backup-restored 表示 HTML 已恢复并完成新基线核验；草稿恢复的 restored 不写 HTML。lastSave.operation=backup-restore 标记本次结果来源；故障与清理警告沿用保存结果规则。
 
 Diff 基于打开/最近保存时的原始字节和同一冻结候选，由有限 Worker 计算；不包含未应用输入。UI 必须按文字显示原始源码，不执行它，范围仅用于显示，不能作为文件写入权限。产品从 Diff 发起 Save 时须携带实际显示的 review；即使后来候选 hash 相同，旧修订也不能确认新保存。该校验不替代磁盘冲突、备份或输入保护。完整字段、缓存、取消与错误合同见 [源码 Diff](SOURCE_DIFF.md)。
 
@@ -89,6 +93,8 @@ HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoint
 第六阶段增加 readDiff，生产 API 共十一个方法，Save 可携带 Diff review。`npm run test:source-diff` 执行八组真实 Electron 实验：干净只读、恢复后的完整词法差异、未应用/组合态保护、新修订拒绝旧确认、净变更归零、renderer 重连/旧文档拒绝，以及 Windows 保存字节一致性和外部冲突。文档清理同时等待 Diff Worker 终止和持久化排空；终止失败保留占用，不报告释放成功。产品面板、历史与真实 IME 仍待接入。
 
 第十一阶段在同一持久化队列的写入锁内加入 [旧检查点清理](CHECKPOINT_COMPACTION.md)。活动 v2 序列保留最近两个完整点及全部 Undo/Redo；新点已核验但清理失败时保留准确的 persisted 修订与 cleanupPending，后来的 Apply 只更新最新内存待写项，不冒充已写盘。后台通知不推进输入版本；实际遗留锁继续阻止 Save 和恢复，产品故障处理仍待实现。
+
+HAE-010 第六阶段新增 listBackups/restoreBackup 后，生产 API 共十三个方法。`test:save-session` 新增十四组 [备份窗口实验](../tests/save-session/backup.ts)，共四十组通过；仍在原有 90 秒上限内运行。包括单独确认、净变化/组合标志保护、精确干净点、实际 renderer 崩溃、Windows 替换与再次保存、重建失败和清理警告。没有产品控件、真实 IME 或原生备份确认对话框验收。
 
 ## 历史命令与保存后的恢复
 

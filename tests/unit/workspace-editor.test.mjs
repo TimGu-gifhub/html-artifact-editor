@@ -2,6 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { isWorkspaceCommand, isWorkspaceRequest } from '../../src/contracts/workspace-editor.ts';
+import { isBackupDecision } from '../../src/contracts/backup.ts';
+
+test('backup commands bind a current document and an exact private-record reference without file or confirmation authority', () => {
+  const documentId = randomUUID(); const reference = { transactionId: randomUUID(), intentHash: 'a'.repeat(64) };
+  const request = { kind: 'backup-restore', stateRevision: 1, documentId, reference };
+  assert.ok(isWorkspaceCommand(request)); assert.ok(isWorkspaceCommand({ kind: 'backup-list', documentId }));
+  for (const value of [ { kind: 'backup-list' }, { kind: 'backup-list', documentId, path: 'private' },
+    { ...request, documentId: null }, { ...request, stateRevision: 0 }, { ...request, force: true },
+    { ...request, decision: 'restore' }, { ...request, bytes: [] }, { ...request, path: 'other.html' },
+    ...[null, {}, { transactionId: '../other', intentHash: reference.intentHash }, { ...reference, intentHash: 'invalid' },
+      { ...reference, path: 'backup.bin' }, { ...reference, bytes: [] }].map(reference => ({ ...request, reference })) ]) {
+    assert.equal(isWorkspaceCommand(value), false, JSON.stringify(value));
+  }
+  const decision = { reviewId: randomUUID(), decision: 'restore' };
+  assert.ok(isBackupDecision(decision)); assert.ok(isBackupDecision({ ...decision, decision: 'cancel' }));
+  for (const value of [null, [], { ...decision, reviewId: 'old' }, { ...decision, decision: 'discard' }, { ...decision, force: true }]) {
+    assert.equal(isBackupDecision(value), false);
+  }
+});
 
 test('workspace requests require a specific document identity for every edit and exclude file authority', () => {
   const documentId = randomUUID(); const sessionId = randomUUID();

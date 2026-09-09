@@ -54,6 +54,22 @@ function setup() {
   return { workspace, controls, docs, open, add(name) { const value = source(name); docs.set(name, value); return value; } };
 }
 
+test('backup listing coalesces reads and rejects stale results without accumulating scans after document switches', async () => {
+  const first = source('first'); const second = source('second'); const held = deferred(); let calls = 0;
+  const workspace = createWorkspace('test-output', { review: async () => assert.fail('no review'), chooseCopy: async () => undefined },
+    async (_root, name) => name === 'first' ? first : second, undefined, undefined, undefined,
+    { list: async () => { calls++; return held.promise; } });
+  await workspace.open(workspace.snapshot().stateRevision, async () => 'first');
+  const a = workspace.listBackups(first.id); const b = workspace.listBackups(first.id);
+  const rejected = Promise.all([assert.rejects(a, /STALE_DOCUMENT/), assert.rejects(b, /STALE_DOCUMENT/)]);
+  assert.equal(calls, 1);
+  await workspace.open(workspace.snapshot().stateRevision, async () => 'second');
+  await assert.rejects(workspace.listBackups(second.id), /WORKSPACE_BUSY/); assert.equal(calls, 1);
+  held.resolve({ entries: [], locked: false, reviewRequired: false }); await rejected;
+  assert.equal((await workspace.listBackups(second.id)).documentId, second.id); assert.equal(calls, 2);
+  await workspace.dispose();
+});
+
 test('saved bytes do not publish a new baseline when mapping is invalid before or during native activation', async () => {
   for (const timing of ['prepared', 'verified', 'activated']) {
     const previous = source('previous'); const next = source('next'); const bytes = Buffer.from('<!doctype html><h1>saved</h1>'); const resultHash = digest(bytes);

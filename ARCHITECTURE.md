@@ -185,13 +185,15 @@ Main DirectoryGrant 固定实际目录身份与私有路径排除；ProjectGrant
 
 平台层持有源文件路径链、完整字节、dev/ino 与纳秒时间戳；Main 准备服务以私有存储全局独占锁串行化合作实例，在不可覆写的独立文件中存原始备份、候选、intent 和准备/取消记录。每一步保持句柄写入、sync、回读 hash 和目录/文件复核。记录仅保存规范路径键及显示名称，没有可直接回放的绝对路径。
 
-Main 明确 commit 后，Windows 适配器独占创建同目录候选临时文件；来自可信安装目录的有限协议助手固定目录/源句柄，最后复核身份、正文及元数据。Main 先写 replacing 记录，助手用 ReplaceFileW 保留被替换的原文件，再保持结果读取句柄；Main 独立回读新 hash/身份，写入并验证 committed，才确认提交。成功后的清理只删除仍持有的原文件备份句柄和本调用的私有锁；失败/未知保留证据，不能取消或盲目重试已启动的提交。候选始终来自字节 Patch；C# 仅处理平台文件能力，没有 Preview/renderer 桥。
+Main 明确 commit 后，Windows 适配器独占创建同目录候选临时文件；来自可信安装目录的有限协议助手固定目录/源句柄，最后复核身份、正文及元数据。Main 先写 replacing 记录，助手用 ReplaceFileW 保留被替换的原文件，再保持结果读取句柄；Main 独立回读新 hash/身份，写入并验证 committed，才确认提交。成功后的清理只删除仍持有的原文件备份句柄和本调用的私有锁；失败/未知保留证据，不能取消或盲目重试已启动的提交。文字保存候选来自字节 Patch，整份备份恢复另使用已核验的原始备份字节；C# 仅处理平台文件能力，没有 Preview/renderer 桥。
 
 Workspace 的可选 Main 保存端口把上述事务接入显式 save 命令，冻结已应用候选并互斥输入/打开/关闭。提交后沿原项目根重新准备文档，复核当前文件仍匹配 committed 版本，才发布新 documentId、基线和映射；清空 Text 不复用旧节点身份。重建失败保留旧草稿与事务，返回 rebase-required；已经提交后 UI 崩溃不撤销磁盘操作，Main 继续核对和重建。具体状态与窄接口见 [统一窗口会话](docs/WORKSPACE_SESSION.md)。
 
 重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选、已提交版本或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限。正常产品窗口、跨保存的逻辑历史、恢复向导、持久化编辑意图与 Windows 10/macOS 验收仍待完成，完整协议与 OS 竞态边界见 [保存事务合同](docs/SAVE_PREPARATION.md)。
 
 Main 的 prepareRestore 读取完整有效事务中的 backup.bin，绑定记录 hash、目录/文件身份及字节，再针对当前重新授权的 SaveSource 创建新事务。新 backup.bin 是恢复前的当前文件，candidate.bin 是被选备份的完整原始字节；v2 intent 的 restoreOf 引用来源事务及其 intentHash，普通保存仍使用 v1。准备及替换中重新核验备份来源和当前版本；后续 commit/unknown/清理与普通保存相同。当前只恢复 HTML 主数据流字节并保留当前文件元数据，不从旧日志重建路径权限或历史 ACL/数据流。该能力尚未暴露到窗口恢复 UI，也不会解除遗留锁。
+
+Workspace 的可选 [备份端口](docs/BACKUP_RESTORE.md) 已将元数据列表与单独确认请求接入可信 IPC。Main 固定确认前的备份 proof，拒绝未保存输入并排空精确干净点，再调用同一事务；成功后核验文件/提交记录和原生新映射，建立全新历史。整份备份不会经旧 Text 范围或序列化 DOM 保存。异常保留冻结旧会话，renderer 撤销不能重试已开始的替换；产品列表/确认界面仍未接入。
 
 ### HAE-011：逻辑草稿检查点
 

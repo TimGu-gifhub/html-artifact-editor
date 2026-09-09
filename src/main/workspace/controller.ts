@@ -5,15 +5,20 @@ import type { InputSnapshot } from '../../contracts/input.ts';
 import type { DraftStore, OpenDocument, prepareDocument } from './document.ts';
 import type { ProjectSource } from '../protocol/project-files.ts';
 import type { OriginalSaver, OriginalSaveResult } from '../storage/original.ts';
-import { isTransactionId } from '../../contracts/save-record.ts';
+import { isRestoreReference, isTransactionId } from '../../contracts/save-record.ts';
 import type { WorkspaceRecoveryCatalog } from '../../contracts/recovery.ts';
 import { isDiffReview } from '../../contracts/source-diff.ts';
 import type { DiffReview, WorkspaceDiff } from '../../contracts/source-diff.ts';
 import { openSaveSource } from '../../platform/save-source.ts';
+import { isBackupDecision } from '../../contracts/backup.ts';
+import type { BackupReview, WorkspaceBackupCatalog } from '../../contracts/backup.ts';
+import type { RestoreReference } from '../../contracts/save-record.ts';
+import type { BackupRestorer } from '../storage/backups.ts';
 
 export type WorkspaceDecisions = Readonly<{
   review: (value: LeaveReview) => Promise<unknown>;
   chooseCopy: (name: string) => Promise<string | undefined>;
+  reviewBackup?: (value: BackupReview) => Promise<unknown>;
 }>;
 export type ActivateDocument = (next: OpenDocument | null, previous: OpenDocument | null) => () => void;
 type DepartureProof = Readonly<{ input: InputSnapshot; reason: 'discarded' | 'copied' | null }>;
@@ -21,7 +26,7 @@ type DepartureProof = Readonly<{ input: InputSnapshot; reason: 'discarded' | 'co
 // The synchronous activation port must restore its prior state before throwing.
 // A successful activation returns a rollback for a failed final authority check.
 export function createWorkspace(outputRoot: string, decisions: WorkspaceDecisions, prepare: typeof prepareDocument,
-  activate: ActivateDocument = () => () => {}, saveOriginal?: OriginalSaver, checkpoints?: DraftStore) {
+  activate: ActivateDocument = () => () => {}, saveOriginal?: OriginalSaver, checkpoints?: DraftStore, backups?: BackupRestorer) {
   let current: OpenDocument | null = null;
   let phase: WorkspacePhase = 'idle';
   let revision = 1;
@@ -35,6 +40,8 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
   let lastDeparture: WorkspaceDepartureReport | null = null;
   let retainedSave: OriginalSaveResult | null = null;
   let listing: Promise<WorkspaceRecoveryCatalog> | null = null;
+  let backupListing: Readonly<{ document: OpenDocument; promise: Promise<WorkspaceBackupCatalog> }> | null = null;
+  let backupReview: BackupReview | null = null;
   const listeners = new Set<() => void>();
   // Keep objects whose teardown failed as evidence; block further opens instead
   // of accumulating unbounded views or pretending cleanup succeeded.
@@ -48,7 +55,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
   const snapshot = (): WorkspaceSnapshot => Object.freeze({ stateRevision: revision, phase,
     current: current ? Object.freeze({ id: current.id, name: current.name, input: current.input.snapshot(), project: current.project(),
       persistence: current.persistence?.snapshot() ?? null }) : null,
-    review, cleanupPending: activationUncertain || failedCleanup.size > 0 || !!lastDeparture?.cleanupPending, lastSave, lastDeparture,
+    review, backupReview, cleanupPending: activationUncertain || failedCleanup.size > 0 || !!lastDeparture?.cleanupPending, lastSave, lastDeparture,
     canSave: !!saveOriginal && phase === 'idle' && !disposed && !activationUncertain && !failedCleanup.size
       && !lastSave?.requiresReview && !lastDeparture?.requiresReview && !!current && current.input.snapshot().canSaveCopy
       && (!current.history || current.history.available)
@@ -231,7 +238,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (!published && !started) release();
     }
   };
-  const finish = (): void => { pending = null; review = null; phase = disposed ? 'disposed' : 'idle'; notify(); };
+  const finish = (): void => { pending = null; review = null; backupReview = null; phase = disposed ? 'disposed' : 'idle'; notify(); };
   const openDocument = async (expectedRevision: number, choose: (signal: AbortSignal) => Promise<ProjectSource | undefined>,
     recoverySessionId?: string): Promise<WorkspaceOutcome> => {
     const operation = begin(expectedRevision, 'choosing');
@@ -278,6 +285,94 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (disposed || current !== value) throw new Error('STALE_DOCUMENT');
       if (value.draft.revision !== draftRevision || value.draft.candidate.resultHash !== candidateHash) throw new Error('STALE_SOURCE_DIFF');
       return Object.freeze({ ...diff, documentId, draftRevision });
+    },
+    async listBackups(documentId: string): Promise<WorkspaceBackupCatalog> {
+      const document = current;
+      if (disposed || !document || document.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (!backups) throw new Error('BACKUP_RESTORE_UNAVAILABLE');
+      if (phase !== 'idle') throw new Error('WORKSPACE_BUSY');
+      if (backupListing?.document === document) return backupListing.promise;
+      if (backupListing) throw new Error('WORKSPACE_BUSY');
+      const entry = { document, promise: backups.list(document.saveSource).then(catalog => {
+        if (disposed || current !== document) throw new Error('STALE_DOCUMENT');
+        return Object.freeze({ ...catalog, documentId });
+      }).finally(() => { if (backupListing === entry) backupListing = null; }) };
+      backupListing = entry; return entry.promise;
+    },
+    async restoreBackup(expectedRevision: number, documentId: string, reference: RestoreReference): Promise<Readonly<{ status: WorkspaceSaveReport['status']; state: WorkspaceSnapshot }>> {
+      const leaving = current; const reviewBackup = decisions.reviewBackup;
+      if (!leaving || leaving.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (!backups || !reviewBackup) throw new Error('BACKUP_RESTORE_UNAVAILABLE');
+      if (!isRestoreReference(reference)) throw new Error('BACKUP_RECORD_INVALID');
+      if (lastSave?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
+      const before = leaving.input.snapshot(); inputReady(before);
+      if (before.hasUnappliedInput) throw new Error('UNAPPLIED_INPUT');
+      if (before.changes.length || leaving.draft.candidate.patches.length) throw new Error('UNSAVED_CHANGES');
+      if (leaving.mapping.status !== 'ready' || (leaving.history && !leaving.history.available)) throw new Error('DRAFT_UNAVAILABLE');
+      const selectedReference = Object.freeze({ ...reference });
+      const operation = begin(expectedRevision, 'reviewing');
+      let next: OpenDocument | null = null; let release: (() => void) | undefined; let keepFrozen = false;
+      const report = (status: WorkspaceSaveReport['status'], code: string | null, cleanupPending = false, requiresReview = false): void => {
+        lastSave = Object.freeze({ documentId: current?.id ?? documentId, operation: 'backup-restore', status, code, cleanupPending, requiresReview }); notify();
+      };
+      let status: WorkspaceSaveReport['status'];
+      try {
+        status = await (async (): Promise<WorkspaceSaveReport['status']> => {
+          const selected = await backups.review(leaving.saveSource, selectedReference); live(operation);
+          if (current !== leaving || !sameInput(before, leaving.input.snapshot())) throw new Error('STALE_DOCUMENT_REVIEW');
+          if (selected.backup.hash === leaving.saveSource.baseHash) { report('unchanged', null); return 'unchanged'; }
+          backupReview = Object.freeze({ reviewId: randomUUID(), documentId, currentName: leaving.name,
+            currentHash: leaving.saveSource.baseHash, backup: selected.backup }); notify();
+          const answer = await ask(operation, () => reviewBackup(backupReview!)); live(operation);
+          if (!isBackupDecision(answer) || answer.reviewId !== backupReview.reviewId) throw new Error('STALE_DOCUMENT_REVIEW');
+          if (answer.decision === 'cancel') { report('cancelled', null); return 'cancelled'; }
+          if (current !== leaving || !sameInput(before, leaving.input.snapshot())) throw new Error('STALE_DOCUMENT_REVIEW');
+          release = leaving.input.holdDeparture(before.stateRevision);
+          const frozen = leaving.input.snapshot(); phase = 'saving'; notify();
+          const durable = await leaving.persistence?.settle(); live(operation);
+          if (!sameInput(frozen, leaving.input.snapshot())) throw new Error('STALE_DOCUMENT_REVIEW');
+          if (durable && (durable.cleanupPending || (frozen.draftRevision > 1
+            && (durable.persisted?.draftRevision !== frozen.draftRevision || durable.persisted.resultHash !== frozen.candidateHash)))) {
+            throw new Error('DRAFT_PERSISTENCE_REQUIRED');
+          }
+          // After entry into the transaction, unexpected errors retain the
+          // frozen old session. Only a known pre-write result can release it.
+          keepFrozen = true;
+          let result: OriginalSaveResult;
+          try { result = await selected.restore(operation.signal); }
+          catch { report('unknown', 'SAVE_OUTCOME_UNKNOWN', true, true); return 'unknown'; }
+          retainedSave = result; keepFrozen = result.status === 'committed' || result.requiresReview;
+          if (result.status !== 'committed') {
+            report(result.status, result.code, result.cleanupPending, result.requiresReview); return result.status;
+          }
+          lastSave = null; notify();
+          let staged: ReturnType<typeof stageInstall> | undefined;
+          try {
+            if (disposed || pending !== operation || current !== leaving) throw new Error('SAVE_REBASE_REQUIRED');
+            rebuilding = new AbortController();
+            const saved = await openSaveSource(leaving.entry, selected.bytes);
+            if (!result.verifySaved || !await result.verifySaved(saved)) throw new Error('SAVE_REBASE_REQUIRED');
+            // A whole-backup replacement starts a new clean logical history;
+            // offsets, drafts and old Text lineage are never carried across it.
+            next = await prepare(outputRoot, leaving.preview.grant, ++generation, rebuilding.signal, checkpoints);
+            const check = (): void => {
+              if (disposed || activationUncertain || pending !== operation || current !== leaving || rebuilding?.signal.aborted
+                || next?.mapping.status !== 'ready' || next.saveSource.baseHash !== result.expectedHash
+                || next.draft.candidate.resultHash !== result.expectedHash || !sameInput(frozen, leaving.input.snapshot())) throw new Error('SAVE_REBASE_REQUIRED');
+            };
+            if (!await result.verifySaved(next.saveSource)) throw new Error('SAVE_REBASE_REQUIRED');
+            staged = stageInstall(next, check);
+            if (!await result.verifySaved(next.saveSource)) throw new Error('SAVE_REBASE_REQUIRED');
+            check(); const previous = staged.publish(); next = null;
+            report('backup-restored', result.code, result.cleanupPending, result.cleanupPending);
+            await retire(previous); return 'backup-restored';
+          } catch {
+            try { staged?.rollback(); } catch { activationUncertain = true; }
+            retainedSave = result; report('rebase-required', 'SAVE_REBASE_REQUIRED', result.cleanupPending, true); return 'rebase-required';
+          }
+        })();
+      } finally { if (!keepFrozen) release?.(); await retire(next); rebuilding = null; finish(); }
+      return { status, state: snapshot() };
     },
     async save(expectedRevision: number, documentId: string, reviewed?: DiffReview): Promise<Readonly<{ status: WorkspaceSaveReport['status']; state: WorkspaceSnapshot }>> {
       const leaving = current;

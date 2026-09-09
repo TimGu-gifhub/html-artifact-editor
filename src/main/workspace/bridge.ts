@@ -11,7 +11,8 @@ import type { ProjectChoices } from './project-choice.ts';
 const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUSY', 'INPUT_COMPOSING',
   'DOCUMENT_RECOVERY_REQUIRED', 'DOCUMENT_CLEANUP_REQUIRED', 'STALE_DOCUMENT_REVIEW', 'WORKSPACE_CANCELLED',
   'DOCUMENT_ACTIVATION_FAILED', 'DOCUMENT_ACTIVATION_UNKNOWN', 'STALE_DOCUMENT',
-  'SAVE_PLATFORM_UNSUPPORTED', 'UNAPPLIED_INPUT',
+  'SAVE_PLATFORM_UNSUPPORTED', 'UNAPPLIED_INPUT', 'UNSAVED_CHANGES', 'BACKUP_RESTORE_UNAVAILABLE',
+  'BACKUP_RECORD_INVALID', 'BACKUP_RECORD_CHANGED', 'BACKUP_WRONG_TARGET', 'BACKUP_LIMIT', 'FILE_CHANGED',
   'DRAFT_PERSISTENCE_UNAVAILABLE', 'DRAFT_PERSISTENCE_RETRY_UNAVAILABLE', 'STALE_DRAFT_REQUEST',
   'DRAFT_PERSISTENCE_REQUIRED', 'DRAFT_RETIREMENT_FAILED', 'DRAFT_RETIREMENT_UNKNOWN',
   'DRAFT_PROFILE_IN_USE', 'DRAFT_SESSION_ACTIVE', 'DRAFT_RECOVERY_UNAVAILABLE', 'DRAFT_RECOVERY_CONFLICT',
@@ -35,9 +36,16 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         let outcome: WorkspaceResult['outcome'] = null;
         let recovery: WorkspaceResult['recovery'] = null;
         let diff: WorkspaceResult['diff'] = null;
+        let backups: WorkspaceResult['backups'] = null;
         const documentId = 'documentId' in command ? command.documentId : null;
         try {
-          if (command.kind === 'source-diff') {
+          if (command.kind === 'backup-list') {
+            backups = await workspace.listBackups(command.documentId);
+          } else if (command.kind === 'backup-restore') {
+            const result = await workspace.restoreBackup(command.stateRevision, command.documentId, command.reference);
+            code = ['failed', 'unknown', 'rebase-required'].includes(result.status) ? result.state.lastSave?.code ?? 'SAVE_FAILED' : null;
+            outcome = result.status === 'backup-restored' || result.status === 'unchanged' || result.status === 'cancelled' || result.status === 'rebase-required' ? result.status : null;
+          } else if (command.kind === 'source-diff') {
             diff = await workspace.readDiff(command.documentId, command.draftRevision, command.candidateHash);
           } else if (command.kind === 'recovery-list') {
             recovery = await workspace.listRecovery();
@@ -86,7 +94,7 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         } catch (error) {
           code = error instanceof Error && publicErrors.has(error.message) ? error.message : 'WORKSPACE_COMMAND_FAILED';
         }
-        return { ok: code === null, code, state: workspace.snapshot(), documentId, copy, outcome, recovery, diff };
+        return { ok: code === null, code, state: workspace.snapshot(), documentId, copy, outcome, recovery, diff, backups };
       },
     });
 }

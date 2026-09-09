@@ -60,7 +60,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:session` | 同一窗口的可信 IPC/文档身份/预览/关闭，挂载回滚、旧请求拒绝、UI 崩溃重连与未返回选择器撤销；不是产品控件验收 |
 | `npm run test:project` | 生产 preload/IPC 上的目录授权、嵌套资源、CSP/API 诊断、入口切换/另存/撤销及根目录替换；选择器仍为 Main 测试回调 |
 | `npm run test:storage` | Electron 内嵌 Node 执行真实文件准备、Windows 原生替换/备份恢复、权限/占用、事务故障及进程强杀；仅覆盖自制临时 HTML，无产品窗口 |
-| `npm run test:save-session` | Windows 真实 Electron 窗口、生产 IPC、原文件保存/重建、崩溃/未知结果/外部冲突/清理警告；无产品控件或真实 IME |
+| `npm run test:save-session` | Windows 真实 Electron 窗口、生产 IPC、原文件保存/备份恢复/重建、崩溃/未知结果/外部冲突/清理警告；无产品控件或真实 IME |
 | `npm run test:recovery` | 真实 Electron 的恢复列表/重新授权/新映射安装、进程所有权、恢复后编辑与 Windows 保存去重；自制空白 transport 页面，无产品验收 |
 | `npm run test:source-diff` | 真实 Electron 生产接口读取完整源码 Diff、拒绝旧确认、重连及 Windows 保存字节/冲突检查；无产品 Diff 面板 |
 | `npm run test:history` | 逻辑历史通过真实 Worker、Main Windows 保存端口和隔离 Preview，验证空 Text 安装/恢复、保存点/分支、原生选择/编辑锁、确认丢失及来源/DOM 拒绝；另含可信 Workspace history、v2 检查点和实际进程重启；无产品控件 |
@@ -128,6 +128,8 @@ HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重
 `test-results/security.json` 记录本次 commit/工作区、运行版本、自制样例 SHA-256、10 组已执行断言与零网络连接结果；`security-proofread.png` / `security-interactive.png` / `security-preview.png` 是忽略的渲染截图。预览原生文件输入被取消、下载事件被 preventDefault，以及主/子 frame 保存调用无 handler 均有执行断言；输出中的两条 `No handler registered for 'hae:save'` 是预期负向证据。详见 [HAE-002 记录](implementation/HAE-002.md)。
 
 ## 本地检查和平台待验项
+
+HAE-010 第六阶段的 [窗口备份恢复](BACKUP_RESTORE.md) 在 test:save-session 中增加十四组实验，与原保存/离开检查合计四十组；test:storage 另纳入六项 backup-review.test.mjs。备份确认使用 Main 测试回调，空白可信 transport 页面只验证接口和真实文件结果，不等同于产品恢复界面。
 
 HAE-010 第五阶段把 [七项保存中断处置实验](../tests/unit/save-resolution.test.mjs) 加入 Windows 存储门槛，并将 `test:history` 扩为 31 组：真实 profile 竞争、原生提交/未确认处的进程强杀、Main 明确处置、干净历史恢复/Undo 和单独备份恢复。助手的 review 分支由同一 C# 源构建；仍只提交源码，不提交 exe、profile 或恢复记录。本节点没有增大现有测试时限；产品 UI、原生 IME/对话框与其他平台继续单独验收。
 

@@ -13,13 +13,14 @@ import { readCompactionResolutions } from './compaction-resolutions.ts';
 import { draftOwnership } from './draft-ownership.ts';
 import { saveResolutionFile } from '../../contracts/save-resolution.ts';
 import { readSaveResolutions } from './save-resolutions.ts';
+import type { BackupSummary } from '../../contracts/backup.ts';
 
 const JSON_LIMIT = 16 * 1024;
 const STORE_LIMIT = 200 * 1024 * 1024;
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.stringify(value)}\n`);
 const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 type Lock = Awaited<ReturnType<CheckedDirectory['writeNew']>>;
-type RestoreProof = Readonly<{ reference: RestoreReference; bytes: Uint8Array; verify: () => Promise<void> }>;
+type RestoreProof = Readonly<{ reference: RestoreReference; createdAt: number; bytes: Uint8Array; verify: () => Promise<void> }>;
 export type PreparationResult = Readonly<{ status: 'failed'; code: string; transactionId: string | null; cancel: null }>
   | Readonly<{ status: 'prepared'; code: null; transactionId: string; intent: SaveIntent; cancel: () => Promise<void>;
     commit: () => Promise<ReplacementResult> }>;
@@ -142,7 +143,8 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
         || !sameVersion(nowHeader.stat, header.stat) || !sameVersion(nowBackup.stat, backup.stat)) throw new Error('BACKUP_RECORD_CHANGED');
     };
     await verify();
-    return Object.freeze({ reference: Object.freeze({ transactionId, intentHash: header.hash }), bytes: backup.bytes, verify });
+    return Object.freeze({ reference: Object.freeze({ transactionId, intentHash: header.hash }), createdAt: prior.intent.createdAt,
+      bytes: backup.bytes, verify });
   };
   const operations = { inspect,
     async scan() {
@@ -264,6 +266,17 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
   };
   return Object.freeze({ namespace: root.identityChain, inspect, scan: operations.scan,
     prepare: (source: SaveSource, candidate: Pick<PatchCandidate, 'bytes' | 'baseHash' | 'resultHash'>) => operations.prepare(source, candidate),
+    async reviewBackup(source: SaveSource, transactionId: string) {
+      await source.verify();
+      const proof = await restoreProof(source, transactionId);
+      await source.verify();
+      const summary: BackupSummary = Object.freeze({ reference: proof.reference, createdAt: proof.createdAt,
+        size: proof.bytes.length, hash: digest(proof.bytes) });
+      // This Main-only closure retains the exact versions seen before review.
+      // A later preparation must not silently adopt a rewritten backup record.
+      return Object.freeze({ summary, get bytes() { return new Uint8Array(proof.bytes); },
+        prepare: () => operations.prepare(source, { bytes: proof.bytes, baseHash: source.baseHash, resultHash: summary.hash }, proof) });
+    },
     async prepareRestore(source: SaveSource, transactionId: string): Promise<PreparationResult> {
       if (busy) return Object.freeze({ status: 'failed', code: 'SAVE_BUSY', transactionId: null, cancel: null });
       try {

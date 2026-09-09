@@ -4,6 +4,9 @@ import type { WorkspaceSnapshot } from './workspace.ts';
 import type { WorkspaceRecoveryCatalog } from './recovery.ts';
 import { isDiffReview } from './source-diff.ts';
 import type { DiffReview, WorkspaceDiff } from './source-diff.ts';
+import { isRestoreReference } from './save-record.ts';
+import type { WorkspaceBackupCatalog } from './backup.ts';
+import type { RestoreReference } from './save-record.ts';
 
 export const WORKSPACE_CONNECT = 'hae:workspace-connect';
 export const WORKSPACE_COMMAND = 'hae:workspace-command';
@@ -14,13 +17,16 @@ export type WorkspaceCommand = Readonly<{ kind: 'read' | 'recovery-list' }>
   | Readonly<{ kind: 'restore'; stateRevision: number; recoverySessionId: string; sourceMode: 'file' | 'directory' }>
   | Readonly<{ kind: 'switch-entry'; stateRevision: number; documentId: string }>
   | Readonly<{ kind: 'save'; stateRevision: number; documentId: string; review?: DiffReview }>
+  | Readonly<{ kind: 'backup-list'; documentId: string }>
+  | Readonly<{ kind: 'backup-restore'; stateRevision: number; documentId: string; reference: RestoreReference }>
   | Readonly<{ kind: 'source-diff'; documentId: string; draftRevision: number; candidateHash: string }>
   | Readonly<{ kind: 'retry-persistence'; draftRevision: number; documentId: string }>
   | Readonly<{ kind: 'edit'; documentId: string; value: DocumentCommand }>;
 export type WorkspaceRequest = Readonly<{ sessionId: string; sequence: number; command: WorkspaceCommand }>;
 export type WorkspaceResult = Readonly<{
   ok: boolean; code: string | null; state: WorkspaceSnapshot | null;
-  documentId: string | null; copy: EditorCopyResult | null; outcome: 'opened' | 'restored' | 'cancelled' | 'saved' | 'unchanged' | 'rebase-required' | null;
+  documentId: string | null; copy: EditorCopyResult | null; outcome: 'opened' | 'restored' | 'backup-restored' | 'cancelled' | 'saved' | 'unchanged' | 'rebase-required' | null;
+  backups?: WorkspaceBackupCatalog | null;
   recovery?: WorkspaceRecoveryCatalog | null;
   diff?: WorkspaceDiff | null;
 }>;
@@ -35,6 +41,8 @@ export type WorkspaceAPI = Readonly<{
   switchEntry: (documentId: string, stateRevision: number) => Promise<WorkspaceResult>;
   readDiff: (documentId: string, draftRevision: number, candidateHash: string) => Promise<WorkspaceResult>;
   save: (documentId: string, stateRevision: number, review?: DiffReview) => Promise<WorkspaceResult>;
+  listBackups: (documentId: string) => Promise<WorkspaceResult>;
+  restoreBackup: (documentId: string, stateRevision: number, reference: RestoreReference) => Promise<WorkspaceResult>;
   retryPersistence: (documentId: string, draftRevision: number) => Promise<WorkspaceResult>;
   edit: (documentId: string, value: DocumentCommand) => Promise<WorkspaceResult>;
   onState: (listener: (state: WorkspaceSnapshot) => void) => () => void;
@@ -55,6 +63,9 @@ export function isWorkspaceCommand(value: unknown): value is WorkspaceCommand {
     case 'source-diff': return count === 4 && identity(value.documentId)
       && isDiffReview({ draftRevision: value.draftRevision, candidateHash: value.candidateHash });
     case 'save': return (count === 3 || (count === 4 && isDiffReview(value.review))) && identity(value.documentId)
+      && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
+    case 'backup-list': return count === 2 && identity(value.documentId);
+    case 'backup-restore': return count === 4 && identity(value.documentId) && isRestoreReference(value.reference)
       && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
     case 'switch-entry': return count === 3 && identity(value.documentId)
       && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;

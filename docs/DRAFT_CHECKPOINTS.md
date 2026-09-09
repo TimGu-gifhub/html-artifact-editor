@@ -6,6 +6,8 @@
 
 完整 Save 的遗留锁可在重启后通过 [新的明确决定](SAVE_RECOVERY.md) 结束。该审查记录不是提交证明：只有原 committed 证据仍精确匹配时，既有 saved v2 历史才可重建；candidate-on-disk 或外部冲突继续拒绝旧历史回放。Save 审查记录与原事务共用检查点配额，部分/损坏审查记录阻止恢复和新写入。
 
+[窗口备份恢复](BACKUP_RESTORE.md) 属于单独确认的 HTML 替换，先冻结输入、排空队列并核验最新干净修订/hash，不能跨过尚未持久化的归零点。成功后使用新文件版本和新的干净历史，旧检查点仍作为证据保留；它不会延续旧 checkpointSessionId 或回放旧 Text 意图。
+
 [captureTextIntents](../src/core/history/checkpoint.ts) 重新验证完整 SourceIndex 和 PatchCandidate，核对基线、身份、补丁、候选完整 hash；同步固定逻辑编辑后才开始异步存储。每项仅保留 nodeId、expectedText、newText、rawSliceHash、contextFingerprint，不保存可执行 offset、替换字节、选择器或路径。
 
 [rebuildCheckpoint](../src/core/history/checkpoint.ts) 使用 Main 当前提供的原始字节和新 SourceIdentity 重新解析完整源码树，核验 Text 是否可编辑、旧文字、源码片段 hash 和上下文，再从新索引生成字节范围与编码。实体、Unicode、换行及结构检查沿用 [Patch 引擎](../src/core/patch/engine.ts)，完整结果必须等于检查点 resultHash。重复目标、动态/只读节点、非规范文本、伪造范围或不匹配的基线均拒绝，不执行全局文字替换。

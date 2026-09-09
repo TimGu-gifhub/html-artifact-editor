@@ -1,6 +1,7 @@
 import type { InputSnapshot } from './input.ts';
 import type { ProjectSummary } from './resources.ts';
 import type { DraftPersistenceState } from './persistence.ts';
+import type { BackupReview } from './backup.ts';
 
 export type WorkspacePhase = 'idle' | 'choosing' | 'opening' | 'reviewing' | 'saving' | 'committing' | 'disposed';
 export type LeaveReview = Readonly<{
@@ -9,8 +10,9 @@ export type LeaveReview = Readonly<{
 }>;
 export type LeaveDecision = Readonly<{ reviewId: string; decision: 'cancel' | 'discard' | 'save-copy' }>;
 export type WorkspaceSaveReport = Readonly<{
-  documentId: string; status: 'saved' | 'rebase-required' | 'failed' | 'unknown' | 'cancelled' | 'unchanged';
+  documentId: string; status: 'saved' | 'backup-restored' | 'rebase-required' | 'failed' | 'unknown' | 'cancelled' | 'unchanged';
   code: string | null; cleanupPending: boolean; requiresReview: boolean;
+  operation?: 'backup-restore';
 }>;
 export type WorkspaceDepartureReport = Readonly<{
   documentId: string; status: 'clean' | 'retired' | 'empty' | 'failed' | 'unknown';
@@ -19,7 +21,7 @@ export type WorkspaceDepartureReport = Readonly<{
 export type WorkspaceSnapshot = Readonly<{
   stateRevision: number; phase: WorkspacePhase;
   current: Readonly<{ id: string; name: string; input: InputSnapshot; project: ProjectSummary; persistence: DraftPersistenceState | null }> | null;
-  review: LeaveReview | null; cleanupPending: boolean; lastSave: WorkspaceSaveReport | null;
+  review: LeaveReview | null; backupReview: BackupReview | null; cleanupPending: boolean; lastSave: WorkspaceSaveReport | null;
   lastDeparture: WorkspaceDepartureReport | null; canSave: boolean;
 }>;
 export type WorkspaceOutcome = Readonly<{

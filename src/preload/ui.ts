@@ -125,6 +125,8 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
     switchEntry: (documentId, stateRevision) => request({ kind: 'switch-entry', documentId, stateRevision }),
     readDiff: (documentId, draftRevision, candidateHash) => request({ kind: 'source-diff', documentId, draftRevision, candidateHash }),
     save: (documentId, stateRevision, review) => request({ kind: 'save', documentId, stateRevision, ...(review === undefined ? {} : { review }) }),
+    listBackups: (documentId) => request({ kind: 'backup-list', documentId }),
+    restoreBackup: (documentId, stateRevision, reference) => request({ kind: 'backup-restore', documentId, stateRevision, reference }),
     retryPersistence: (documentId, draftRevision) => request({ kind: 'retry-persistence', documentId, draftRevision }),
     edit: (documentId, value) => request({ kind: 'edit', documentId, value }),
     onState: (listener) => {
