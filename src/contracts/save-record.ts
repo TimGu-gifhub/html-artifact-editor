@@ -1,10 +1,12 @@
 import { MAX_SOURCE_BYTES } from './source-tree.ts';
 
 export type StoredFileIdentity = Readonly<{ dev: string; ino: string; mtimeNs: string; ctimeNs: string }>;
-export type SaveIntent = Readonly<{
-  version: 1; transactionId: string; targetKey: string; name: string; identity: StoredFileIdentity;
+export type RestoreReference = Readonly<{ transactionId: string; intentHash: string }>;
+type IntentFields = Readonly<{
+  transactionId: string; targetKey: string; name: string; identity: StoredFileIdentity;
   oldHash: string; newHash: string; oldSize: number; newSize: number; createdAt: number;
 }>;
+export type SaveIntent = IntentFields & (Readonly<{ version: 1 }> | Readonly<{ version: 2; restoreOf: RestoreReference }>);
 export type SaveSeal = Readonly<{ version: 1; transactionId: string; intentHash: string; phase: 'prepared' | 'cancelled' | 'replacing' }>;
 export type SaveCommit = Readonly<{ version: 1; transactionId: string; intentHash: string; phase: 'committed'; resultHash: string; identity: StoredFileIdentity }>;
 export type RecoveryState = 'incomplete' | 'invalid' | 'unavailable' | 'wrong-target' | 'baseline-matches' | 'candidate-on-disk' | 'committed-matches' | 'conflict';
@@ -21,8 +23,13 @@ export function isStoredFileIdentity(value: unknown): value is StoredFileIdentit
 }
 export const sameStoredIdentity = (a: StoredFileIdentity, b: StoredFileIdentity): boolean =>
   a.dev === b.dev && a.ino === b.ino && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
+export function isRestoreReference(value: unknown): value is RestoreReference {
+  return record(value) && Object.keys(value).length === 2 && isTransactionId(value.transactionId) && isContentHash(value.intentHash);
+}
 export function isSaveIntent(value: unknown): value is SaveIntent {
-  if (!record(value) || Object.keys(value).length !== 10 || value.version !== 1 || !isTransactionId(value.transactionId)
+  if (!record(value) || (value.version === 1 ? Object.keys(value).length !== 10
+    : value.version !== 2 || Object.keys(value).length !== 11 || !isRestoreReference(value.restoreOf)
+      || value.restoreOf.transactionId === value.transactionId) || !isTransactionId(value.transactionId)
     || !isContentHash(value.targetKey) || !isContentHash(value.oldHash) || !isContentHash(value.newHash)
     || !size(value.oldSize) || !size(value.newSize) || !Number.isSafeInteger(value.createdAt) || (value.createdAt as number) <= 0
     || typeof value.name !== 'string' || !value.name.length || value.name.length > 255 || /[\x00-\x1f\x7f/\\]/u.test(value.name)) return false;

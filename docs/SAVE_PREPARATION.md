@@ -1,6 +1,6 @@
 # 保存事务与私有证据
 
-日期：2026-09-09；HAE-010 第三阶段。准备服务创建私有备份、候选和记录；明确调用 Main 的 commit 才进入 Windows 原生替换。现通过 Workspace 的可选 Main 端口和可信 save 命令验证保存及新基线，正常应用与恢复写盘尚未接入。`prepared` 表示准备证据可读，不表示 HTML 已保存，也不是可以跨异步步骤复用的替换权限。执行范围见 [阶段记录](implementation/HAE-010.md)。
+日期：2026-09-09；HAE-010 第四阶段。准备服务创建私有备份、候选和记录；明确调用 Main 的 commit 才进入 Windows 原生替换。现通过 Workspace 的可选 Main 端口和可信 save 命令验证保存及新基线，另提供 Main 显式备份恢复事务；正常产品窗口与恢复向导尚未接入。`prepared` 表示准备证据可读，不表示 HTML 已保存，也不是可以跨异步步骤复用的替换权限。执行范围见 [阶段记录](implementation/HAE-010.md)。
 
 ## Main 调用边界
 
@@ -60,9 +60,21 @@ Windows 的 ReplaceFileW 会升级某些旧式 ACL 的继承格式。实现比�
 | committed-matches | 完整 committed 记录关联原 intent，当前目标同时匹配新 hash 与记录的 dev/ino/mtimeNs/ctimeNs |
 | conflict | 目标内容或文件版本不同，包括外部改写后恢复旧字节 |
 
-intent/seal/commit 严格按 [纯 schema](../src/contracts/save-record.ts) 检查；JSON 最多 16 KiB，原始文件/候选各最多 5 MiB。阶段为 incomplete/invalid/prepared/cancelled/replacing/committed；committed 必须有关联的 replacing，不能与 cancelled 并存。JSON 中没有绝对路径、ACL 或恢复写入权限。最多每目标 20 项记录、私有存储 200 MiB，根枚举最多 512 项，每事务最多 7 个已知文件。预算检查在全局锁内，不自动裁剪未完成证据或最后备份；清理界面仍待实现。
+intent/seal/commit 严格按 [纯 schema](../src/contracts/save-record.ts) 检查；普通 intent 为 v1，恢复 intent 为 v2，增加精确的 restoreOf 字段；seal/commit 仍用 v1 并绑定各自 intent 的完整 hash。JSON 最多 16 KiB，原始文件/候选各最多 5 MiB。阶段为 incomplete/invalid/prepared/cancelled/replacing/committed；committed 必须有关联的 replacing，不能与 cancelled 并存。JSON 中没有绝对路径、ACL 或恢复写入权限。最多每目标 20 项记录、私有存储 200 MiB，根枚举最多 512 项，每事务最多 7 个已知文件。预算检查在全局锁内，不自动裁剪未完成证据或最后备份；清理界面仍待实现。
 
 此协议保障已执行的普通本地磁盘样例。同一私有目录的合作实例锁不约束其他应用、独立 profile 或敌对本地进程；路径复核到操作之间仍有 OS 竞态。文件 sync 的效果依赖 OS/设备，O_EXCL 对网络文件系统也有边界，因此进程强杀证据不等于断电、网络盘或所有文件系统验证。[Node 文件刷新](https://nodejs.org/api/fs.html#filehandlesync)、[文件打开标志](https://nodejs.org/api/fs.html#file-system-flags)。
+
+## Main 显式备份恢复
+
+`prepareRestore(source, transactionId)` 只允许 Main 传入刚刚授权并固定当前版本的 SaveSource，以及选择的备份事务 ID。它不根据记录中的显示名称重新打开文件。来源须为完整、有效的 prepared/cancelled/replacing/committed 记录，targetKey 必须与当前目标相同；损坏、缺失、未知 schema、错误目标、软硬链接或本次授权/读取后的身份变化均拒绝。已有全局锁仍会阻止恢复，不按记录阶段、时间或文件 hash 自动解锁。
+
+恢复先读取并验证来源记录、backup.bin 及相关 seal/commit，固定其目录身份、intent/backup 文件版本、完整 hash 与原字节；在准备完成和替换前后复核。外部程序即使重写相同备份字节，也不能冒充固定的来源版本。用户后续 UI 确认必须绑定当前文档/状态版本；这个 Main 方法不提供绕过确认的 renderer 路径接口。
+
+新事务与普通保存使用同一锁、配额、备份及 Windows 替换流程：先把当前源文件作为新 backup.bin 写入并独立回读，才允许替换为所选旧备份。候选为备份的完整原始字节，保留 BOM、行尾、实体及所有旧源码；这是用户显式恢复整份备份，不是编辑时序列化 DOM。新 intent 的 `version: 2` 与 `restoreOf: {transactionId, intentHash}` 记录备份来源，拒绝额外路径/force 参数及自引用。新记录自身保留恢复前后完整字节，检查时不递归依赖无限历史链。
+
+返回值仍为 failed 或 prepared；prepared 含新 intent、cancel/commit。取消不修改 HTML；当前字节已经等于备份时返回 SAVE_NO_CHANGES，既不写记录也不解除其他遗留状态。恢复失败/未知保留新旧证据，重复 commit 共用结果；缺少平台适配器仍明确拒绝替换。恢复产生的“恢复前备份”可用于下一次显式恢复，已用过的备份不被删除或消费。
+
+本阶段恢复的是 HTML 主数据流的原始字节，平台替换保留当前文件的创建时间/ACL/附加数据流；历史 ACL/数据流不在 backup.bin 中，不能声称将其恢复到过去。尚无正常应用恢复窗口、恢复后会话接线、未保存编辑意图回放、遗留锁/残留 sidecar 的安全清理。真实磁盘满、断电与平台限制仍适用。
 
 ## 后续接线
 

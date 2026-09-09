@@ -190,3 +190,5 @@ Main 明确 commit 后，Windows 适配器独占创建同目录候选临时文�
 Workspace 的可选 Main 保存端口把上述事务接入显式 save 命令，冻结已应用候选并互斥输入/打开/关闭。提交后沿原项目根重新准备文档，复核当前文件仍匹配 committed 版本，才发布新 documentId、基线和映射；清空 Text 不复用旧节点身份。重建失败保留旧草稿与事务，返回 rebase-required；已经提交后 UI 崩溃不撤销磁盘操作，Main 继续核对和重建。具体状态与窄接口见 [统一窗口会话](docs/WORKSPACE_SESSION.md)。
 
 重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选、已提交版本或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限。正常产品窗口、跨保存的逻辑历史、恢复向导、持久化编辑意图与 Windows 10/macOS 验收仍待完成，完整协议与 OS 竞态边界见 [保存事务合同](docs/SAVE_PREPARATION.md)。
+
+Main 的 prepareRestore 读取完整有效事务中的 backup.bin，绑定记录 hash、目录/文件身份及字节，再针对当前重新授权的 SaveSource 创建新事务。新 backup.bin 是恢复前的当前文件，candidate.bin 是被选备份的完整原始字节；v2 intent 的 restoreOf 引用来源事务及其 intentHash，普通保存仍使用 v1。准备及替换中重新核验备份来源和当前版本；后续 commit/unknown/清理与普通保存相同。当前只恢复 HTML 主数据流字节并保留当前文件元数据，不从旧日志重建路径权限或历史 ACL/数据流。该能力尚未暴露到窗口恢复 UI，也不会解除遗留锁。

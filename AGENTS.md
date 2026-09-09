@@ -8,6 +8,8 @@ Human-readable project documentation is primarily Simplified Chinese. Keep ident
 
 HAE-010 connects its Main/platform save transaction to an optional Workspace save port and narrow trusted IPC: private cooperative lock, verified backup/candidate, explicit Windows ReplaceFileW commit, result journal and fresh baseline/mapping. The file version is captured at document open. Preparing/cancelling never replaces HTML; prepared is not saved. Failure/unknown or failed rebind retains evidence and blocks blind retry; cleanup warnings do not turn a verified save into failure. Read docs/SAVE_PREPARATION.md and docs/WORKSPACE_SESSION.md before extending it. `npm run test:storage` runs real filesystem/native helper tests under Electron's bundled Node; `npm run test:save-session` exercises the production transport in real Electron windows on Windows. Neither is normal product UI or recovery acceptance. The Windows helper builds from C# source with the local .NET Framework compiler; never commit its executable or generated sidecars.
 
+Main `prepareRestore` can now restore a verified backup through the same transaction, backing up the currently authorized file first. It uses exact backup bytes and a v2 intent linking the source backup; ordinary v1 records remain readable. It does not replay drafts, recover historical ACL/ADS, release stale locks or expose a renderer restoration method. Current version/target checks, backup revalidation and explicit commit remain mandatory.
+
 ## Invariants
 
 - Preserve the original file bytes outside verified text patch ranges. Never save a serialized whole DOM/AST as a shortcut.

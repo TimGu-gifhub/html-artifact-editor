@@ -20,7 +20,7 @@ try {
   const version = spawnSync(electron, ['-p', 'JSON.stringify(process.versions)'], options); assert.equal(version.status, 0);
   record.versions = JSON.parse(version.stdout); assert.ok(record.versions.electron && record.versions.node);
   const files = ['tests/unit/save-preparation.test.mjs'];
-  if (process.platform === 'win32') files.push('tests/unit/save-commit.test.mjs');
+  if (process.platform === 'win32') files.push('tests/unit/save-commit.test.mjs', 'tests/unit/save-recovery.test.mjs');
   record.nativeReplacement = process.platform === 'win32' ? 'included' : 'unsupported';
   const run = spawnSync(electron, ['--test', '--test-reporter=tap', ...files], options);
   const output = (run.stdout ?? '') + (run.stderr ?? '');

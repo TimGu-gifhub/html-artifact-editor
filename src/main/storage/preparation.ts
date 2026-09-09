@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { isContentHash, isSaveCommit, isSaveIntent, isSaveSeal, isTransactionId, sameStoredIdentity } from '../../contracts/save-record.ts';
-import type { RecoveryState, SaveCommit, SaveIntent, SaveSeal } from '../../contracts/save-record.ts';
+import type { RecoveryState, RestoreReference, SaveCommit, SaveIntent, SaveSeal } from '../../contracts/save-record.ts';
 import { MAX_SOURCE_BYTES } from '../../contracts/source-tree.ts';
 import type { PatchCandidate } from '../../core/patch/engine.ts';
-import { checkedDirectory, digest } from '../../platform/storage-files.ts';
+import { checkedDirectory, digest, sameVersion } from '../../platform/storage-files.ts';
 import type { CheckedDirectory } from '../../platform/storage-files.ts';
 import type { SaveSource, SaveTargetState } from '../../platform/save-source.ts';
 import type { ReplacementResult, SourceReplacer } from '../../platform/windows-replacement.ts';
@@ -13,6 +13,7 @@ const STORE_LIMIT = 200 * 1024 * 1024;
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.stringify(value)}\n`);
 const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 type Lock = Awaited<ReturnType<CheckedDirectory['writeNew']>>;
+type RestoreProof = Readonly<{ reference: RestoreReference; bytes: Uint8Array; verify: () => Promise<void> }>;
 export type PreparationResult = Readonly<{ status: 'failed'; code: string; transactionId: string | null; cancel: null }>
   | Readonly<{ status: 'prepared'; code: null; transactionId: string; intent: SaveIntent; cancel: () => Promise<void>;
     commit: () => Promise<ReplacementResult> }>;
@@ -24,7 +25,8 @@ async function optionalRead(folder: CheckedDirectory, name: string, limit: numbe
   try { return await folder.read(name, limit); }
   catch (error) { if ((error as { code?: string }).code === 'ENOENT') return null; throw error; }
 }
-const immutableIntent = (value: SaveIntent): SaveIntent => Object.freeze({ ...value, identity: Object.freeze({ ...value.identity }) });
+const immutableIntent = (value: SaveIntent): SaveIntent => Object.freeze({ ...value, identity: Object.freeze({ ...value.identity }),
+  ...(value.version === 2 ? { restoreOf: Object.freeze({ ...value.restoreOf }) } : {}) });
 const codeFor = (error: unknown): string => {
   const value = error && typeof error === 'object' ? error as { code?: unknown; message?: unknown } : {};
   if (value.code === 'EEXIST') return 'SAVE_LOCKED';
@@ -102,7 +104,26 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       return result(phase, 'conflict');
     } catch { return result('invalid', 'invalid'); }
   };
-  return Object.freeze({ inspect,
+  const restoreProof = async (source: SaveSource, transactionId: string): Promise<RestoreProof> => {
+    const prior = await inspect(transactionId);
+    if (!prior.intent || prior.phase === 'invalid' || prior.phase === 'incomplete') throw new Error('BACKUP_RECORD_INVALID');
+    if (prior.intent.targetKey !== source.targetKey) throw new Error('BACKUP_WRONG_TARGET');
+    const folder = await root.directory(transactionId);
+    const header = await folder.read('intent.json', JSON_LIMIT);
+    const backup = await folder.read('backup.bin', MAX_SOURCE_BYTES);
+    const verify = async (): Promise<void> => {
+      const current = await inspect(transactionId);
+      const nowHeader = await folder.read('intent.json', JSON_LIMIT);
+      const nowBackup = await folder.read('backup.bin', MAX_SOURCE_BYTES);
+      if (!current.intent || current.phase === 'invalid' || current.phase === 'incomplete'
+        || current.intent.targetKey !== source.targetKey || current.intent.oldHash !== backup.hash
+        || current.intent.oldSize !== backup.bytes.length || nowHeader.hash !== header.hash || nowBackup.hash !== backup.hash
+        || !sameVersion(nowHeader.stat, header.stat) || !sameVersion(nowBackup.stat, backup.stat)) throw new Error('BACKUP_RECORD_CHANGED');
+    };
+    await verify();
+    return Object.freeze({ reference: Object.freeze({ transactionId, intentHash: header.hash }), bytes: backup.bytes, verify });
+  };
+  const operations = { inspect,
     async scan() {
       // Discovery reads only our bounded private namespace, never source paths
       // from a journal. Any existing lock, including a partial one, stays put.
@@ -116,7 +137,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       await root.verify();
       return Object.freeze({ records: Object.freeze(records), locked, unrecognized });
     },
-    async prepare(source: SaveSource, candidate: Pick<PatchCandidate, 'bytes' | 'baseHash' | 'resultHash'>): Promise<PreparationResult> {
+    async prepare(source: SaveSource, candidate: Pick<PatchCandidate, 'bytes' | 'baseHash' | 'resultHash'>, restore?: RestoreProof): Promise<PreparationResult> {
       let transactionId: string | null = null; let lock: Lock | undefined; let retained = false;
       if (busy) return Object.freeze({ status: 'failed', code: 'SAVE_BUSY', transactionId, cancel: null });
       busy = true;
@@ -125,15 +146,16 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
         if (bytes.length > MAX_SOURCE_BYTES || !isContentHash(candidate.resultHash) || digest(bytes) !== candidate.resultHash
           || candidate.baseHash !== source.baseHash) throw new Error('SAVE_INVALID_CANDIDATE');
         if (candidate.resultHash === source.baseHash) throw new Error('SAVE_NO_CHANGES');
-        await source.verify();
+        await restore?.verify(); await source.verify();
         const id = randomUUID();
         lock = await root.writeNew('active.lock', encode({ version: 1, transactionId: id, targetKey: source.targetKey }), (step) => onStep(`lock-${step}`));
         await source.verify(); await checkQuota(source, bytes.length);
         const folder = await root.directory(id, true); transactionId = id;
         await onStep('directory');
-        const intent: SaveIntent = immutableIntent({ version: 1, transactionId: id, targetKey: source.targetKey,
+        const fields = { transactionId: id, targetKey: source.targetKey,
           name: source.name, identity: source.identity, oldHash: source.baseHash, newHash: digest(bytes),
-          oldSize: source.size, newSize: bytes.length, createdAt: Date.now() });
+          oldSize: source.size, newSize: bytes.length, createdAt: Date.now() };
+        const intent: SaveIntent = immutableIntent(restore ? { ...fields, version: 2, restoreOf: restore.reference } : { ...fields, version: 1 });
         if (!isSaveIntent(intent)) throw new Error('SAVE_INVALID_INTENT');
         const header = await folder.writeNew('intent.json', encode(intent), (step) => onStep(`intent-${step}`));
         await folder.writeNew('backup.bin', source.bytes, (step) => onStep(`backup-${step}`));
@@ -144,7 +166,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
         const seal: SaveSeal = Object.freeze({ version: 1, transactionId: id, intentHash: header.hash, phase: 'prepared' });
         await folder.writeNew('prepared.json', encode(seal), (step) => onStep(`prepared-${step}`));
         const evidence = await inspect(id, source.current);
-        await source.verify(); // A late external edit is a conflict, not a backup failure.
+        await restore?.verify(); await source.verify(); // A late external edit is a conflict, not a backup failure.
         if (evidence.phase !== 'prepared' || evidence.state !== 'baseline-matches') throw new Error('BACKUP_VERIFY_FAILED');
         await root.verify(); retained = true;
         let cancellation: Promise<void> | undefined; let commitment: Promise<ReplacementResult> | undefined;
@@ -154,7 +176,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
             if (!replacer) return Promise.resolve(Object.freeze({ status: 'failed', code: 'SAVE_PLATFORM_UNSUPPORTED', cleanupPending: false }));
             commitment ??= (async (): Promise<ReplacementResult> => {
               const verifyEvidence = async (): Promise<void> => {
-                await lock!.verifyOwned(); await root.verify();
+                await lock!.verifyOwned(); await root.verify(); await restore?.verify();
                 if ((await folder.read('intent.json', JSON_LIMIT)).hash !== header.hash
                   || (await folder.read('backup.bin', MAX_SOURCE_BYTES)).hash !== intent.oldHash
                   || (await folder.read('candidate.bin', MAX_SOURCE_BYTES)).hash !== intent.newHash) throw new Error('BACKUP_VERIFY_FAILED');
@@ -207,6 +229,18 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
         if (lock) { try { await lock.removeOwned(); } catch { code = 'STORAGE_LOCK_CHANGED'; } }
         return Object.freeze({ status: 'failed', code, transactionId, cancel: null });
       } finally { if (!retained) busy = false; }
+    },
+  };
+  return Object.freeze({ inspect, scan: operations.scan,
+    prepare: (source: SaveSource, candidate: Pick<PatchCandidate, 'bytes' | 'baseHash' | 'resultHash'>) => operations.prepare(source, candidate),
+    async prepareRestore(source: SaveSource, transactionId: string): Promise<PreparationResult> {
+      if (busy) return Object.freeze({ status: 'failed', code: 'SAVE_BUSY', transactionId: null, cancel: null });
+      try {
+        const proof = await restoreProof(source, transactionId);
+        // Restore is an explicit full-byte backup operation. First back up the
+        // newly authorized current source through the ordinary transaction.
+        return await operations.prepare(source, { bytes: proof.bytes, baseHash: source.baseHash, resultHash: digest(proof.bytes) }, proof);
+      } catch (error) { return Object.freeze({ status: 'failed', code: codeFor(error), transactionId: null, cancel: null }); }
     },
   });
 }
