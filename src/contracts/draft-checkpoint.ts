@@ -13,6 +13,10 @@ export type DraftCheckpoint = Readonly<{
   resultHash: string; intents: readonly StoredTextIntent[];
 }>;
 export type DraftCheckpointSeal = Readonly<{ version: 1; checkpointId: string; recordHash: string }>;
+export type DraftRetirement = Readonly<{
+  version: 1; checkpointId: string; recordHash: string; sessionId: string;
+  draftRevision: number; reason: 'discarded' | 'copied'; createdAt: number;
+}>;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 export function isStoredTextIntent(value: unknown): value is StoredTextIntent {
   return object(value) && Object.keys(value).length === 5 && typeof value.nodeId === 'string' && /^n(?:0|[1-9][0-9]{0,4})$/u.test(value.nodeId)
@@ -32,4 +36,11 @@ export function isDraftCheckpoint(value: unknown): value is DraftCheckpoint {
 }
 export function isDraftCheckpointSeal(value: unknown): value is DraftCheckpointSeal {
   return object(value) && Object.keys(value).length === 3 && value.version === 1 && isTransactionId(value.checkpointId) && isContentHash(value.recordHash);
+}
+export function isDraftRetirement(value: unknown): value is DraftRetirement {
+  return object(value) && Object.keys(value).length === 7 && value.version === 1 && isTransactionId(value.checkpointId)
+    && isContentHash(value.recordHash) && isTransactionId(value.sessionId)
+    && Number.isSafeInteger(value.draftRevision) && (value.draftRevision as number) > 0
+    && (value.reason === 'discarded' || value.reason === 'copied')
+    && Number.isSafeInteger(value.createdAt) && (value.createdAt as number) > 0;
 }

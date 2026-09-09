@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isDraftCheckpoint, isDraftCheckpointSeal, MAX_DRAFT_RECORD_BYTES } from '../../contracts/draft-checkpoint.ts';
-import type { DraftCheckpoint, DraftCheckpointSeal } from '../../contracts/draft-checkpoint.ts';
+import type { DraftCheckpoint, DraftCheckpointSeal, DraftRetirement } from '../../contracts/draft-checkpoint.ts';
 import { isSaveIntent, isTransactionId, sameStoredIdentity } from '../../contracts/save-record.ts';
 import type { RecoveryState } from '../../contracts/save-record.ts';
 import { MAX_SOURCE_BYTES } from '../../contracts/source-tree.ts';
@@ -12,6 +12,7 @@ import { checkedDirectory, digest } from '../../platform/storage-files.ts';
 import type { CheckedDirectory } from '../../platform/storage-files.ts';
 import type { SaveSource, SaveTargetState } from '../../platform/save-source.ts';
 import type { createSavePreparationStore } from './preparation.ts';
+import { readDraftHeader, readDraftRetirement } from './draft-records.ts';
 
 const STORE_LIMIT = 200 * 1024 * 1024;
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.stringify(value)}\n`);
@@ -22,11 +23,21 @@ type SaveRecords = Awaited<ReturnType<typeof createSavePreparationStore>>;
 type OwnedLock = Awaited<ReturnType<CheckedDirectory['writeNew']>>;
 export type CheckpointInspection = Readonly<{
   checkpointId: string; phase: 'complete' | 'incomplete' | 'invalid'; state: RecoveryState;
-  checkpoint: DraftCheckpoint | null;
+  checkpoint: DraftCheckpoint | null; recordHash: string | null;
 }>;
 export type CheckpointWrite = Readonly<{
   status: 'persisted' | 'failed' | 'unknown'; checkpointId: string | null; draftRevision: number;
   resultHash: string; code: string | null; cleanupPending: boolean;
+}>;
+export type CheckpointRetirement = Readonly<{
+  status: 'retired' | 'empty' | 'failed' | 'unknown'; checkpointId: string | null;
+  code: string | null; cleanupPending: boolean;
+}>;
+export type CheckpointGroup = Readonly<{
+  sessionId: string; targetKey: string; name: string; draftRevision: number; checkpointId: string | null;
+  status: 'dirty' | 'clean' | 'retired' | 'incomplete' | 'invalid' | 'ambiguous' | 'saved';
+  targetState: RecoveryState; retirement: DraftRetirement['reason'] | null;
+  resultHash: string | null; recordHash: string | null;
 }>;
 const errorCode = (error: unknown): string => {
   const value = error as { code?: string; message?: string } | null;
@@ -81,11 +92,11 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
   };
   const inspect = async (checkpointId: string, readTarget?: () => Promise<SaveTargetState>): Promise<CheckpointInspection> => {
     try {
-      const { checkpoint } = await load(checkpointId);
-      return Object.freeze({ checkpointId, checkpoint, phase: 'complete', state: await classify(checkpoint, readTarget) });
+      const { checkpoint, recordHash } = await load(checkpointId);
+      return Object.freeze({ checkpointId, checkpoint, recordHash, phase: 'complete', state: await classify(checkpoint, readTarget) });
     } catch (error) {
       const phase = (error as { code?: string }).code === 'ENOENT' ? 'incomplete' : 'invalid';
-      return Object.freeze({ checkpointId, checkpoint: null, phase, state: phase });
+      return Object.freeze({ checkpointId, checkpoint: null, recordHash: null, phase, state: phase });
     }
   };
   const inventory = async () => {
@@ -98,7 +109,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       const files = await folder.entries(7); const saved = files.some(file => file.name === 'intent.json');
       const type = saved ? 'save' : files.some(file => file.name === 'record.json') ? 'draft' : 'unknown';
       const allowed = saved ? ['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json']
-        : ['record.json', 'baseline.bin', 'complete.json'];
+        : ['record.json', 'baseline.bin', 'complete.json', 'retired.json'];
       for (const file of files) {
         if (file.kind !== 'file' || !allowed.includes(file.name)) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
         used += file.size;
@@ -108,7 +119,76 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
     }
     return { entries, used };
   };
-  return Object.freeze({ inspect,
+  const records = async () => {
+    const { entries, used } = await inventory(); const known = []; const unclassified: string[] = [];
+    for (const item of entries) {
+      if (item.type === 'lock' || item.type === 'save') continue;
+      try {
+        const header = await readDraftHeader(root, item.name);
+        let retirement: DraftRetirement | null = null; let invalidRetirement = false;
+        try { retirement = await readDraftRetirement(header); } catch { invalidRetirement = true; }
+        // A damaged anchor can obscure which session was ended. Do not let a
+        // different/older header make that session look recoverable again.
+        if (invalidRetirement) unclassified.push(item.name);
+        // Keep only binding metadata across records, not all documents' intents.
+        const { intents, ...binding } = header.checkpoint;
+        known.push({ header: { folder: header.folder, checkpoint: Object.freeze(binding), hash: header.hash },
+          changeCount: intents.length, retirement, invalidRetirement });
+      } catch { unclassified.push(item.name); }
+    }
+    await root.verify();
+    return { known, unclassified, used, locked: entries.some(item => item.type === 'lock') };
+  };
+  const retirementFor = (rows: Awaited<ReturnType<typeof records>>['known'], sessionId: string) => {
+    const matches = rows.filter(row => row.header.checkpoint.sessionId === sessionId);
+    if (matches.some(row => row.invalidRetirement)) throw new Error('DRAFT_RETIREMENT_INVALID');
+    const closed = matches.filter(row => row.retirement !== null);
+    if (closed.length > 1) throw new Error('DRAFT_RETIREMENT_INVALID');
+    const retirement = closed[0]?.retirement ?? null;
+    if (retirement && matches.some(row => row.header.checkpoint.draftRevision > retirement.draftRevision)) throw new Error('DRAFT_RETIREMENT_INVALID');
+    return retirement;
+  };
+  const operations = { inspect,
+    async catalog(readTarget?: () => Promise<SaveTargetState>) {
+      const all = await records(); const groups: CheckpointGroup[] = [];
+      const sessions = new Set(all.known.map(row => row.header.checkpoint.sessionId));
+      for (const sessionId of [...sessions].sort()) {
+        const rows = all.known.filter(row => row.header.checkpoint.sessionId === sessionId);
+        const first = rows[0]!.header.checkpoint;
+        const revision = Math.max(...rows.map(row => row.header.checkpoint.draftRevision));
+        const latest = rows.filter(row => row.header.checkpoint.draftRevision === revision);
+        const latestValue = latest[0]!.header.checkpoint;
+        const summary = { sessionId, targetKey: first.targetKey, name: first.name, draftRevision: revision };
+        let status: CheckpointGroup['status'] = 'incomplete'; let checkpointId: string | null = null;
+        let targetState: RecoveryState = 'incomplete'; let retirement: DraftRetirement['reason'] | null = null;
+        let resultHash: string | null = null; let recordHash: string | null = null;
+        try {
+          if (rows.some(row => row.header.checkpoint.targetKey !== first.targetKey || row.header.checkpoint.baseHash !== first.baseHash
+            || !sameStoredIdentity(row.header.checkpoint.identity, first.identity))
+            || latest.some(row => row.header.checkpoint.resultHash !== latestValue.resultHash)) throw new Error('DRAFT_CHECKPOINT_AMBIGUOUS');
+          const terminal = retirementFor(all.known, sessionId);
+          if (terminal) { status = 'retired'; retirement = terminal.reason; targetState = 'unavailable'; }
+          else {
+            let invalid = false;
+            for (const row of latest.sort((a, b) => a.header.checkpoint.checkpointId.localeCompare(b.header.checkpoint.checkpointId))) {
+              const value = await inspect(row.header.checkpoint.checkpointId, readTarget);
+              if (value.phase === 'complete' && value.recordHash === row.header.hash) {
+                checkpointId = value.checkpointId; targetState = value.state;
+                resultHash = value.checkpoint!.resultHash; recordHash = value.recordHash;
+                status = value.state === 'committed-matches' ? 'saved' : value.checkpoint!.intents.length ? 'dirty' : 'clean'; break;
+              }
+              invalid ||= value.phase !== 'incomplete';
+            }
+            if (!checkpointId && invalid) { status = 'invalid'; targetState = 'invalid'; }
+          }
+        } catch (error) {
+          status = error instanceof Error && error.message === 'DRAFT_CHECKPOINT_AMBIGUOUS' ? 'ambiguous' : 'invalid'; targetState = 'invalid';
+        }
+        groups.push(Object.freeze({ ...summary, checkpointId, status, targetState, retirement, resultHash, recordHash }));
+      }
+      return Object.freeze({ groups: Object.freeze(groups), unclassified: Object.freeze(all.unclassified), locked: all.locked,
+        reviewRequired: all.unclassified.length > 0 || groups.some(group => ['invalid', 'incomplete', 'ambiguous'].includes(group.status)) });
+    },
     async scan() {
       const { entries } = await inventory(); const records = [];
       for (const item of entries) {
@@ -145,14 +225,21 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
         for (const item of entries) {
           if (item.type === 'lock') continue;
           const folder = await root.directory(item.name);
-          const prior = decode((await folder.read(item.type === 'save' ? 'intent.json' : 'record.json',
-            item.type === 'save' ? 16 * 1024 : MAX_DRAFT_RECORD_BYTES)).bytes);
+          const priorFile = await folder.read(item.type === 'save' ? 'intent.json' : 'record.json',
+            item.type === 'save' ? 16 * 1024 : MAX_DRAFT_RECORD_BYTES);
+          const prior = decode(priorFile.bytes);
           if (item.type === 'save') {
             if (!isSaveIntent(prior) || prior.transactionId !== item.name) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
             if (prior.targetKey === source.targetKey) count++;
             continue;
           }
           if (!isDraftCheckpoint(prior) || prior.checkpointId !== item.name) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
+          const retirement = await readDraftRetirement({ folder, checkpoint: prior, hash: priorFile.hash });
+          if (prior.sessionId === sessionId) {
+            if (prior.targetKey !== source.targetKey || prior.baseHash !== source.baseHash
+              || !sameStoredIdentity(prior.identity, source.identity)) throw new Error('DRAFT_SESSION_MISMATCH');
+            if (retirement) throw new Error('DRAFT_SESSION_RETIRED');
+          }
           if (prior.targetKey === source.targetKey) count++;
           if (prior.sessionId === sessionId && prior.draftRevision > draftRevision) throw new Error('DRAFT_CHECKPOINT_STALE');
           if (prior.sessionId === sessionId && prior.draftRevision === draftRevision) {
@@ -197,11 +284,89 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
     },
     async restoreCandidate(checkpointId: string, source: SaveSource, index: SourceIndex): Promise<PatchCandidate> {
       const { checkpoint } = await load(checkpointId);
+      const assertActive = async (): Promise<void> => {
+        const all = await records();
+        if (all.unclassified.length) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
+        if (retirementFor(all.known, checkpoint.sessionId)) throw new Error('DRAFT_SESSION_RETIRED');
+      };
+      await assertActive();
       const state = await classify(checkpoint, source.current);
       if (state === 'committed-matches') throw new Error('DRAFT_ALREADY_SAVED');
       if (state !== 'baseline-matches' || index.baseHash !== source.baseHash) throw new Error('DRAFT_RECOVERY_CONFLICT');
-      await source.verify(); const candidate = rebuildCheckpoint(index, checkpoint, digest); await source.verify();
+      await source.verify(); const candidate = rebuildCheckpoint(index, checkpoint, digest); await source.verify(); await assertActive();
       return candidate;
     },
-  });
+    async restoreLatest(sessionId: string, source: SaveSource, index: SourceIndex): Promise<PatchCandidate> {
+      if (!isTransactionId(sessionId)) throw new Error('DRAFT_CHECKPOINT_INVALID');
+      const select = async () => {
+        const catalog = await operations.catalog(source.current);
+        if (catalog.locked) throw new Error('DRAFT_STORAGE_LOCKED');
+        if (catalog.unclassified.length) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
+        const group = catalog.groups.find(group => group.sessionId === sessionId);
+        if (!group || group.status !== 'dirty' || group.targetState !== 'baseline-matches' || !group.checkpointId) throw new Error('DRAFT_RECOVERY_UNAVAILABLE');
+        return group;
+      };
+      const before = await select(); const candidate = await operations.restoreCandidate(before.checkpointId!, source, index);
+      const after = await select();
+      if (before.checkpointId !== after.checkpointId || before.draftRevision !== after.draftRevision
+        || before.recordHash !== after.recordHash || candidate.resultHash !== after.resultHash) throw new Error('DRAFT_CHECKPOINT_CHANGED');
+      return candidate;
+    },
+    // Main calls this only after an explicit discard or verified save-copy
+    // decision, with that session's writes drained and further edits frozen.
+    // It retires private recovery data; it never saves or deletes HTML/bytes.
+    async retire(source: SaveSource, sessionId: string, draftRevision: number, reason: DraftRetirement['reason']): Promise<CheckpointRetirement> {
+      let lock: OwnedLock | undefined; let acquiringLock = false; let writing = false;
+      let checkpointId: string | null = null; let status: CheckpointRetirement['status'] = 'failed';
+      let code: string | null = null; let cleanupPending = false;
+      if (busy) return Object.freeze({ status, checkpointId, code: 'DRAFT_STORAGE_BUSY', cleanupPending });
+      busy = true;
+      try {
+        if (!isTransactionId(sessionId) || !Number.isSafeInteger(draftRevision) || draftRevision < 1
+          || !['discarded', 'copied'].includes(reason)) throw new Error('DRAFT_RETIREMENT_INVALID');
+        acquiringLock = true;
+        lock = await root.writeNew('active.lock', encode({ version: 1, retirementId: randomUUID() }), step => onStep(`lock-${step}`));
+        acquiringLock = false;
+        const all = await records();
+        if (all.unclassified.length) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
+        const matching = all.known.filter(row => row.header.checkpoint.sessionId === sessionId);
+        if (!matching.length) status = 'empty';
+        else {
+          if (matching.some(row => row.header.checkpoint.targetKey !== source.targetKey || row.header.checkpoint.baseHash !== source.baseHash
+            || !sameStoredIdentity(row.header.checkpoint.identity, source.identity))) throw new Error('DRAFT_SESSION_MISMATCH');
+          const existing = retirementFor(all.known, sessionId);
+          if (existing) {
+            if (existing.draftRevision !== draftRevision || existing.reason !== reason) throw new Error('DRAFT_SESSION_RETIRED');
+            checkpointId = existing.checkpointId; status = 'retired';
+          } else {
+            matching.sort((a, b) => b.header.checkpoint.draftRevision - a.header.checkpoint.draftRevision
+              || a.header.checkpoint.checkpointId.localeCompare(b.header.checkpoint.checkpointId));
+            const anchor = matching[0]!.header;
+            if (anchor.checkpoint.draftRevision > draftRevision) throw new Error('DRAFT_RETIREMENT_STALE');
+            if (all.used + 2048 > STORE_LIMIT) throw new Error('DRAFT_STORAGE_LIMIT');
+            const retirement: DraftRetirement = Object.freeze({ version: 1, checkpointId: anchor.checkpoint.checkpointId,
+              recordHash: anchor.hash, sessionId, draftRevision, reason, createdAt: Date.now() });
+            checkpointId = retirement.checkpointId;
+            await lock.verifyOwned(); writing = true;
+            const written = await anchor.folder.writeNew('retired.json', encode(retirement), step => onStep(`retirement-${step}`));
+            const fresh = await readDraftHeader(root, checkpointId);
+            const observed = await readDraftRetirement(fresh);
+            if (fresh.hash !== anchor.hash || JSON.stringify(observed) !== JSON.stringify(retirement)
+              || (await fresh.folder.read('retired.json', 2048)).hash !== written.hash) throw new Error('DRAFT_RETIREMENT_CHANGED');
+            status = 'retired';
+          }
+        }
+        await lock.verifyOwned();
+      } catch (error) { code = errorCode(error); status = writing ? 'unknown' : 'failed'; }
+      finally {
+        if (lock) {
+          try { await onStep('release-lock'); await lock.removeOwned(); }
+          catch { cleanupPending = true; code = 'DRAFT_CLEANUP_PENDING'; }
+        } else if (acquiringLock && code !== 'DRAFT_STORAGE_LOCKED') cleanupPending = true;
+        busy = false;
+      }
+      return Object.freeze({ status, checkpointId, code, cleanupPending });
+    },
+  };
+  return Object.freeze(operations);
 }

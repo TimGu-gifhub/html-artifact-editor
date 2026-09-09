@@ -40,10 +40,13 @@ test('a checkpoint persisted before or after actual Save is identified by the ex
     const source = await openSaveSource(f.entry, expected);
     const saves = await createSavePreparationStore(f.saveRoot); const drafts = await createDraftCheckpointStore(f.draftRoot, undefined, saves);
     assert.equal((await drafts.inspect(checkpoint.checkpointId, source.current)).state, 'committed-matches');
+    assert.equal((await drafts.catalog(source.current)).groups[0].status, 'saved');
     const index = createSourceIndex(expected, { projectId: 'new', documentId: 'saved', generation: 3 }, digest);
     await assert.rejects(drafts.restoreCandidate(checkpoint.checkpointId, source, index), /DRAFT_ALREADY_SAVED/);
     await writeFile(f.entry, expected); const rewritten = await openSaveSource(f.entry, expected);
     assert.equal((await drafts.inspect(checkpoint.checkpointId, rewritten.current)).state, 'candidate-on-disk');
+    assert.equal((await drafts.catalog(rewritten.current)).groups[0].status, 'dirty');
+    assert.equal((await drafts.catalog(rewritten.current)).groups[0].targetState, 'candidate-on-disk');
     await assert.rejects(drafts.restoreCandidate(checkpoint.checkpointId, rewritten, index), /DRAFT_RECOVERY_CONFLICT/);
     assert.deepEqual(await readFile(f.entry), expected);
   }

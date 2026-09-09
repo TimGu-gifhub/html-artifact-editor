@@ -49,7 +49,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       if (item.kind !== 'directory' || !isTransactionId(item.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
       const folder = await root.directory(item.name);
       const files = await folder.entries(7); const draft = files.some(file => file.name === 'record.json');
-      const allowed = draft ? ['record.json', 'baseline.bin', 'complete.json']
+      const allowed = draft ? ['record.json', 'baseline.bin', 'complete.json', 'retired.json']
         : ['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json'];
       for (const file of files) {
         if (file.kind !== 'file' || !allowed.includes(file.name)) throw new Error('STORAGE_REVIEW_REQUIRED');

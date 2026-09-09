@@ -18,6 +18,7 @@ try {
   const store = await createDraftCheckpointStore(privateRoot, async step => {
     if (step === stage) { process.send({ stage }); await new Promise(() => {}); }
   });
-  const result = await store.write(source, index, candidate, sessionId, 3);
+  const result = stage.startsWith('retirement-') ? await store.retire(source, sessionId, 3, 'discarded')
+    : await store.write(source, index, candidate, sessionId, 3);
   throw new Error(`Writer missed barrier: ${result.status} ${result.code}`);
 } finally { clearInterval(keepAlive); }
