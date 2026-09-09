@@ -192,3 +192,9 @@ Workspace 的可选 Main 保存端口把上述事务接入显式 save 命令，�
 重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选、已提交版本或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限。正常产品窗口、跨保存的逻辑历史、恢复向导、持久化编辑意图与 Windows 10/macOS 验收仍待完成，完整协议与 OS 竞态边界见 [保存事务合同](docs/SAVE_PREPARATION.md)。
 
 Main 的 prepareRestore 读取完整有效事务中的 backup.bin，绑定记录 hash、目录/文件身份及字节，再针对当前重新授权的 SaveSource 创建新事务。新 backup.bin 是恢复前的当前文件，candidate.bin 是被选备份的完整原始字节；v2 intent 的 restoreOf 引用来源事务及其 intentHash，普通保存仍使用 v1。准备及替换中重新核验备份来源和当前版本；后续 commit/unknown/清理与普通保存相同。当前只恢复 HTML 主数据流字节并保留当前文件元数据，不从旧日志重建路径权限或历史 ACL/数据流。该能力尚未暴露到窗口恢复 UI，也不会解除遗留锁。
+
+### HAE-011：逻辑草稿检查点
+
+纯 core/history 从经过验证的候选导出逻辑 Text 意图，不存可执行 offset。Main 将原始基线、严格 v1 记录和最后的完整 seal 写入独立检查点；重新读取时重建源码索引并验证节点、上下文及完整候选 hash。真正恢复候选还需重新授权当前源文件并匹配版本；不会由检查点名称取得文件权限。
+
+草稿与保存共用私有目录、active.lock、每目标合计 20 项和总计 200 MiB 配额；不自动删除证据或解除遗留锁。重启只有对应 committed 记录及精确新文件版本均成立，才阻止已保存草稿的重复应用。当前提供 Main 存储与候选重建方法，尚无每次 Apply 持久化、恢复安装、退役、历史或 Diff 接线。协议及执行范围见 [草稿检查点](docs/DRAFT_CHECKPOINTS.md) 与 [HAE-011](docs/implementation/HAE-011.md)。

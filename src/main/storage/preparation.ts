@@ -7,6 +7,7 @@ import { checkedDirectory, digest, sameVersion } from '../../platform/storage-fi
 import type { CheckedDirectory } from '../../platform/storage-files.ts';
 import type { SaveSource, SaveTargetState } from '../../platform/save-source.ts';
 import type { ReplacementResult, SourceReplacer } from '../../platform/windows-replacement.ts';
+import { isDraftCheckpoint, MAX_DRAFT_RECORD_BYTES } from '../../contracts/draft-checkpoint.ts';
 
 const JSON_LIMIT = 16 * 1024;
 const STORE_LIMIT = 200 * 1024 * 1024;
@@ -47,13 +48,21 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       if (item.name === 'active.lock' && item.kind === 'file') { used += item.size; continue; }
       if (item.kind !== 'directory' || !isTransactionId(item.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
       const folder = await root.directory(item.name);
-      for (const file of await folder.entries(7)) {
-        if (file.kind !== 'file' || !['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json'].includes(file.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
+      const files = await folder.entries(7); const draft = files.some(file => file.name === 'record.json');
+      const allowed = draft ? ['record.json', 'baseline.bin', 'complete.json']
+        : ['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json'];
+      for (const file of files) {
+        if (file.kind !== 'file' || !allowed.includes(file.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
         used += file.size;
       }
-      const record = decode((await folder.read('intent.json', JSON_LIMIT)).bytes);
-      if (!isSaveIntent(record) || record.transactionId !== item.name) throw new Error('STORAGE_REVIEW_REQUIRED');
-      if (record.targetKey === source.targetKey) count++;
+      const record = decode((await folder.read(draft ? 'record.json' : 'intent.json', draft ? MAX_DRAFT_RECORD_BYTES : JSON_LIMIT)).bytes);
+      if (draft) {
+        if (!isDraftCheckpoint(record) || record.checkpointId !== item.name) throw new Error('STORAGE_REVIEW_REQUIRED');
+        if (record.targetKey === source.targetKey) count++;
+      } else {
+        if (!isSaveIntent(record) || record.transactionId !== item.name) throw new Error('STORAGE_REVIEW_REQUIRED');
+        if (record.targetKey === source.targetKey) count++;
+      }
     }
     // No automatic pruning, especially of incomplete records or the last backup.
     if (count >= 20 || used + source.size + candidateSize + JSON_LIMIT > STORE_LIMIT) throw new Error('BACKUP_LIMIT');
@@ -131,7 +140,11 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       let locked = false; let unrecognized = false;
       for (const item of entries) {
         if (item.name === 'active.lock') { locked = true; continue; }
-        if (item.kind === 'directory' && isTransactionId(item.name)) records.push(await inspect(item.name));
+        if (item.kind === 'directory' && isTransactionId(item.name)) {
+          const files = await (await root.directory(item.name)).entries(7);
+          if (files.some(file => file.name === 'record.json') && !files.some(file => file.name === 'intent.json')) continue;
+          records.push(await inspect(item.name));
+        }
         else unrecognized = true;
       }
       await root.verify();
@@ -231,7 +244,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       } finally { if (!retained) busy = false; }
     },
   };
-  return Object.freeze({ inspect, scan: operations.scan,
+  return Object.freeze({ namespace: root.identityChain, inspect, scan: operations.scan,
     prepare: (source: SaveSource, candidate: Pick<PatchCandidate, 'bytes' | 'baseHash' | 'resultHash'>) => operations.prepare(source, candidate),
     async prepareRestore(source: SaveSource, transactionId: string): Promise<PreparationResult> {
       if (busy) return Object.freeze({ status: 'failed', code: 'SAVE_BUSY', transactionId: null, cancel: null });

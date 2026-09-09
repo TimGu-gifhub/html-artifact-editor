@@ -96,7 +96,9 @@ HAE-010 第一阶段增加 10 项真实存储/进程测试，当时共 151 单�
 
 第三阶段的 `test:save-session` 用实际 Main 会话与生产 UI preload 接通保存，十组实验通过，包括连续保存后旧 ID 拒绝、清空节点、同文外部改写、保存中关闭保护、实际 renderer 崩溃和重建/清理故障。`test-results/save-session.json` 记录系统/运行时、源提交与工作区差异、结果和完整文件 hash。无控件测试页面不代表产品 UI，接口 composing 标志不代表实际 IME；此命令当前要求 Windows，其他平台明确拒绝。全量及最后定向回归的分开计数见 [HAE-010](implementation/HAE-010.md)。
 
-第四阶段新增 `tests/unit/save-recovery.test.mjs`，验证 Main 备份恢复的 v1/v2 记录、当前文件再次备份、实际恢复/反向恢复、来源损坏/换名/同文改写、外部冲突、互斥、故障和三个真实 Main 强杀点。Windows 的 `test:storage` 现在在 Electron 内嵌 Node 执行准备、提交、恢复三份测试文件；其他平台仍只重跑准备文件并标记原生替换 unsupported，不据此宣称恢复已在其他平台验证。恢复向导和持久化草稿仍待接入。
+第四阶段新增 `tests/unit/save-recovery.test.mjs`，验证 Main 备份恢复的 v1/v2 记录、当前文件再次备份、实际恢复/反向恢复、来源损坏/换名/同文改写、外部冲突、互斥、故障和三个真实 Main 强杀点。该阶段 Windows 的 `test:storage` 在 Electron 内嵌 Node 执行准备、提交、恢复三份测试文件；其他平台只重跑准备文件并标记原生替换 unsupported，不据此宣称恢复已在其他平台验证。
+
+HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备与检查点存储文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。开发 Node 与内嵌 Node 的结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。该后端尚未连接每次 Apply、退出等待、记录退役、恢复窗口或历史/Diff；不能把存储直接调用当作产品自动持久化。
 
 单文件原生选择器以 HTML 父目录为根；目录入口先明确授权根，再选择根内 HTML，切换入口保留原根身份。两种方式都不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 

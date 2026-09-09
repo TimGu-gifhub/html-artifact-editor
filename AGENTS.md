@@ -10,6 +10,8 @@ HAE-010 connects its Main/platform save transaction to an optional Workspace sav
 
 Main `prepareRestore` can now restore a verified backup through the same transaction, backing up the currently authorized file first. It uses exact backup bytes and a v2 intent linking the source backup; ordinary v1 records remain readable. It does not replay drafts, recover historical ACL/ADS, release stale locks or expose a renderer restoration method. Current version/target checks, backup revalidation and explicit commit remain mandatory.
 
+HAE-011 adds logical Text checkpoints and Main private storage; read docs/DRAFT_CHECKPOINTS.md before extending it. Recovery rebuilds fresh source ranges and verifies the current file identity/hash. Checkpoints and saves share one private directory, lock and quota. A matching committed file version prevents duplicate replay; matching candidate bytes alone does not. This is not yet wired to Apply, UI persistence status, automatic latest-point selection, retirement, Undo/Redo or Diff. Never infer those capabilities from direct store tests.
+
 ## Invariants
 
 - Preserve the original file bytes outside verified text patch ranges. Never save a serialized whole DOM/AST as a shortcut.

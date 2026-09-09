@@ -4,8 +4,10 @@ import { createSourceIndex } from '../parser/source-index.ts';
 import type { HashBytes, SourceIdentity, SourceIndex, TextSource } from '../parser/source-index.ts';
 import { chooseLineEnding, defaultLineEnding, encodeText, normalizeText } from './encoding.ts';
 import type { LineEnding } from './encoding.ts';
+import { isStoredTextIntent, MAX_DRAFT_INTENTS } from '../../contracts/draft-checkpoint.ts';
+import type { StoredTextIntent } from '../../contracts/draft-checkpoint.ts';
 
-export const MAX_PATCHES = 1000;
+export const MAX_PATCHES = MAX_DRAFT_INTENTS;
 export type TextChange = Readonly<{
   identity: SourceIdentity; baseHash: string; nodeId: string; expectedText: string; newText: string;
 }>;
@@ -150,6 +152,25 @@ function compile(source: SourceIndex, input: readonly TextPatch[], hash: HashByt
 // Internal/storage callers may validate patches, but cannot supply new byte ranges.
 export function buildPatchCandidate(source: SourceIndex, patches: readonly TextPatch[], hash: HashBytes): PatchCandidate {
   return compile(verifySource(source, hash), patches, hash);
+}
+
+// Recovery supplies logical intent only. Reparse/verify the full baseline, then
+// derive every byte range and replacement from these newly verified Text nodes.
+export function buildTextIntentCandidate(input: SourceIndex, intents: readonly StoredTextIntent[], hash: HashBytes): PatchCandidate {
+  const source = verifySource(input, hash);
+  if (!Array.isArray(intents) || intents.length > MAX_PATCHES) throw new Error('PATCH_COUNT_LIMIT');
+  const nodes = new Map(source.nodes.map(node => [node.nodeId, node]));
+  const fallback = defaultLineEnding(source.text);
+  const patches = intents.map(intent => {
+    if (!isStoredTextIntent(intent)) throw new Error('DRAFT_INTENT_INVALID');
+    const node = nodes.get(intent.nodeId);
+    if (!node?.editable || node.decodedText !== intent.expectedText || node.rawSliceHash !== intent.rawSliceHash
+      || node.contextFingerprint !== intent.contextFingerprint) throw new Error('DRAFT_INTENT_MISMATCH');
+    const text = normalizeText(intent.newText);
+    if (text !== intent.newText || text === node.decodedText) throw new Error('NONCANONICAL_PATCH');
+    return makePatch(source, node, text, fallback);
+  });
+  return compile(source, patches, hash);
 }
 
 export function createPatchEngine(input: SourceIndex, hash: HashBytes, initialPatches: readonly TextPatch[] = []) {
