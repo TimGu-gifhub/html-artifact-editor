@@ -35,8 +35,10 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
   let disposal: Promise<void> | undefined;
   let review: LeaveReview | null = null;
   let pending: AbortController | null = null;
-  let operationDone: Promise<void> | undefined;
-  let finishOperation: (() => void) | undefined;
+  let operationDone: Promise<WorkspaceSaveReport | null> | undefined;
+  let finishOperation: ((report: WorkspaceSaveReport | null) => void) | undefined;
+  let savingOperation = false;
+  let operationSave: WorkspaceSaveReport | null = null;
   let rebuilding: AbortController | null = null;
   let lastSave: WorkspaceSaveReport | null = null;
   let lastDeparture: WorkspaceDepartureReport | null = null;
@@ -68,14 +70,15 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     if (state.input?.composing) throw new Error('INPUT_COMPOSING');
     if (state.draftPhase === 'uncertain') throw new Error('DOCUMENT_RECOVERY_REQUIRED');
   };
-  const begin = (expectedRevision: number, initialPhase: WorkspacePhase): AbortController => {
+  const begin = (expectedRevision: number, initialPhase: WorkspacePhase, isSave = false): AbortController => {
     if (disposed || phase !== 'idle') throw new Error('WORKSPACE_BUSY');
     if (expectedRevision !== revision) throw new Error('STALE_WORKSPACE');
     if (activationUncertain || failedCleanup.size) throw new Error('DOCUMENT_CLEANUP_REQUIRED');
     if (lastDeparture?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
     inputReady(current?.input.snapshot());
     pending = new AbortController();
-    operationDone = new Promise<void>(done => { finishOperation = done; });
+    savingOperation = isSave; operationSave = null;
+    operationDone = new Promise<WorkspaceSaveReport | null>(done => { finishOperation = done; });
     phase = initialPhase; notify(); return pending;
   };
   const live = (operation: AbortController): void => {
@@ -243,8 +246,9 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     }
   };
   const finish = (): void => {
-    const done = finishOperation; finishOperation = undefined; operationDone = undefined;
-    pending = null; review = null; backupReview = null; phase = disposed ? 'disposed' : 'idle'; notify(); done?.();
+    const done = finishOperation; const saved = operationSave;
+    finishOperation = undefined; operationDone = undefined; savingOperation = false; operationSave = null;
+    pending = null; review = null; backupReview = null; phase = disposed ? 'disposed' : 'idle'; notify(); done?.(saved);
   };
   const openDocument = async (expectedRevision: number, choose: (signal: AbortSignal) => Promise<ProjectSource | undefined>,
     recoverySessionId?: string): Promise<WorkspaceOutcome> => {
@@ -271,6 +275,11 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     snapshot,
     get current() { return current; },
     get retainedSave() { return retainedSave; },
+    // Main close coordination can join this exact accepted Save, never launch
+    // or retry one. A still-open backup review is not a started file operation.
+    waitForSave(): Promise<WorkspaceSaveReport | null> | null {
+      return !disposed && savingOperation && ['saving', 'committing'].includes(phase) ? operationDone! : null;
+    },
     onState(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
     // Main-only authority revocation. It settles chooser/review waits, but never
     // disposes the current input or interrupts a file write already in progress.
@@ -317,10 +326,10 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (before.changes.length || leaving.draft.candidate.patches.length) throw new Error('UNSAVED_CHANGES');
       if (leaving.mapping.status !== 'ready' || (leaving.history && !leaving.history.available)) throw new Error('DRAFT_UNAVAILABLE');
       const selectedReference = Object.freeze({ ...reference });
-      const operation = begin(expectedRevision, 'reviewing');
+      const operation = begin(expectedRevision, 'reviewing', true);
       let next: OpenDocument | null = null; let release: (() => void) | undefined; let keepFrozen = false;
       const report = (status: WorkspaceSaveReport['status'], code: string | null, cleanupPending = false, requiresReview = false): void => {
-        lastSave = Object.freeze({ documentId: current?.id ?? documentId, operation: 'backup-restore', status, code, cleanupPending, requiresReview }); notify();
+        lastSave = Object.freeze({ documentId: current?.id ?? documentId, operation: 'backup-restore', status, code, cleanupPending, requiresReview }); operationSave = lastSave; notify();
       };
       let status: WorkspaceSaveReport['status'];
       try {
@@ -390,10 +399,10 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (lastSave?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
       const before = leaving.input.snapshot();
       if (before.hasUnappliedInput) throw new Error(before.input?.composing ? 'INPUT_COMPOSING' : 'UNAPPLIED_INPUT');
-      const operation = begin(expectedRevision, 'saving');
+      const operation = begin(expectedRevision, 'saving', true);
       let next: OpenDocument | null = null;
       const report = (status: WorkspaceSaveReport['status'], code: string | null, cleanupPending = false, requiresReview = false): void => {
-        lastSave = Object.freeze({ documentId: current?.id ?? documentId, status, code, cleanupPending, requiresReview }); notify();
+        lastSave = Object.freeze({ documentId: current?.id ?? documentId, status, code, cleanupPending, requiresReview }); operationSave = lastSave; notify();
       };
       let status: WorkspaceSaveReport['status'];
       try {

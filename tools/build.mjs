@@ -29,6 +29,8 @@ const entries = {
   'save-session': ['tests/save-session/main.ts', 'out/save-session'],
   startup: ['tests/startup/main.ts', 'out/startup'],
   'startup-child': ['tests/startup/child.ts', 'out/startup-child'],
+  quit: ['tests/quit/main.ts', 'out/quit'],
+  'quit-child': ['tests/quit/child.ts', 'out/quit-child'],
   recovery: ['tests/draft-restore/main.ts', 'out/recovery'],
   'recovery-child': ['tests/draft-restore/child.ts', 'out/recovery-child'],
   'source-diff': ['tests/source-diff/main.ts', 'out/source-diff'],

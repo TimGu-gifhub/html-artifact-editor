@@ -8,12 +8,13 @@ import { createWorkspace } from './controller.ts';
 import type { Workspace, WorkspaceDecisions } from './controller.ts';
 import { prepareDocument } from './document.ts';
 import { bindWorkspaceWindow } from './window.ts';
+import type { WindowCloseOptions } from './window.ts';
 import type { ProjectChoices } from './project-choice.ts';
 import type { OriginalSaver } from '../storage/original.ts';
 import type { DraftStore } from './document.ts';
 import type { BackupRestorer } from '../storage/backups.ts';
 
-export type SessionPorts = WorkspaceDecisions & Readonly<{
+export type SessionPorts = WorkspaceDecisions & WindowCloseOptions & Readonly<{
   chooseOpen: () => Promise<string | undefined>;
   bounds: () => Rectangle;
   reportError: (code: string) => void;
@@ -46,7 +47,7 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
   let guard: ReturnType<typeof bindWorkspaceWindow>;
   try {
     bridge = connect();
-    try { guard = bindWorkspaceWindow(window, workspace, ports.reportError); }
+    try { guard = bindWorkspaceWindow(window, workspace, ports.reportError, ports); }
     catch (error) { bridge.close(); throw error; }
   } catch (error) { host.dispose(); void workspace.dispose(); throw error; }
   let disposed = false;
@@ -73,6 +74,7 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
     workspace, host,
     get connected() { return bridge.active; },
     get closing() { return guard.closing; },
+    requestClose: guard.requestClose,
     // Main-only recovery of a revoked UI renderer. It cannot change the current
     // document, reconnect an old page token, Apply, Save or discard pending text.
     async reloadUI(): Promise<void> {

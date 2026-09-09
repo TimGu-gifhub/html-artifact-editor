@@ -30,7 +30,9 @@ HAE-010 另经 [统一窗口会话](WORKSPACE_SESSION.md) 提供显式原文件�
 
 [bindWorkspaceWindow](../src/main/workspace/window.ts) 在 close 事件中同步 preventDefault，再请求 Workspace 检查。等待期间的重复关闭共用一个决定；取消、组合态、忙碌、失败或未知结果都保持窗口。Workspace 完成 closed 后才销毁原生窗口。
 
-dispose 仅用于进程/测试的强制清理，保留当前对象引用并取消尚未提交的准备；等待选择/确认的回调也响应取消，迟到答复和异常被消费，不会重新触发操作。不能暴露为用户关闭或 renderer 的 force 命令。系统强杀/Main 崩溃/断电仍需要 HAE-010 的持久化与恢复，内存引用不能提供此保障。
+第七阶段返回 Main requestClose，原生事件和应用退出共用这一 Promise。持久化工厂固定加入已接受 Save/备份恢复的等待，以及批准关闭后的清理屏障；只有已核验成功且清理无警告才继续关闭，不重试文件写入。runtime.dispose 成功后才销毁窗口，详细错误和应用事件顺序见 [应用退出协调](APPLICATION_QUIT.md)。
+
+dispose 是 Main 生命周期清理；持久化窗口在批准关闭后也通过它完成清理屏障，但它不能代替用户的离开决定。清理保留当前对象引用并取消尚未提交的准备；等待选择/确认的回调也响应取消，迟到答复和异常被消费，不会重新触发操作。不能暴露为用户关闭或 renderer 的 force 命令。系统强杀/Main 崩溃/断电仍需要 HAE-010 的持久化与恢复，内存引用不能提供此保障。
 
 ## API 与接线边界
 

@@ -179,6 +179,10 @@ WorkspaceSession 让同一 current 服务于可信 IPC、输入/草稿、Preview
 
 Main 的 PersistentWorkspaceSession 固定使用 userData/workspace-records，统一装配保存、检查点、备份与既有 WorkspaceSession。异步启动前占用唯一进程内实例，Electron profile 锁排除重复进程；不以新路径或清空目录绕过遗留证据。取得锁的 profile 不能通过改名复用。重复 dispose 共用结果，等待打开准备、已开始的事务、各代可信连接中的命令、历史/Diff/检查点与 Preview 清理；存储身份/空闲验证通过后才释放实例，未知结果继续占用。11 组真实 Windows 实验验证跨窗口/进程恢复、五处校稿与保存后历史/备份还原；正常启动、退出协调及产品控件仍待接入，见 [持久化启动合同](docs/PERSISTENT_STARTUP.md)。
 
+### HAE-005 第七段：应用退出协调
+
+Main 的 bindWorkspaceQuit 同步拦截 before-quit/will-quit，并接管最后窗口关闭的默认退出。它与原生 close 共用 requestClose，在成功关闭且持久化 runtime.dispose 核验通过后再请求 Electron 退出。持久化关闭仅加入已接受的 Save/备份恢复；成功且无清理警告后重查关闭条件，失败/未知保留窗口，不隐式写盘或重放决定。批准关闭后的清理屏障发生在原生窗口销毁前；记录退役、Worker/IPC 或存储占用无法确认时不强退。13 组独立进程实验记录真实退出与受阻结果；正常产品入口、菜单/确认 UI、真实 IME 和 OS 关机验收仍待完成，见 [应用退出合同](docs/APPLICATION_QUIT.md)。
+
 ### HAE-008 第一段：目录授权与诊断
 
 Main DirectoryGrant 固定实际目录身份与私有路径排除；ProjectGrant 加入根内相对 HTML 入口。两步原生选择器产生 Main 授权，switchEntry 复用原根身份并重新核验路径链，不能因目录被替换而重新授权。该根只扩大允许的预览资源范围，另存 writer 仍限入口所在文件夹的新 HTML。Workspace 在完整准备后处理离开确认、视图提交和旧会话撤销，迟到目录答复不能创建新操作。

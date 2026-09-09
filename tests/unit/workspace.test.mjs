@@ -209,11 +209,13 @@ test('teardown joins an already started original Save and retains its late unkno
   await workspace.open(workspace.snapshot().stateRevision, async () => 'first');
   previous.update({ changes: [{ nodeId: 'n1', oldText: 'base', newText: 'changed' }], canSaveCopy: true });
   const saving = workspace.save(workspace.snapshot().stateRevision, previous.id); await started.promise;
+  const observedSave = workspace.waitForSave(); assert.ok(observedSave);
   let complete = false; const disposal = workspace.dispose().then(() => { complete = true; });
   await Promise.resolve(); await Promise.resolve(); assert.equal(complete, false); assert.equal(previous.calls.closed, 0);
   const unknown = { status: 'unknown', code: 'SAVE_OUTCOME_UNKNOWN', transactionId: randomUUID(), expectedHash: 'b'.repeat(64),
     cleanupPending: true, requiresReview: true, verifySaved: null };
   held.resolve(unknown); assert.equal((await saving).status, 'unknown'); await disposal;
+  assert.equal((await observedSave).status, 'unknown'); assert.equal(workspace.waitForSave(), null);
   assert.equal(previous.calls.closed, 1); assert.equal(workspace.retainedSave, unknown);
   assert.equal(workspace.snapshot().lastSave.requiresReview, true); assert.equal(workspace.snapshot().phase, 'disposed');
 });

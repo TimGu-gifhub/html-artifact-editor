@@ -11,6 +11,7 @@ import { registerBundledContent } from '../../src/main/bundled-content.ts';
 import { lockContents, securePreferences } from '../../src/main/preview/security.ts';
 import { createPersistentWorkspaceSession } from '../../src/main/workspace/persistent-session.ts';
 import type { PersistentSessionPorts } from '../../src/main/workspace/persistent-session.ts';
+import type { PersistentWorkspaceSession } from '../../src/main/workspace/persistent-session.ts';
 
 export const original = Buffer.from('\ufeff<!doctype html>\r\n<html><head><meta charset="utf-8"><link rel="stylesheet" href="keep.css"><title>自制校稿报告</title></head><body>'
   + '<h1>2025 年度报告 &amp; 😀</h1><p id="date">2025-01-01</p><table><tbody><tr><td id="one">一</td><td id="two">二</td><td id="three">三</td></tr></tbody></table><!-- 原样 --></body></html>\r\n');
@@ -44,10 +45,12 @@ export function ports(window: BrowserWindow, root: string, entry: string, overri
     reviewBackup: async value => ({ reviewId: value.reviewId, decision: 'restore' }), reportError: () => {},
     bounds: () => { const { width, height } = window.getContentBounds(); return { x: 0, y: 0, width, height }; }, ...overrides };
 }
-export async function fixture(outputRoot: string, root: string, entry: string, overrides: Partial<PersistentSessionPorts> = {}) {
+export async function fixture(outputRoot: string, root: string, entry: string, overrides: Partial<PersistentSessionPorts> = {},
+  setup?: (window: BrowserWindow, runtime: PersistentWorkspaceSession) => void) {
   const window = await editorWindow(outputRoot, root);
   const runtime = await createPersistentWorkspaceSession(window, outputRoot, ports(window, root, entry, overrides));
   try {
+    setup?.(window, runtime);
     await window.loadURL(EDITOR_URL);
     const call = (expression: string): Promise<WorkspaceResult> => window.webContents.executeJavaScript(expression);
     const read = async () => { const r = await call('haeWorkspace.read()'); assert.ok(r.ok, r.code ?? 'read failed'); return r.state!; };

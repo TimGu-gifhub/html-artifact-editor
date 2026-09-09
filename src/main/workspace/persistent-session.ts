@@ -13,7 +13,7 @@ import { createWorkspaceSession } from './session.ts';
 import type { SessionPorts } from './session.ts';
 
 export const WORKSPACE_STORAGE_NAME = 'workspace-records';
-export type PersistentSessionPorts = Omit<SessionPorts, 'saveOriginal' | 'checkpoints' | 'backups'> & Readonly<{
+export type PersistentSessionPorts = Omit<SessionPorts, 'saveOriginal' | 'checkpoints' | 'backups' | 'waitForSave' | 'beforeClose'> & Readonly<{
   onStorageStep?: (kind: 'save' | 'checkpoint', step: string) => Promise<void>;
 }>;
 let owner: symbol | null = null;
@@ -59,7 +59,7 @@ export async function createPersistentWorkspaceSession(window: BrowserWindow, ou
     if (window.isDestroyed() || window.webContents.isDestroyed()) throw new Error('EDITOR_BRIDGE_UNAVAILABLE');
     if (window.webContents.getURL()) throw new Error('EDITOR_WINDOW_ALREADY_LOADED');
     session = createWorkspaceSession(window, outputRoot, { ...ports,
-      saveOriginal: createOriginalSaver(saves), checkpoints, backups });
+      saveOriginal: createOriginalSaver(saves), checkpoints, backups, waitForSave: true, beforeClose: () => dispose() });
     const active = session;
     let disposal: Promise<void> | undefined;
     const dispose = (): Promise<void> => {
@@ -85,7 +85,7 @@ export async function createPersistentWorkspaceSession(window: BrowserWindow, ou
     window.once('closed', onClosed);
     return Object.freeze({ workspace: active.workspace, host: active.host,
       get connected() { return active.connected; }, get closing() { return active.closing; },
-      reloadUI: active.reloadUI, dispose,
+      reloadUI: active.reloadUI, requestClose: active.requestClose, dispose,
       // Main-only recovery/maintenance access, never serialized through IPC.
       storage: Object.freeze({ directory: records.path, saves, checkpoints, backups }),
     });

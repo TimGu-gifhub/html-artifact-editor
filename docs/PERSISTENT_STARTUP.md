@@ -8,6 +8,8 @@
 
 Main 提供既有 chooseOpen、chooseCopy、review、reviewBackup、projectChoices、bounds 和 reportError 回调。新增 onStorageStep 是 Main 实验故障/等待注入点，不是 IPC 方法。保存、检查点和备份服务由工厂统一安装，调用者不能通过这些端口替换。返回的 storage 是 Main 私有的检查/维护引用，只能在该运行实例的生命周期内使用；原有维护合同仍要求排除活动文档和存储事务。
 
+第七阶段增加 Main requestClose：原生关闭和应用退出共用既有 review，等待已接受的 Save/备份恢复结果，并在批准关闭后先完成 runtime.dispose 再销毁窗口。等待与清理屏障由工厂固定安装，调用者不能替换，renderer 没有新增方法。完整语义见 [应用退出协调](APPLICATION_QUIT.md)。
+
 固定位置为 Electron userData 的直接子目录 **workspace-records**。工厂先获取 Electron profile 的进程锁，再核验目录链和身份；仅在不存在时创建已核验父目录下的已知直接子目录。文件、链接、目录替换、权限失败均报错，不迁移、不清空，也不随机换一个目录逃避旧证据。保存、草稿、结束标记、清理/恢复记录继续共用原 active.lock、身份注册表和配额，原记录格式不变。
 
 同一进程在异步启动前同步占用运行实例；第二次启动或第二个窗口返回 EDITOR_RUNTIME_ACTIVE。实际 profile 锁排除其他 Electron 进程。已持有的锁绑定此前确认的 userData，修改路径不能把旧锁当作新 profile 的所有权；运行期间 userData/sessionData 与锁状态须保持一致。独立 profile 不构成全机器文件互斥，原有文件版本、冲突和备份校验仍必须执行。
@@ -25,7 +27,7 @@ dispose 是 Main teardown，不能代替用户的取消、放弃、另存或原�
 
 准备中的 Save 在关闭后完成私有取消和锁释放，原 HTML 不变。已经替换的 Save 继续核验提交记录；窗口已销毁、无法安装新基线时保留 rebase-required、旧源和候选，不报告普通保存完成。无法确定清理或结果时，dispose 拒绝并保留实例占用，后续启动不能绕过；工厂不自动重试或删除证据。
 
-Electron profile 的 OS 锁由 Main 进程持有，工厂不会在窗口之间释放它。调用方仍须负责应用退出流程并等待 teardown；本阶段未安装正常应用的 quit 菜单或 before-quit 协调器。app.exit、强杀、OS 关机和断电不能靠异步窗口回调保证排空，已持久化记录须按既有恢复合同核验。
+Electron profile 的 OS 锁由 Main 进程持有，工厂不会在窗口之间释放它。Main 可安装应用退出协调器，将 before-quit、will-quit 和最后窗口关闭连到同一关闭/排空结果；正常应用和产品 quit 菜单尚未安装该服务。app.exit、强杀、OS 关机和断电不能靠异步窗口回调保证排空，已持久化记录须按既有恢复合同核验。
 
 ## 执行范围
 

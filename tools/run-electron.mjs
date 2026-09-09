@@ -17,11 +17,12 @@ const kind = process.argv.includes('--smoke') ? 'smoke'
                 : process.argv.includes('--project') ? 'project'
                   : process.argv.includes('--save-session') ? 'save-session'
                     : process.argv.includes('--startup') ? 'startup'
-                      : process.argv.includes('--recovery') ? 'recovery'
-                        : process.argv.includes('--source-diff') ? 'source-diff'
-                          : process.argv.includes('--history') ? 'history'
+                      : process.argv.includes('--quit') ? 'quit'
+                        : process.argv.includes('--recovery') ? 'recovery'
+                          : process.argv.includes('--source-diff') ? 'source-diff'
+                            : process.argv.includes('--history') ? 'history'
     : process.argv.includes('--preview') ? 'preview-tool' : 'main';
-const smoke = ['smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project', 'save-session', 'startup', 'recovery', 'source-diff', 'history'].includes(kind);
+const smoke = ['smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project', 'save-session', 'startup', 'quit', 'recovery', 'source-diff', 'history'].includes(kind);
 const entry = resolve(root, `out/${kind}/index.cjs`);
 if (!existsSync(entry)) throw new Error('Build output missing. Run npm run build first.');
 const reportPath = resolve(root, `test-results/${kind}.json`);
@@ -38,7 +39,7 @@ if (kind === 'preview-tool' && process.argv.includes('--directory')) args.push('
 const child = spawn(electron, args, { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
 // History also includes 24 separately durable edits plus compaction/restart.
 // This is a suite budget; individual workers and IPC keep their existing limits.
-const timeoutMs = ['save-session', 'recovery', 'history'].includes(kind) ? 90_000 : 45_000;
+const timeoutMs = ['save-session', 'quit', 'recovery', 'history'].includes(kind) ? 90_000 : 45_000;
 const timeout = smoke ? setTimeout(() => {
   console.error(`Electron ${kind} exceeded ${timeoutMs / 1000} seconds.`);
   child.kill();
