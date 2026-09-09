@@ -93,6 +93,15 @@ git diff --check
 
 命令、依赖版本、输出边界与环境排错见 [开发说明](docs/DEVELOPMENT.md)，许可证见 [依赖清单](docs/DEPENDENCIES.md)。本项目不使用 GitHub CI，仓库 Actions 已关闭；构建、测试、启动冒烟和文档检查在本地执行，平台可用性由对应 Windows/Mac 实机验收。`npm ci` 是锁定依赖安装命令，继续保留。
 
+## AI 辅助开发与致谢
+
+本项目在需求梳理、架构设计、代码实现、测试和文档编写过程中，使用了 **ChatGPT / Codex** 与 **Kimi / Kimi Code** 辅助开发。感谢以下公司及其研究、产品与工程团队提供的模型和工具：
+
+- **[OpenAI](https://openai.com/)**：感谢 **ChatGPT、Codex 和 GPT 系列模型**，为项目规划、核心实现、代码审查与文档完善提供帮助。
+- **[月之暗面（Moonshot AI）](https://www.moonshot.ai/)**：感谢 **Kimi、Kimi Code 和 [Kimi K3 模型](https://www.kimi.ai/blog/kimi-k3)**，支持了[前端视觉候选的设计、实现与修正](docs/implementation/HAE-007.md)。
+
+AI 用于开发辅助，应用本身保持本地离线，不依赖云端模型或 AI API。开发分工、实际调用记录与人工复核要求见 [AI 开发流程](docs/AI_WORKFLOW.md)。
+
 ## License
 
 本项目采用 [MIT License](LICENSE)。项目原创代码和文档允许按许可证条款使用、修改和分发；引入的第三方依赖仍须保留其各自许可证和声明。用户打开的 HTML 及资源不会因为被本工具编辑而改变其版权或许可证。
