@@ -12,10 +12,15 @@ export type WorkspaceSaveReport = Readonly<{
   documentId: string; status: 'saved' | 'rebase-required' | 'failed' | 'unknown' | 'cancelled' | 'unchanged';
   code: string | null; cleanupPending: boolean; requiresReview: boolean;
 }>;
+export type WorkspaceDepartureReport = Readonly<{
+  documentId: string; status: 'clean' | 'retired' | 'empty' | 'failed' | 'unknown';
+  code: string | null; cleanupPending: boolean; requiresReview: boolean;
+}>;
 export type WorkspaceSnapshot = Readonly<{
   stateRevision: number; phase: WorkspacePhase;
   current: Readonly<{ id: string; name: string; input: InputSnapshot; project: ProjectSummary; persistence: DraftPersistenceState | null }> | null;
-  review: LeaveReview | null; cleanupPending: boolean; lastSave: WorkspaceSaveReport | null; canSave: boolean;
+  review: LeaveReview | null; cleanupPending: boolean; lastSave: WorkspaceSaveReport | null;
+  lastDeparture: WorkspaceDepartureReport | null; canSave: boolean;
 }>;
 export type WorkspaceOutcome = Readonly<{
   status: 'opened' | 'closed' | 'cancelled'; state: WorkspaceSnapshot;

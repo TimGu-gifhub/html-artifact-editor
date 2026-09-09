@@ -13,6 +13,7 @@ const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUS
   'DOCUMENT_ACTIVATION_FAILED', 'DOCUMENT_ACTIVATION_UNKNOWN', 'STALE_DOCUMENT',
   'SAVE_PLATFORM_UNSUPPORTED', 'UNAPPLIED_INPUT',
   'DRAFT_PERSISTENCE_UNAVAILABLE', 'DRAFT_PERSISTENCE_RETRY_UNAVAILABLE', 'STALE_DRAFT_REQUEST',
+  'DRAFT_PERSISTENCE_REQUIRED', 'DRAFT_RETIREMENT_FAILED', 'DRAFT_RETIREMENT_UNKNOWN',
   'RESOURCE_BLOCKED',
   'COPY_FAILED', 'COPY_OUTCOME_UNKNOWN', 'INPUT_MAPPING_LOST', 'INVALID_TEXT_NUL', 'INVALID_UNICODE', 'TEXT_SIZE_LIMIT']);
 
@@ -54,6 +55,8 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
           } else if (command.kind === 'edit') {
             const current = workspace.current;
             if (!current || current.id !== command.documentId) throw new Error('STALE_DOCUMENT');
+            if (workspace.snapshot().lastDeparture?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
+            if (workspace.snapshot().phase === 'committing') throw new Error('WORKSPACE_BUSY');
             if (workspace.snapshot().cleanupPending && command.value.kind !== 'change') throw new Error('DOCUMENT_CLEANUP_REQUIRED');
             if (workspace.snapshot().phase === 'saving' && workspace.retainedSave !== null) throw new Error('WORKSPACE_BUSY');
             // Late input may arrive during open/review and invalidate its proof.

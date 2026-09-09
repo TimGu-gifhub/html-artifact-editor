@@ -29,15 +29,15 @@ documentId 必须随用户操作一起捕获，不能在迟到回调中自动换
 
 ## 切换与故障
 
-文档替换顺序为：独立完成候选准备 → 核验离开决定 → 同步挂载新预览 → 最终核验操作及旧输入 → 发布新 current → 关闭旧文档。订阅通知仅报告状态，不承担必须成功的挂载工作。
+文档替换顺序为：独立完成候选准备 → 核验离开决定 → 同步挂载新预览 → 最终核验操作及旧输入 → 发布新 current → 关闭旧文档。启用 checkpoints 时，在试挂载前冻结输入并排空写入，明确丢弃/已核验副本须在试挂载后确认结束标记，再发布新 current；原窗口在整个过程中保留。订阅通知仅报告状态，不承担必须成功的挂载工作。
 
 [PreviewHost](../src/platform/preview-host.ts) 拥有原生子视图附着关系；Workspace 拥有输入、预览内容和清理。新增视图、设置尺寸或移除旧视图失败时，先恢复旧视图再拒绝提交。成功挂载后若最终权限核验失败，调用回滚；旧输入、候选及文档 ID 不改变。原生缩放/回滚无法确定结果时，设置 cleanupPending 并阻止 Apply、Save、Open 和 Close，保留现场。Main 可保留晚到的 change 输入；当前没有用户可操作的视图故障恢复流程。
 
-打开/确认期间允许当前文档的晚到 change，使旧离开决定失效；begin/apply/resolve/save-copy 在 Workspace 非 idle 时拒绝。原文件保存及重建期间也拒绝 change，防止冻结候选之后接受新输入。InputController 自身的 busy、组合态和版本约束继续有效。HAE-008 的目录打开/入口切换复用同一路径；编辑窗口内的交互预览切换仍待接入。
+打开/确认期间允许当前文档的晚到 change，使旧离开决定失效；begin/apply/resolve/save-copy 在 Workspace 非 idle 时拒绝。原文件保存及重建、离开决定的 committing 阶段也拒绝 change，防止冻结候选之后接受新输入。Main holdDeparture 将 InputController 置于 leaving，只保留原输入和映射，不关闭它们；预检或挂载失败可释放冻结，标记结果不确定则保留冻结。此方法没有 renderer 命令。组合态和版本约束继续有效。HAE-008 的目录打开/入口切换复用同一路径；编辑窗口内的交互预览切换仍待接入。
 
-导航、重载、renderer 崩溃和销毁撤销连接，取消未提交的打开/确认等待，不销毁 Main 当前输入。未返回的另存选择器也可结束等待；迟到路径或异常被消费，不启动后续写入。已经开始的文件写入不因 UI 失效而中断或重试。
+导航、重载、renderer 崩溃和销毁撤销连接，取消未开始结束标记的打开/确认等待，不销毁 Main 当前输入。未返回的另存选择器也可结束等待；迟到路径或异常被消费，不启动后续写入。已经授权并开始的保存或结束标记不因 UI 失效而中断或重试，Main 继续核验其结果。
 
-`reloadUI()` 仅供 Main 在旧 bridge 已撤销后使用，固定加载应用 UI 并建立新连接。它恢复同一文档的 Main 状态，不自动 Apply、Save、放弃输入或清除 composing；前端仍须保存未确认的本地文字并处理真实 IME/焦点。Main 崩溃、系统强杀或断电不受此内存保留机制保障，持久化恢复属于 HAE-010。
+`reloadUI()` 仅供 Main 在旧 bridge 已撤销后使用，固定加载应用 UI 并建立新连接。它读取 Main 当前已结算的文档状态，不自行 Apply、Save、放弃输入或清除 composing；原操作已完成切换时会读到新文档。前端仍须保存未确认的本地文字并处理真实 IME/焦点。Main 崩溃、系统强杀或断电不受此内存保留机制保障，持久化恢复属于 HAE-010/011。
 
 原生关闭复用 [文档与窗口生命周期](WORKSPACE_LIFECYCLE.md)，同一 current 上处理取消、放弃或明确另存后关闭。覆盖保存进行中拒绝关闭；离开确认尚未提供覆盖保存选项，不开放绕过恢复的强制关闭命令。
 
@@ -63,6 +63,8 @@ InputController 与 DraftSession 在整个文件操作期间互斥；已提交�
 
 HAE-011 的可选 Main checkpoints 端口为每份文档建立一个独立持久化队列；确认改变文字的 Apply 自动排队，失败保留输入并停止自动重试。current.persistence 传递准确的最新/写入中/待写/已持久化修订和错误，后台变化不推进输入版本。Save 在输入互斥期间等待私有写入结束，关闭文档等待队列排空；UI 崩溃不终止 Main 写入。没有配置端口时状态为 null，正常应用尚未安装端口。完整语义与记录退役、恢复列表等限制见 [草稿检查点](DRAFT_CHECKPOINTS.md)。
 
+第四阶段增加 lastDeparture，其 documentId/status/code/cleanupPending/requiresReview 只报告离开时的私有记录结果。状态为 clean/retired/empty/failed/unknown；标记失败或未知保持窗口和全部证据，requiresReview 阻止继续修改或盲目重试。无净修改时若最后的归零检查点未确认，DRAFT_PERSISTENCE_REQUIRED 允许用户显式重试该检查点后重新关闭。有效标记但清理失败仍可完成已授权的切换/关闭，并保留独立警告；后续恢复界面仍待实现。
+
 `npm run test:session` 使用真实 BrowserWindow、WebContentsView、生产 preload/IPC 与 Main 会话；测试专用 probe 只发送反例请求，不进入默认八目标构建。自制无控件的可信页面不代表产品 UI，也没有 Kimi 前端实现声明。
 
 已执行十组检查：空会话/来源拒绝；标题与重复单元格修改及独立字节副本；三处真实视图操作故障；确认与晚到 IPC 输入竞争；换文档后旧请求拒绝及副本重开；实际 renderer 崩溃后重连；未返回另存选择器撤销；状态/schema/重放反例；同会话 window.close 取消和另存关闭；原生 resize 事件的尺寸故障保留与阻止操作。
@@ -74,3 +76,5 @@ HAE-008 另用生产 preload/IPC 执行八组目录/共享资源/诊断/输入�
 `npm run test:save-session` 已在 Windows 11 / Electron 44.2.0 执行十组真实窗口、生产 preload/IPC 和原生替换测试：连续保存/清空节点/项目根保留、组合态及未应用输入、保存互斥/关闭、打开后同文外部改写、准备时和替换后 renderer 崩溃、未知结果、原生挂载失败、提交后外部改写、提交后的清理警告。报告为忽略的 `test-results/save-session.json`；完整文件 hash、实际版本、限制和全量门槛见 [HAE-010](implementation/HAE-010.md)。测试的空白可信页面不是产品界面，composing 标志不是实际中文 IME 验收。
 
 HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoints 端口的实验：连续 Apply 与慢写合并、精确持久化状态、Save 共用锁等待与新基线、失败/显式重试、实际 renderer 崩溃后继续写入、归零后原生关闭等待，以及检查点失败后显式保存。完整证据和未实现的生命周期/恢复范围见 [HAE-011](implementation/HAE-011.md)。
+
+第四阶段再加入 [十组窗口离开实验](../tests/save-session/departure.ts)：关闭排空与结束标记、三处挂载失败、取消/失效确认与核验副本、三处结束写入异常、标记开始前后两次实际 renderer 崩溃、归零失败与显式重试、清理警告。源 HTML/CSS 与候选按独立期望字节核对；每个等待仍有界，保存会话整套运行上限扩为 90 秒。

@@ -32,11 +32,13 @@ const args = [kind === 'main' ? root : entry];
 if (kind === 'preview-tool' && process.argv.includes('--interactive')) args.push('--interactive');
 if (kind === 'preview-tool' && process.argv.includes('--directory')) args.push('--directory');
 const child = spawn(electron, args, { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
+// Save-session includes the native save, persistence and departure crash suites.
+const timeoutMs = kind === 'save-session' ? 90_000 : 45_000;
 const timeout = smoke ? setTimeout(() => {
-  console.error(`Electron ${kind} exceeded 45 seconds.`);
+  console.error(`Electron ${kind} exceeded ${timeoutMs / 1000} seconds.`);
   child.kill();
   process.exitCode = 1;
-}, 45_000) : undefined;
+}, timeoutMs) : undefined;
 child.once('error', (error) => { clearTimeout(timeout); console.error(error); process.exitCode = 1; });
 child.once('close', async (code) => {
   clearTimeout(timeout);

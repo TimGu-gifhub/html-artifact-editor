@@ -57,6 +57,16 @@ export function createInputController(mapping: PreviewMapping, draft: DraftSessi
   return Object.freeze({
     snapshot,
     onState(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    // Main-only departure hold: keep raw input and mapping alive while private
+    // evidence settles. A failed preflight can release it; uncertainty retains it.
+    holdDeparture(expectedStateRevision: number): () => void {
+      idle();
+      if (expectedStateRevision !== stateRevision) throw new Error('STALE_INPUT_STATE');
+      if (draft.phase !== 'idle') throw new Error('DRAFT_UNAVAILABLE');
+      if (input) notComposing(input);
+      phase = 'leaving'; notify();
+      return () => { if (!closed && phase === 'leaving') { phase = 'idle'; notify(); } };
+    },
     async begin(request: unknown) {
       idle();
       if (!isInputBegin(request) || request.draftRevision !== draft.revision || draft.phase !== 'idle' || input) throw new Error('STALE_INPUT_BEGIN');

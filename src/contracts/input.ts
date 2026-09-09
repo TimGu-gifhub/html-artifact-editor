@@ -8,7 +8,7 @@ export type InputResolution = InputVersion & Readonly<{ decision: 'stay' | 'disc
 export type ActiveInput = Readonly<{
   editToken: string; nodeId: string; revision: number; text: string; appliedText: string; composing: boolean;
 }>;
-export type InputPhase = 'idle' | 'beginning' | 'applying' | 'resolving' | 'saving' | 'closed';
+export type InputPhase = 'idle' | 'beginning' | 'applying' | 'resolving' | 'saving' | 'leaving' | 'closed';
 export type InputSnapshot = Readonly<{
   stateRevision: number; phase: InputPhase; mappingStatus: 'binding' | 'ready' | 'invalidated' | 'closed'; mappingReason: string | null;
   selection: Readonly<{ reference: MappingSelection; text: string }> | null;

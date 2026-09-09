@@ -18,6 +18,8 @@ import { createOriginalSaver } from '../../src/main/storage/original.ts';
 import { createWorkspaceSession } from '../../src/main/workspace/session.ts';
 import { createWindowsReplacer } from '../../src/platform/windows-replacement.ts';
 import type { PreviewHostStep } from '../../src/platform/preview-host.ts';
+import type { LeaveDecision, LeaveReview } from '../../src/contracts/workspace.ts';
+import { checkDeparture } from './departure.ts';
 
 registerSchemes(); app.enableSandbox(); app.on('before-quit', event => event.preventDefault());
 const outputRoot = resolve(__dirname, '..'); const results = resolve(outputRoot, '../test-results');
@@ -45,15 +47,17 @@ async function fixture(persistDrafts = false) {
   const ui = new BrowserWindow({ show: false, width: 960, height: 640, webPreferences: {
     ...securePreferences, session: uiSession, preload: join(outputRoot, 'preload/ui/index.cjs'),
   } }); lockContents(ui.webContents);
-  const control: { step: (step: string) => Promise<void>; draftStep: (step: string) => Promise<void>; hostFault: PreviewHostStep | null } = {
-    step: async () => {}, draftStep: async () => {}, hostFault: null };
+  const control: { step: (step: string) => Promise<void>; draftStep: (step: string) => Promise<void>; hostFault: PreviewHostStep | null;
+    review: (value: LeaveReview) => Promise<LeaveDecision>; copyPath: string | undefined } = {
+    step: async () => {}, draftStep: async () => {}, hostFault: null,
+    review: async value => ({ reviewId: value.reviewId, decision: 'cancel' }), copyPath: undefined };
   const store = await createSavePreparationStore(privateRoot, step => control.step(step), await createWindowsReplacer(join(outputRoot, 'native/ReplaceHelper.exe')));
   const checkpoints = await createDraftCheckpointStore(privateRoot, step => control.draftStep(step), store);
   const errors: string[] = [];
   const runtime = createWorkspaceSession(ui, outputRoot, {
-    chooseOpen: async () => entry, chooseCopy: async () => undefined,
+    chooseOpen: async () => entry, chooseCopy: async () => control.copyPath,
     projectChoices: { chooseDirectory: async () => project, chooseEntry: async () => entry },
-    review: async value => ({ reviewId: value.reviewId, decision: 'cancel' }), reportError: code => errors.push(code),
+    review: value => control.review(value), reportError: code => errors.push(code),
     bounds: () => { const { width, height } = ui.getContentBounds(); return { x: 0, y: 0, width, height }; },
     onHostStep: step => { if (control.hostFault === step) { control.hostFault = null; throw new Error('test attachment failure'); } },
     saveOriginal: createOriginalSaver(store),
@@ -89,12 +93,13 @@ async function fixture(persistDrafts = false) {
     return { root, project, entry, privateRoot, store, checkpoints, ui, control, runtime, errors, call, read, current, edit, save, select, change, apply, dirty, close };
   } catch (error) { await close(); throw error; }
 }
-type Fixture = Awaited<ReturnType<typeof fixture>>;
+export type Fixture = Awaited<ReturnType<typeof fixture>>;
 async function use(run: (f: Fixture) => Promise<void>, persistDrafts = false): Promise<void> { const f = await fixture(persistDrafts); try { await run(f); } finally { await f.close(); } }
 
 async function run(): Promise<void> {
   if (process.platform !== 'win32') throw new Error('SAVE_SESSION_PLATFORM_UNSUPPORTED');
   await mkdir(results, { recursive: true }); await mkdir(app.getPath('userData'), { recursive: true }); await app.whenReady();
+  await checkDeparture({ use, until, barrier, pass, original, expected, css });
   await use(async f => {
     const hold = barrier(); let writing = false;
     f.control.draftStep = async step => { if (step === 'baseline-synced' && !writing) { writing = true; await hold.wait; } };
