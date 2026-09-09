@@ -1,6 +1,6 @@
 # 草稿检查点与恢复候选
 
-日期：2026-09-09；HAE-011 第九阶段。已实现纯核心逻辑编辑意图、Main 私有检查点存储、可选窗口持久化端口，以及最新点选择、会话结束标记、窗口离开协调与恢复安装，执行记录见 [HAE-011](implementation/HAE-011.md)。调用者须为 Main；正常产品入口与恢复界面尚未接入。检查点成功仅表示该版本的私有证据完成写入和回读，不表示 HTML 已保存。
+日期：2026-09-09；HAE-011 第十阶段。已实现纯核心逻辑编辑意图、Main 私有检查点存储、可选窗口持久化端口，以及最新点选择、会话结束标记、窗口离开协调、恢复安装与精确提交后的历史重建，执行记录见 [HAE-011](implementation/HAE-011.md)。调用者须为 Main；正常产品入口与恢复界面尚未接入。检查点成功仅表示该版本的私有证据完成写入和回读，不表示 HTML 已保存。
 
 ## 1. 来源与恢复权限
 
@@ -48,6 +48,10 @@
 重启先验证检查点本身，再检查 Main 当前授权的目标。基线完整 hash 与文件版本均相同才为 baseline-matches；错误目标、不可读或版本冲突分别拒绝恢复。仅与 resultHash 相同只能报告 candidate-on-disk，不能当成已保存。
 
 若保存存储存在完整 committed 事务，其目标、旧基线 hash/身份和新 hash 均与检查点对应，并且该 committed 记录的实际新文件版本与当前目标一致，才为 committed-matches。restoreCandidate 对此返回 DRAFT_ALREADY_SAVED，避免保存后、草稿退役前崩溃导致再次应用。实际替换却缺少提交证据、外部重写相同候选字节或保存记录无法读取，都不能冒充这个结果。该分类本身不删除或消费任何记录。
+
+最新 saved v2 点还可通过 Main `prepareRecovery(sessionId, source, continuationSessionId)` 准备完整历史。必须关联唯一有效的提交事务，绑定原基线版本、当前文件版本、完整新旧 hash/大小和实际 intent/commit 文件 hash；重建前、准备映射后及挂载前后都重新核验。只读准备从原始历史和私有基线重新计算保存点，增加历史修订，保留 Undo/Redo；返回的候选是实际当前文件的完整字节、零补丁，不重复回放旧修改。此方法本身不写文件，旧 restoreCandidate/restoreLatest 继续拒绝 saved，v1 saved 不支持历史转换。
+
+任何已绑定当前已保存文件版本的其他会话记录都会阻止这个旧入口（DRAFT_SAVED_HISTORY_SUPERSEDED），包括正常 Save 创建的干净点、更新草稿、不完整点和有效结束标记。应从对应后续会话按其最新修订恢复；不自动挑另一会话、回退或删除记录。归属不明的头/标记拒绝所有恢复。当前恢复自己新建的序列仅在修订、完整历史、结果和 seal 均精确匹配时通过挂载复核。提交不唯一时返回 DRAFT_SAVED_HISTORY_UNCONFIRMED，候选同文、旧锁或未知结果不能替代证明。
 
 ## 5. Apply 持久化与会话协调
 
@@ -101,11 +105,13 @@ retired 表示标记已核验；没有该会话记录返回 empty，不生成持
 
 restore(sessionId, stateRevision, sourceMode) 要求明确 Main 选择器授权，sourceMode 为 file 或 directory，preload 默认 file；不从记录推导路径，也不把 UI 字符串当作目录权限。单文件模式仍以 HTML 父目录为根，目录模式重新选择根与入口。当前窗口仍适用原有离开确认、版本、组合态、输入冻结和故障保护。
 
-[prepareDocument](../src/main/workspace/document.ts) 生成新 Preview，claim 原持久化序列并核验打开快照；readLatestHistory 在映射前验证 v2 来源证明，再由有限 Parser Worker 建立必要的空 Text。resolveLatest 再次选择完整点，取得候选、历史和 Main 私有核验函数。v1 继续使用普通映射。恢复时重查原始文件身份/hash、逻辑目标和完整候选字节；只接收第 6 节的最新点。隔离 registry 的 [restore 协议](../src/contracts/mapping-restore.ts) 只允许 revision=1、无选择或编辑锁的新映射，一批最多 1000 个唯一 Text、每项新文本 64 Ki UTF-16 单元，整批有源大小限制；不含路径或 offset。所有 DOM 目标与旧值在第一次赋值前核验，保持 MutationObserver 开启并逐项核对实际 Text 写入，完成后映射修订变为 2。它不是页面 API，也不伪造用户点击。
+[prepareDocument](../src/main/workspace/document.ts) 生成新 Preview，claim 原持久化序列并核验打开快照；prepareRecovery 在映射前取得计划。普通分支由 readLatestHistory 验证 v2 来源证明，再由有限 Parser Worker 建立必要的空 Text；计划的 resolve 委托 resolveLatest 再次选择完整点，取得候选、历史和 Main 私有核验函数。v1 继续使用普通映射；saved v2 分支按第 4 节重建实际当前基线。恢复时重查原始文件身份/hash、逻辑目标和完整候选字节；只接收第 6 节的最新点。隔离 registry 的 [restore 协议](../src/contracts/mapping-restore.ts) 只允许 revision=1、无选择或编辑锁的新映射，一批最多 1000 个唯一 Text、每项新文本 64 Ki UTF-16 单元，整批有源大小限制；不含路径或 offset。所有 DOM 目标与旧值在第一次赋值前核验，保持 MutationObserver 开启并逐项核对实际 Text 写入，完成后映射修订变为 2。它不是页面 API，也不伪造用户点击。
 
 Main 只在收到准确确认后发布内存候选；恢复批次若失败或未知，关闭尚未发布的视图并保留原私有记录，不写 HTML。未知异常可能已经改变候选视图的一部分，不能把内部 DOM 操作宣称为原子事务。安装前后再次核验源版本、最新记录 ID/修订/记录 hash 和完整候选 hash；较新检查点或外部文件变化使安装失败。旧草稿的结束标记已确认而新恢复证明失效时，回滚到保留的旧视图，准确保留 retired 状态和故障原因，冻结旧输入并要求恢复，不把新视图报成已安装。
 
-恢复成功时 current.id、source/mapping 身份均为新值；checkpointSessionId 和草稿修订沿用原记录。队列以已核验候选初始化 persisted，不立即重写检查点；下一次有变化的 Apply 推进原修订序列，之后丢弃也结束该原序列，避免旧点再次出现。显式 Save 继续走备份/提交事务，并以实际 committed 新文件版本阻止重复恢复；保存后使用新基线和新的持久化会话。
+普通恢复成功时 current.id、source/mapping 身份均为新值；checkpointSessionId 和草稿修订沿用原记录。队列以已核验候选初始化 persisted，不立即重写检查点；下一次有变化的 Apply 推进原修订序列，之后丢弃也结束该原序列，避免旧点再次出现。显式 Save 继续走备份/提交事务，并以实际 committed 新文件版本阻止重复恢复；保存后使用新基线和新的持久化会话。
+
+第 4 节 saved v2 转换通过同一个可信 restore 命令进入：prepareDocument 在映射前取得恢复计划，同时占用原请求序列与新生成的 checkpointSessionId；只把当前保存点证明交给 Parser Worker。新干净候选、历史和修订先写入新序列，等待 persisted 且无清理警告，再复核源文件、原点、提交证据及新点后允许挂载。挂载前后再次复核，只有文档/Worker/持久化确认关闭才释放两份占用。安装或离开确认取消不删除已经形成的新干净点，可从该新会话继续；旧入口不能越过它。新点失败/未知或锁清理失败阻止安装，保留新旧证据，暂不提供绕过不完整点的恢复操作。全过程不替换 HTML。
 
 持久文档准备通过 [Electron profile 所有权](../src/platform/editor-profile.ts) 排除同 userData 的另一编辑进程；其底层 API 见 [Electron 官方文档](https://www.electronjs.org/docs/latest/api/app#apprequestsingleinstancelockadditionaldata)。[Main 所有权注册表](../src/main/storage/draft-ownership.ts) 按完整私有目录身份链和 sessionId 排除本进程另一窗口/存储对象。进程锁由 Electron 持有至退出，不按 PID/时间删除锁；会话占用只在文档和队列关闭成功后释放。底层只读提取/存储测试端口不自动取得文档所有权；此约束适用于合作的持久编辑进程，并不防御其他同权限程序直接修改私有文件。
 
@@ -115,6 +121,6 @@ Main 只在收到准确确认后发布内存候选；恢复批次若失败或未
 
 v2 的 [完整历史记录](HISTORY.md) 由新 Main 文档默认产生，包含有界操作链、Redo、独立保存点和最初来源。同一待写项同步冻结候选、修订和历史，合并队列不能把另一修订的历史附在旧候选上。v1 导入/导出仍拒绝 lineage；恢复 v1 的 history=null，保留净意图并且不能撤销恢复前的操作。明确 Save 后可开始新历史，但不会补造旧顺序。
 
-仍待实现产品恢复控件、结束操作失败后的处理、产品历史/Diff 面板及正常产品入口。源码 Diff 的只读数据与保存确认已接入，见 [源码 Diff](SOURCE_DIFF.md)。结束失败/未知时保留的冻结会话目前不能由用户在产品中继续处理；没有强制离开、自动解锁或绕过标记的重试。未应用输入仍是既有 Main 内存状态；没有持久化它，也没有持久化未获 Preview 确认的 uncertainCandidate。活动历史计算已使用有限 Worker；私有存储验证仍由 Main 调用纯核心，满配额/大历史的交互性能尚需验证。原生提交后、新干净历史点写入前的崩溃仍需后续恢复协调；旧点的 saved 分类禁止重复回放，暂不自动重建其已保存历史。
+仍待实现产品恢复控件、结束操作失败后的处理、产品历史/Diff 面板及正常产品入口。源码 Diff 的只读数据与保存确认已接入，见 [源码 Diff](SOURCE_DIFF.md)。结束失败/未知时保留的冻结会话目前不能由用户在产品中继续处理；没有强制离开、自动解锁或绕过标记的重试。未应用输入仍是既有 Main 内存状态；没有持久化它，也没有持久化未获 Preview 确认的 uncertainCandidate。活动历史计算已使用有限 Worker；私有存储验证与 saved 历史准备仍由 Main 调用纯核心，满配额/大历史的交互性能尚需验证。精确提交后的完整历史恢复已接通，但新干净点失败、遗留锁或更高修订不完整时仍需要后续明确的故障处理，不能绕过证据。
 
 证据使用自制文件，覆盖完整候选字节、外部冲突、记录损坏、写入异常、实际进程强杀与原生保存去重。未执行正常产品 UI、真实 IME、Windows 10/macOS、真实磁盘满或断电验收；HAE-011 和 M2 保持未完成。

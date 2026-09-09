@@ -7,6 +7,7 @@ import { MAX_SOURCE_BYTES } from '../../contracts/source-tree.ts';
 import { captureTextIntents, rebuildCheckpoint } from '../../core/history/checkpoint.ts';
 import { captureHistoryIntents, rebuildHistoryCheckpoint } from '../../core/history/persistence.ts';
 import type { HistoryCheckpoint } from '../../core/history/timeline.ts';
+import { createTextHistory } from '../../core/history/timeline.ts';
 import { freezeHistoryCheckpoint } from '../draft/history.ts';
 import type { PatchCandidate } from '../../core/patch/engine.ts';
 import { createSourceIndex } from '../../core/parser/source-index.ts';
@@ -161,15 +162,35 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
     if (retirement && matches.some(row => row.header.checkpoint.draftRevision > retirement.draftRevision)) throw new Error('DRAFT_RETIREMENT_INVALID');
     return retirement;
   };
-  const selectLatest = async (sessionId: string, source: SaveSource): Promise<CheckpointGroup> => {
+  const selectLatest = async (sessionId: string, source: SaveSource, allowSaved = false): Promise<CheckpointGroup> => {
     if (!isTransactionId(sessionId)) throw new Error('DRAFT_CHECKPOINT_INVALID');
     const catalog = await operations.catalog(source.current);
     if (catalog.locked) throw new Error('DRAFT_STORAGE_LOCKED');
     if (catalog.unclassified.length) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
     const group = catalog.groups.find(group => group.sessionId === sessionId);
-    if (!group || (group.status !== 'dirty' && !(group.status === 'clean' && group.historyAvailable))
-      || group.targetState !== 'baseline-matches' || !group.checkpointId) throw new Error('DRAFT_RECOVERY_UNAVAILABLE');
+    const saved = allowSaved && group?.status === 'saved' && group.historyAvailable && group.targetState === 'committed-matches';
+    if (!group || (!saved && ((group.status !== 'dirty' && !(group.status === 'clean' && group.historyAvailable))
+      || group.targetState !== 'baseline-matches')) || !group.checkpointId) throw new Error('DRAFT_RECOVERY_UNAVAILABLE');
     return group;
+  };
+  const committedProof = async (checkpoint: DraftCheckpoint, source: SaveSource) => {
+    if (!saves) throw new Error('DRAFT_SAVED_HISTORY_UNCONFIRMED');
+    const scan = await saves.scan();
+    if (scan.unrecognized) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
+    const matches: string[] = [];
+    for (const row of scan.records) {
+      if (row.phase !== 'committed' || row.intent?.targetKey !== checkpoint.targetKey || row.intent.oldHash !== checkpoint.baseHash
+        || row.intent.newHash !== checkpoint.resultHash) continue;
+      const value = await saves.inspect(row.transactionId, source.current); const intent = value.intent;
+      if (value.state !== 'committed-matches' || !intent || intent.targetKey !== checkpoint.targetKey
+        || intent.oldHash !== checkpoint.baseHash || intent.oldSize !== checkpoint.baseSize || intent.newHash !== checkpoint.resultHash
+        || intent.newSize !== source.size || !sameStoredIdentity(intent.identity, checkpoint.identity)) continue;
+      const folder = await root.directory(row.transactionId);
+      const header = await folder.read('intent.json', 16 * 1024); const commit = await folder.read('committed.json', 16 * 1024);
+      matches.push(`${row.transactionId}:${header.hash}:${commit.hash}`);
+    }
+    if (matches.length !== 1) throw new Error('DRAFT_SAVED_HISTORY_UNCONFIRMED');
+    return matches[0]!;
   };
   const operations = { inspect, claimSession: ownership.claim, isSessionActive: ownership.isActive,
     async catalog(readTarget?: () => Promise<SaveTargetState>) {
@@ -342,6 +363,55 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       const loaded = await load(before.checkpointId!); await source.verify();
       if (loaded.recordHash !== before.recordHash) throw new Error('DRAFT_CHECKPOINT_CHANGED');
       return loaded.history;
+    },
+    // A saved v2 point supplies history, never a candidate to replay. The caller
+    // owns both sessions and must seal the new clean point before installation.
+    // Existing continuation evidence (even incomplete/retired) prevents fallback.
+    async prepareRecovery(sessionId: string, source: SaveSource, continuationSessionId: string) {
+      if (!isTransactionId(continuationSessionId) || continuationSessionId === sessionId) throw new Error('DRAFT_SESSION_MISMATCH');
+      const before = await selectLatest(sessionId, source, true);
+      if (before.status !== 'saved') return Object.freeze({ kind: 'draft' as const, sessionId,
+        history: await operations.readLatestHistory(sessionId, source),
+        resolve: (index: SourceIndex) => operations.resolveLatest(sessionId, source, index) });
+      const verifySource = async (): Promise<void> => {
+        try { await source.verify(); } catch { throw new Error('DRAFT_RECOVERY_CONFLICT'); }
+      };
+      await verifySource(); const loaded = await load(before.checkpointId!);
+      if (loaded.recordHash !== before.recordHash || !loaded.history) throw new Error('DRAFT_CHECKPOINT_CHANGED');
+      const proof = await committedProof(loaded.checkpoint, source);
+      const prior = createTextHistory(loaded.baseline, { projectId: 'checkpoint', documentId: before.checkpointId!, generation: 1 }, digest, loaded.history);
+      const history = freezeHistoryCheckpoint(prior.rebaseSaved(source.bytes,
+        { projectId: 'recovery', documentId: continuationSessionId, generation: 1 }).capture());
+      const verify = async (): Promise<void> => {
+        await verifySource(); const after = await selectLatest(sessionId, source, true);
+        if (after.status !== 'saved' || before.checkpointId !== after.checkpointId || before.recordHash !== after.recordHash
+          || before.draftRevision !== after.draftRevision || before.resultHash !== after.resultHash
+          || proof !== await committedProof(loaded.checkpoint, source)) throw new Error('DRAFT_CHECKPOINT_CHANGED');
+        const all = await records();
+        if (all.locked) throw new Error('DRAFT_STORAGE_LOCKED');
+        if (all.unclassified.length) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
+        for (const row of all.known) {
+          const record = row.header.checkpoint;
+          if (record.sessionId === sessionId || record.targetKey !== source.targetKey || record.baseHash !== source.baseHash
+            || !sameStoredIdentity(record.identity, source.identity)) continue;
+          if (record.sessionId !== continuationSessionId) throw new Error('DRAFT_SAVED_HISTORY_SUPERSEDED');
+          if (record.draftRevision !== history.record.revision || record.resultHash !== source.baseHash
+            || row.historyHash !== digest(encode(history.record)) || row.retirement || row.invalidRetirement) throw new Error('DRAFT_CHECKPOINT_CHANGED');
+          const value = await inspect(record.checkpointId);
+          if (value.phase !== 'complete' || value.recordHash !== row.header.hash) throw new Error('DRAFT_CHECKPOINT_CHANGED');
+        }
+        await verifySource();
+      };
+      await verify();
+      return Object.freeze({ kind: 'saved' as const, sessionId: continuationSessionId, history,
+        async resolve(index: SourceIndex) {
+          const candidate = createTextHistory(index.bytes, index.identity, digest, history).candidate;
+          captureHistoryIntents(index, candidate, history, digest);
+          if (index.baseHash !== source.baseHash || candidate.patches.length) throw new Error('DRAFT_HISTORY_MISMATCH');
+          await verify();
+          return Object.freeze({ candidate, history, sessionId: continuationSessionId,
+            checkpointId: null, draftRevision: history.record.revision, verify });
+        } });
     },
     async resolveLatest(sessionId: string, source: SaveSource, index: SourceIndex) {
       const select = () => selectLatest(sessionId, source);

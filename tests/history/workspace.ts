@@ -31,7 +31,7 @@ async function fixture(outputRoot: string, results: string) {
   const privateRoot = join(app.getPath('userData'), randomUUID()); await mkdir(privateRoot);
   const assets = join(root, 'bundled'); await mkdir(assets);
   await writeFile(join(assets, 'index.html'), '<!doctype html><meta charset="utf-8"><title>History transport fixture</title>');
-  const control = { saveStep: async (_step: string): Promise<void> => {} };
+  const control = { saveStep: async (_step: string): Promise<void> => {}, draftStep: async (_step: string): Promise<void> => {} };
   const connect = async (recoveryId?: string) => {
     const uiSession = session.fromPartition(`history-ui-${randomUUID()}`, { cache: false });
     await registerBundledContent(uiSession, 'editor', 'app', assets);
@@ -40,7 +40,7 @@ async function fixture(outputRoot: string, results: string) {
     } }); lockContents(ui.webContents);
     const saves = await createSavePreparationStore(privateRoot, step => control.saveStep(step), process.platform === 'win32'
       ? await createWindowsReplacer(join(outputRoot, 'native/ReplaceHelper.exe')) : undefined);
-    const checkpoints = await createDraftCheckpointStore(privateRoot, undefined, saves);
+    const checkpoints = await createDraftCheckpointStore(privateRoot, step => control.draftStep(step), saves);
     const errors: string[] = [];
     const runtime = createWorkspaceSession(ui, outputRoot, {
       chooseOpen: async () => entry, chooseCopy: async () => undefined,
@@ -158,6 +158,42 @@ export async function runHistoryWorkspace(outputRoot: string, results: string, p
       assert.equal(await w.text(), ''); assert.ok((await w.move('undo')).ok); assert.deepEqual(Buffer.from(w.current().draft.candidate.bytes), restored);
       pass('verified Windows Save retains a complete clean history checkpoint; window/store reopening restores a proven empty Text, Undo requires a second explicit Save, and Redo survives both savepoints and recovery');
     } finally { await w.close(); }
+
+    const saved = await fixture(outputRoot, results); let restored = await saved.connect(); let priorId: string;
+    try {
+      await restored.select('h1'); await restored.apply(''); await restored.settle();
+      priorId = restored.current().checkpointSessionId;
+      // End the process-owned session after the production saver commits, before
+      // Workspace can create a clean point. The next window uses production IPC.
+      const result = await createOriginalSaver(restored.saves)(restored.current().saveSource, restored.current().draft.candidate, new AbortController().signal);
+      assert.equal(result.status, 'committed'); const baseline = await readFile(saved.entry);
+      await restored.close(); restored = await saved.connect(priorId);
+      assert.equal(await restored.text(), ''); assert.equal(restored.current().draft.candidate.patches.length, 0);
+      assert.notEqual(restored.current().checkpointSessionId, priorId); await restored.settle();
+      assert.equal(restored.checkpoints.isSessionActive(priorId), true);
+      const continuation = restored.current().checkpointSessionId;
+      await restored.close(); await assert.rejects(saved.connect(priorId), /DRAFT_SAVED_HISTORY_SUPERSEDED/);
+      restored = await saved.connect(continuation); assert.ok((await restored.move('undo')).ok);
+      assert.equal(await restored.text(), 'A & 😀'); assert.deepEqual(await readFile(saved.entry), baseline);
+      assert.equal((await restored.save()).outcome, 'saved'); await restored.settle();
+      assert.deepEqual(await readFile(saved.entry), Buffer.from(original.toString().replace('A &#38; 😀', 'A &amp; 😀')));
+      pass('production Workspace restore rebuilds committed history as a sealed clean continuation; the old saved entry cannot bypass it, Undo is unsaved until another explicit Windows Save');
+    } finally { await restored.close(); }
+
+    const failed = await fixture(outputRoot, results); const old = await failed.connect(); let failedId: string; let disk: Buffer;
+    try {
+      await old.select('h1'); await old.apply('B'); await old.settle(); failedId = old.current().checkpointSessionId;
+      assert.equal((await createOriginalSaver(old.saves)(old.current().saveSource, old.current().draft.candidate, new AbortController().signal)).status, 'committed');
+      disk = await readFile(failed.entry);
+    } finally { await old.close(); }
+    failed.control.draftStep = async step => { if (step === 'baseline-written') throw Error('test failed clean continuation'); };
+    await assert.rejects(failed.connect(failedId), /DRAFT_PERSISTENCE_REQUIRED/);
+    failed.control.draftStep = async () => {};
+    await assert.rejects(failed.connect(failedId), /DRAFT_SAVED_HISTORY_SUPERSEDED/);
+    const evidence = await createDraftCheckpointStore(failed.privateRoot);
+    assert.equal(evidence.isSessionActive(failedId), false); assert.equal((await evidence.catalog()).groups.length, 2);
+    assert.deepEqual(await readFile(failed.entry), disk);
+    pass('a failed clean continuation prevents window installation, retains the committed HTML and incomplete evidence, releases confirmed teardown ownership and refuses fallback through the old saved entry');
   }
 
   const lost = await fixture(outputRoot, results); const w = await lost.connect();
@@ -202,4 +238,18 @@ export async function runHistoryWorkspace(outputRoot: string, results: string, p
   } finally { await restored.stop(); }
   assert.deepEqual(await readFile(entry), original);
   pass('after a separate Electron process is forcibly terminated, a new process reacquires the profile and restores the sealed full history through prepareDocument, confirms Preview Redo and durably records it without writing HTML');
+  if (process.platform === 'win32') {
+    const committing = start('seed-saved'); let oldId: string;
+    try { const message = await committing.ready(); assert.equal(message.state, 'saved'); oldId = message.sessionId!; }
+    finally { await committing.stop(); }
+    const baseline = await readFile(entry); assert.deepEqual(baseline, Buffer.from(original.toString().replace('A &#38; 😀', '')));
+    const resuming = start('restore-saved', oldId);
+    try {
+      const message = await resuming.ready(); assert.equal(message.state, 'saved-restored'); assert.notEqual(message.sessionId, oldId);
+      assert.equal(message.revision, 7); assert.equal(message.undoCount, 1); assert.equal(message.redoCount, 1);
+      assert.equal(await resuming.exited, 0);
+    } finally { await resuming.stop(); }
+    assert.deepEqual(await readFile(entry), baseline);
+    pass('a separate Electron process killed after native commit but before a clean checkpoint can restart into a newly sealed history, install an empty Text, confirm Undo/Redo and preserve the already saved HTML bytes');
+  }
 }

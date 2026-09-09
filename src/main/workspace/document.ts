@@ -45,17 +45,23 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
   let sourceDiff: ReturnType<typeof createSourceDiffReader> | undefined;
   let history: HistoryController | undefined;
   try {
-    const checkpointSessionId = recoverySessionId ?? preview.identity.sessionId;
-    releaseOwnership = checkpoints?.claimSession(checkpointSessionId);
+    const requestedSessionId = recoverySessionId ?? preview.identity.sessionId;
+    releaseOwnership = checkpoints?.claimSession(requestedSessionId);
     const saveSource = await openSaveSource(entry, preview.sourceBytes());
-    const retainedHistory = recoverySessionId ? await checkpoints!.readLatestHistory(recoverySessionId, saveSource) : savedHistory;
+    const recoveryPlan = recoverySessionId ? await checkpoints!.prepareRecovery(recoverySessionId, saveSource, preview.identity.sessionId) : null;
+    const checkpointSessionId = recoveryPlan?.sessionId ?? requestedSessionId;
+    if (checkpointSessionId !== requestedSessionId) {
+      const releaseRequested = releaseOwnership!; const releaseContinuation = checkpoints!.claimSession(checkpointSessionId);
+      releaseOwnership = () => { releaseContinuation(); releaseRequested(); };
+    }
+    const retainedHistory = recoveryPlan?.history ?? savedHistory;
     const lineage = retainedHistory ? { originBytes: retainedHistory.originBytes, values: retainedHistory.record.savedValues } : undefined;
     mapping = await createPreviewMapping(outputRoot, preview, lifetime.signal, lineage);
     const writer = await createNewFileWriter(dirname(entry));
     await saveSource.verify();
     signal.throwIfAborted();
     const index = mapping.source;
-    const recovery = recoverySessionId ? await checkpoints!.resolveLatest(recoverySessionId, saveSource, index) : null;
+    const recovery = recoveryPlan ? await recoveryPlan.resolve(index) : null;
     // Legacy v1 only has net intents. Preserve its recovery without inventing a
     // prior operation order; a subsequent verified Save can start fresh history.
     if (!recovery || recovery.history) history = await createHistoryController(outputRoot, index, recovery?.history ?? savedHistory, lifetime.signal);
@@ -66,11 +72,17 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
     else if (recovery) await draft.restore(recovery.candidate, recovery.draftRevision);
     if (recovery) { await recovery.verify(); signal.throwIfAborted(); }
     persistence = checkpoints ? createDraftPersistence((candidate, revision, checkpoint) =>
-      checkpoints.write(saveSource, index, candidate, checkpointSessionId, revision, checkpoint), recovery ? {
-      candidate: draft.candidate, revision: recovery.draftRevision, checkpointId: recovery.checkpointId,
+      checkpoints.write(saveSource, index, candidate, checkpointSessionId, revision, checkpoint), recoveryPlan?.kind === 'draft' ? {
+      candidate: draft.candidate, revision: recovery!.draftRevision, checkpointId: recovery!.checkpointId!,
       ...(history ? { history: history.capture() } : {}),
     } : undefined) : null;
-    if (savedHistory) persistence?.enqueue(draft.candidate, draft.revision, history!.capture());
+    if (savedHistory || recoveryPlan?.kind === 'saved') persistence?.enqueue(draft.candidate, draft.revision, history!.capture());
+    if (recoveryPlan?.kind === 'saved') {
+      const durable = await persistence!.settle();
+      if (durable.status !== 'persisted' || durable.cleanupPending || durable.persisted?.draftRevision !== draft.revision
+        || durable.persisted.resultHash !== draft.candidate.resultHash) throw new Error('DRAFT_PERSISTENCE_REQUIRED');
+      await recovery!.verify(); signal.throwIfAborted();
+    }
     input = createInputController(mapping, draft);
     sourceDiff = createSourceDiffReader(outputRoot, index, () => ({ candidate: draft.candidate, revision: draft.revision, phase: draft.phase }));
     let closing: Promise<void> | undefined;

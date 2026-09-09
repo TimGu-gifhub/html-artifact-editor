@@ -75,7 +75,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 
 开发 Node 的单元套件使用 `--test-concurrency=4`，避免随主机 CPU 数量增加而同时启动过多原生文件/子进程实验。此限制只控制测试文件调度，不改变用例内部的并发竞态、故障断言和单项期限。超时或取消仍使门槛失败，须保留日志并定位后重跑。
 
-HAE-011 第七阶段增加来源重建与历史单元检查，完整逻辑记录的内存往返不代表磁盘持久化。`test:history` 的报告位于 test-results/history.json，使用独立实验入口和自制文件；Windows 原生 Save 成功、取消、冲突、未知结果分别断言，其他 OS 对未执行的 Windows 路径标记 pending。第八阶段把来源证明接入有限 Parser Worker 与隔离 Preview，新增八组真实 DOM/确认协议实验，共十六组；第九阶段接通 Main 文档/InputController/Workspace 历史与 v2 完整检查点，新增六组窗口/独立进程恢复实验，共二十二组；未验收产品快捷键和真实 IME。见 [逻辑历史合同](HISTORY.md) 与 [执行记录](implementation/HAE-011.md)。
+HAE-011 第七阶段增加来源重建与历史单元检查，完整逻辑记录的内存往返不代表磁盘持久化。`test:history` 的报告位于 test-results/history.json，使用独立实验入口和自制文件；Windows 原生 Save 成功、取消、冲突、未知结果分别断言，其他 OS 对未执行的 Windows 路径标记 pending。第八阶段把来源证明接入有限 Parser Worker 与隔离 Preview，新增八组真实 DOM/确认协议实验，共十六组；第九阶段接通 Main 文档/InputController/Workspace 历史与 v2 完整检查点，新增六组窗口/独立进程恢复实验，共二十二组。第十阶段再增加提交后恢复、干净点失败和保存后进程强杀三组，共二十五组；存储套件另验证提交歧义、版本/记录变化与后续证据阻止回退。未验收产品快捷键和真实 IME。见 [逻辑历史合同](HISTORY.md) 与 [执行记录](implementation/HAE-011.md)。
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 

@@ -43,6 +43,7 @@ test('a checkpoint persisted before or after actual Save is identified by the ex
     assert.equal((await drafts.catalog(source.current)).groups[0].status, 'saved');
     const index = createSourceIndex(expected, { projectId: 'new', documentId: 'saved', generation: 3 }, digest);
     await assert.rejects(drafts.restoreCandidate(checkpoint.checkpointId, source, index), /DRAFT_ALREADY_SAVED/);
+    await assert.rejects(drafts.prepareRecovery(f.sessionId, source, randomUUID()), /DRAFT_RECOVERY_UNAVAILABLE/);
     await writeFile(f.entry, expected); const rewritten = await openSaveSource(f.entry, expected);
     assert.equal((await drafts.inspect(checkpoint.checkpointId, rewritten.current)).state, 'candidate-on-disk');
     assert.equal((await drafts.catalog(rewritten.current)).groups[0].status, 'dirty');

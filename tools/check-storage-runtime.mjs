@@ -21,7 +21,8 @@ try {
   record.versions = JSON.parse(version.stdout); assert.ok(record.versions.electron && record.versions.node);
   const files = ['tests/unit/save-preparation.test.mjs', 'tests/unit/draft-checkpoint-store.test.mjs', 'tests/unit/draft-lifecycle.test.mjs',
     'tests/unit/history-persistence.test.mjs'];
-  if (process.platform === 'win32') files.push('tests/unit/save-commit.test.mjs', 'tests/unit/save-recovery.test.mjs', 'tests/unit/draft-checkpoint-save.test.mjs');
+  if (process.platform === 'win32') files.push('tests/unit/save-commit.test.mjs', 'tests/unit/save-recovery.test.mjs', 'tests/unit/draft-checkpoint-save.test.mjs',
+    'tests/unit/history-committed-recovery.test.mjs');
   record.nativeReplacement = process.platform === 'win32' ? 'included' : 'unsupported';
   const run = spawnSync(electron, ['--test', '--test-reporter=tap', ...files], options);
   const output = (run.stdout ?? '') + (run.stderr ?? '');
