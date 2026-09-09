@@ -35,8 +35,9 @@ const args = [kind === 'main' ? root : entry];
 if (kind === 'preview-tool' && process.argv.includes('--interactive')) args.push('--interactive');
 if (kind === 'preview-tool' && process.argv.includes('--directory')) args.push('--directory');
 const child = spawn(electron, args, { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
-// Save-session includes the native save, persistence and departure crash suites.
-const timeoutMs = ['save-session', 'recovery'].includes(kind) ? 90_000 : 45_000;
+// History also includes 24 separately durable edits plus compaction/restart.
+// This is a suite budget; individual workers and IPC keep their existing limits.
+const timeoutMs = ['save-session', 'recovery', 'history'].includes(kind) ? 90_000 : 45_000;
 const timeout = smoke ? setTimeout(() => {
   console.error(`Electron ${kind} exceeded ${timeoutMs / 1000} seconds.`);
   child.kill();

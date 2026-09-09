@@ -88,6 +88,8 @@ HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoint
 
 第六阶段增加 readDiff，生产 API 共十一个方法，Save 可携带 Diff review。`npm run test:source-diff` 执行八组真实 Electron 实验：干净只读、恢复后的完整词法差异、未应用/组合态保护、新修订拒绝旧确认、净变更归零、renderer 重连/旧文档拒绝，以及 Windows 保存字节一致性和外部冲突。文档清理同时等待 Diff Worker 终止和持久化排空；终止失败保留占用，不报告释放成功。产品面板、历史与真实 IME 仍待接入。
 
+第十一阶段在同一持久化队列的写入锁内加入 [旧检查点清理](CHECKPOINT_COMPACTION.md)。活动 v2 序列保留最近两个完整点及全部 Undo/Redo；新点已核验但清理失败时保留准确的 persisted 修订与 cleanupPending，后来的 Apply 只更新最新内存待写项，不冒充已写盘。后台通知不推进输入版本；实际遗留锁继续阻止 Save 和恢复，产品故障处理仍待实现。
+
 ## 历史命令与保存后的恢复
 
 `edit` 的 history 值严格为 `{stateRevision, draftRevision, direction}`；direction 为 undo/redo。它绑定调用时的文档、输入及已确认草稿版本，不接受目标 Text 或源码位置。InputSnapshot.history 为 null 表示旧 v1 恢复会话没有完整历史；否则仅提供 undoCount/redoCount/canUndo/canRedo。

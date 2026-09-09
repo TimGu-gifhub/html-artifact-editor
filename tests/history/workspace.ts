@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { app, BrowserWindow, ipcMain, session } from 'electron';
@@ -210,6 +210,43 @@ export async function runHistoryWorkspace(outputRoot: string, results: string, p
     } finally { callbacks.forEach(callback => ipcMain.on(MAPPING_HISTORY_RESULT, callback)); }
     pass('an actual Preview Undo with its acknowledgement suppressed retains the old confirmed history and prepared candidate, blocks further editing, and never persists or automatically retries the uncertain transition');
   } finally { await w.close(); }
+
+  const continuous = await fixture(outputRoot, results); let editing = await continuous.connect();
+  try {
+    await editing.select('h1');
+    for (let index = 0; index < 24; index++) {
+      await editing.apply(`校稿 ${index} <&> 🧪`); await editing.settle();
+      assert.equal((await readdir(continuous.privateRoot)).length, Math.min(index + 1, 2));
+    }
+    const id = editing.current().checkpointSessionId; assert.equal(editing.current().history!.summary().undoCount, 24);
+    await editing.close(); editing = await continuous.connect(id);
+    assert.equal(await editing.text(), '校稿 23 <&> 🧪'); assert.ok((await editing.move('undo')).ok); await editing.settle();
+    assert.equal(await editing.text(), '校稿 22 <&> 🧪'); assert.equal(editing.current().history!.summary().redoCount, 1);
+    assert.deepEqual(await readFile(continuous.entry), original); assert.deepEqual(await readFile(join(continuous.project, 'keep.css')), css);
+    if (process.platform === 'win32') {
+      assert.equal((await editing.save()).outcome, 'saved'); await editing.settle();
+      assert.deepEqual(await readFile(continuous.entry), Buffer.from(original.toString().replace('A &#38; 😀', '校稿 22 &lt;&amp;&gt; 🧪')));
+      assert.equal(editing.current().history!.summary().redoCount, 1);
+    }
+    pass('24 separately durable production Workspace Applies retain only two complete checkpoints, reopen with all Undo/Redo history, preserve HTML until explicit Save and keep external CSS unchanged');
+  } finally { await editing.close(); }
+
+  const interrupted = await fixture(outputRoot, results); const writing = await interrupted.connect();
+  try {
+    await writing.select('h1'); await writing.apply('B'); await writing.settle(); await writing.apply('C'); await writing.settle();
+    interrupted.control.draftStep = async step => { if (step === 'compaction-after-origin.bin') throw Error('test interrupted obsolete point removal'); };
+    await writing.apply('D'); const before = writing.current().input.snapshot(); const warning = await writing.settle();
+    assert.equal(warning.cleanupPending, true); assert.equal(warning.code, 'DRAFT_COMPACTION_UNKNOWN'); assert.equal(warning.canRetry, false);
+    assert.equal(writing.current().input.snapshot().stateRevision, before.stateRevision);
+    const names = await readdir(interrupted.privateRoot); const persisted = warning.persisted;
+    await writing.apply('E'); const stopped = await writing.current().persistence!.settle();
+    assert.equal(stopped.status, 'failed'); assert.deepEqual(stopped.persisted, persisted);
+    assert.equal(stopped.queuedRevision, writing.current().draft.revision); assert.deepEqual(await readdir(interrupted.privateRoot), names);
+    assert.equal(await writing.text(), 'E'); assert.deepEqual(await readFile(interrupted.entry), original);
+    if (process.platform === 'win32') assert.equal((await writing.save()).code, 'SAVE_LOCKED');
+    assert.deepEqual(await readFile(interrupted.entry), original);
+    pass('a compaction failure reports the exact persisted revision with a cleanup warning, does not invalidate current input, keeps later edits only in memory and stops automatic writes and native Save at the retained lock');
+  } finally { await writing.close(); }
 
   const processRoot = await mkdtemp(join(results, 'history-restart-')); const profile = join(processRoot, 'profile');
   const privateRoot = join(profile, 'private'); await mkdir(privateRoot, { recursive: true });

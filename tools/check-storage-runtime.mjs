@@ -8,7 +8,8 @@ import { buildNative } from './build-native.mjs';
 
 // Filesystem tests under Electron's bundled Node, with no window or user page.
 // Node mode is scoped to these child processes; normal app launch is unchanged.
-const options = { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', windowsHide: true, timeout: 60000, maxBuffer: 4 * 1024 * 1024 };
+// Includes the 48-write compaction stress case and native fault/crash cases.
+const options = { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', windowsHide: true, timeout: 180000, maxBuffer: 4 * 1024 * 1024 };
 const results = resolve('test-results'); mkdirSync(results, { recursive: true });
 const record = { status: 'running', commit: null, dirty: null, platform: { os: type(), release: release(), arch: arch() }, versions: null };
 const report = () => writeFileSync(resolve(results, 'storage-runtime.json'), `${JSON.stringify(record, null, 2)}\n`);
@@ -20,11 +21,11 @@ try {
   const version = spawnSync(electron, ['-p', 'JSON.stringify(process.versions)'], options); assert.equal(version.status, 0);
   record.versions = JSON.parse(version.stdout); assert.ok(record.versions.electron && record.versions.node);
   const files = ['tests/unit/save-preparation.test.mjs', 'tests/unit/draft-checkpoint-store.test.mjs', 'tests/unit/draft-lifecycle.test.mjs',
-    'tests/unit/history-persistence.test.mjs'];
+    'tests/unit/history-persistence.test.mjs', 'tests/unit/checkpoint-compaction.test.mjs'];
   if (process.platform === 'win32') files.push('tests/unit/save-commit.test.mjs', 'tests/unit/save-recovery.test.mjs', 'tests/unit/draft-checkpoint-save.test.mjs',
     'tests/unit/history-committed-recovery.test.mjs');
   record.nativeReplacement = process.platform === 'win32' ? 'included' : 'unsupported';
-  const run = spawnSync(electron, ['--test', '--test-reporter=tap', ...files], options);
+  const run = spawnSync(electron, ['--test', '--test-concurrency=4', '--test-reporter=tap', ...files], options);
   const output = (run.stdout ?? '') + (run.stderr ?? '');
   writeFileSync(resolve(results, 'storage-runtime.log'), output);
   assert.equal(run.status, 0, run.error?.message ?? output.slice(-6000));
