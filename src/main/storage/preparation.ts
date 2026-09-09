@@ -8,6 +8,9 @@ import type { CheckedDirectory } from '../../platform/storage-files.ts';
 import type { SaveSource, SaveTargetState } from '../../platform/save-source.ts';
 import type { ReplacementResult, SourceReplacer } from '../../platform/windows-replacement.ts';
 import { isDraftCheckpoint, MAX_DRAFT_RECORD_BYTES } from '../../contracts/draft-checkpoint.ts';
+import { resolutionFile } from '../../contracts/compaction-resolution.ts';
+import { readCompactionResolutions } from './compaction-resolutions.ts';
+import { draftOwnership } from './draft-ownership.ts';
 
 const JSON_LIMIT = 16 * 1024;
 const STORE_LIMIT = 200 * 1024 * 1024;
@@ -42,9 +45,12 @@ const codeFor = (error: unknown): string => {
 // requires a platform replacer; the optional Workspace port keeps this store in Main.
 export async function createSavePreparationStore(path: string, onStep: (step: string) => Promise<void> = async () => {}, replacer?: SourceReplacer) {
   const root = await checkedDirectory(path); let busy = false;
+  const ownership = draftOwnership(root.identityChain.map(value => `${value.dev}:${value.ino}`).join('/'));
   const checkQuota = async (source: SaveSource, candidateSize: number): Promise<void> => {
     const entries = await root.entries(512); let used = 0; let count = 0;
+    if ((await readCompactionResolutions(root, entries.map(item => item.name))).some(row => !row.seal)) throw new Error('STORAGE_REVIEW_REQUIRED');
     for (const item of entries) {
+      if (resolutionFile(item.name)) { used += item.size; continue; }
       if (item.name === 'active.lock' && item.kind === 'file') { used += item.size; continue; }
       if (item.kind !== 'directory' || !isTransactionId(item.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
       const folder = await root.directory(item.name);
@@ -139,7 +145,10 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       // from a journal. Any existing lock, including a partial one, stays put.
       const entries = await root.entries(512); const records: PreparationInspection[] = [];
       let locked = false; let unrecognized = false;
+      const resolutions = await readCompactionResolutions(root, entries.map(item => item.name));
+      if (resolutions.some(row => !row.seal)) unrecognized = true;
       for (const item of entries) {
+        if (resolutionFile(item.name)) continue;
         if (item.name === 'active.lock') { locked = true; continue; }
         if (item.kind === 'directory' && isTransactionId(item.name)) {
           const files = await (await root.directory(item.name)).entries(7);
@@ -153,9 +162,11 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
     },
     async prepare(source: SaveSource, candidate: Pick<PatchCandidate, 'bytes' | 'baseHash' | 'resultHash'>, restore?: RestoreProof): Promise<PreparationResult> {
       let transactionId: string | null = null; let lock: Lock | undefined; let retained = false;
+      let releaseOperation: (() => void) | undefined;
       if (busy) return Object.freeze({ status: 'failed', code: 'SAVE_BUSY', transactionId, cancel: null });
       busy = true;
       try {
+        releaseOperation = ownership.claimOperation();
         const bytes = new Uint8Array(candidate.bytes); // Freeze before the first await.
         if (bytes.length > MAX_SOURCE_BYTES || !isContentHash(candidate.resultHash) || digest(bytes) !== candidate.resultHash
           || candidate.baseHash !== source.baseHash) throw new Error('SAVE_INVALID_CANDIDATE');
@@ -218,7 +229,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
                 });
               } catch (error) { result = Object.freeze({ status: entered ? 'unknown' : 'failed', code: entered ? 'SAVE_OUTCOME_UNKNOWN' : codeFor(error), cleanupPending: true }); }
               if (result.status === 'committed') {
-                try { await onStep('release-lock'); await lock!.removeOwned(); busy = false; }
+                try { await onStep('release-lock'); await lock!.removeOwned(); busy = false; releaseOperation!(); }
                 catch { return Object.freeze({ status: 'committed', code: 'SAVE_CLEANUP_PENDING', cleanupPending: true }); }
               }
               // A started commit is never retried/cancelled blindly, even after a
@@ -232,7 +243,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
             cancellation ??= (async () => {
               // Cancellation only releases our verified private lock. Evidence stays.
               await folder.writeNew('cancelled.json', encode({ ...seal, phase: 'cancelled' }));
-              await lock!.removeOwned(); busy = false;
+              await lock!.removeOwned(); busy = false; releaseOperation!();
             })();
             return cancellation;
           },
@@ -242,7 +253,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
         let code = codeFor(error);
         if (lock) { try { await lock.removeOwned(); } catch { code = 'STORAGE_LOCK_CHANGED'; } }
         return Object.freeze({ status: 'failed', code, transactionId, cancel: null });
-      } finally { if (!retained) busy = false; }
+      } finally { if (!retained) { busy = false; releaseOperation?.(); } }
     },
   };
   return Object.freeze({ namespace: root.identityChain, inspect, scan: operations.scan,

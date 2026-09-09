@@ -92,6 +92,8 @@ HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoint
 
 ## 历史命令与保存后的恢复
 
+文档清理中断的旧锁现在有 [独立 Main 恢复合同](COMPACTION_RECOVERY.md)，仅在同一 profile 的全部文档与存储事务已经结束后接受明确审查。原窗口仍有内存输入时不能调用它释放占用；取消不写盘，确认完成后可再通过现有 restore/重新授权安装最新草稿。此 Main 方法没有可信 UI/Preview 入口，产品恢复面板、活动窗口暂停/解冻和未持久化输入的处置仍待实现。
+
 `edit` 的 history 值严格为 `{stateRevision, draftRevision, direction}`；direction 为 undo/redo。它绑定调用时的文档、输入及已确认草稿版本，不接受目标 Text 或源码位置。InputSnapshot.history 为 null 表示旧 v1 恢复会话没有完整历史；否则仅提供 undoCount/redoCount/canUndo/canRedo。
 
 InputController 在组合态、未应用输入或原生切换意图待处理时拒绝历史命令。准备候选后才可释放干净编辑锁，冻结期间若出现原生映射变化则拒绝；获得 isolated Preview 的 applied 后才推进历史并持久化。未知结果保留旧记录及待确认候选，禁止盲重试。历史 Worker、Diff 和私有队列都须完成关闭，文档才释放占用。

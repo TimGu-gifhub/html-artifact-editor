@@ -64,6 +64,8 @@ intent/seal/commit 严格按 [纯 schema](../src/contracts/save-record.ts) 检�
 
 HAE-011 的 [检查点清理](CHECKPOINT_COMPACTION.md) 可在草稿写入持有同一锁时，释放该活动 v2 序列较旧完整点的容量，保留两个完整修订和全部逻辑历史；它不移除保存事务、备份或其他会话。Save 本身不触发该流程。残留 active.lock 或 compaction.json 继续阻止保存准备，不通过忽略文件或推断进程退出解除保护。
 
+[清理中断恢复](COMPACTION_RECOVERY.md) 另有明确 Main 审查，限定检查点锁和完整清理证据。Save 准备至取消/确认完成期间在同一目录注册活动占用，阻止这种审查介入；已开始但未确认结束的提交继续保留占用。恢复审查持有目录时也拒绝新 Save。完整 compaction 恢复记录保留并计入字节/枚举预算；部分、孤立或损坏记录阻止准备。这不提供 Save 自身遗留锁或原生 sidecar 的处置方法。
+
 HAE-011 的 [草稿检查点](DRAFT_CHECKPOINTS.md) 共用同一私有目录和 active.lock；其 record.json/baseline.bin/complete.json、v2 的 origin.bin 及可选 retired.json 独立 schema 也计入上述总配额，结束标记不释放记录名额。保存 scan 跳过可归类的草稿目录；混合文件、未知文件名或无法验证归属的记录头阻止新的准备，损坏证据仍计入配额。Main 通过目录身份链防止将不同存储目录的提交证据混配。现有普通 v1 和恢复 v2 记录保持可读，提交阶段与替换协议未变。HAE-011 可用唯一精确提交证据将最新 saved v2 历史重建到当前文件版本；该恢复只形成新的私有干净点，不调用替换助手，不回放已保存候选，也不解除遗留锁。
 
 此协议保障已执行的普通本地磁盘样例。同一私有目录的合作实例锁不约束其他应用、独立 profile 或敌对本地进程；路径复核到操作之间仍有 OS 竞态。文件 sync 的效果依赖 OS/设备，O_EXCL 对网络文件系统也有边界，因此进程强杀证据不等于断电、网络盘或所有文件系统验证。[Node 文件刷新](https://nodejs.org/api/fs.html#filehandlesync)、[文件打开标志](https://nodejs.org/api/fs.html#file-system-flags)。

@@ -12,17 +12,56 @@ import { openSaveSource } from '../../src/platform/save-source.ts';
 import { digest } from '../../src/platform/storage-files.ts';
 import { createSavePreparationStore } from '../../src/main/storage/preparation.ts';
 import { createWindowsReplacer } from '../../src/platform/windows-replacement.ts';
+import { prepareCompactionRecovery } from '../../src/main/storage/compaction-recovery.ts';
 
 const [mode, profile, entry, privateRoot, recoveryId] = process.argv.slice(2);
-if (!profile || !entry || !privateRoot || !['seed', 'restore', 'seed-saved', 'restore-saved'].includes(mode ?? '')) throw Error('Invalid history child arguments');
+if (!profile || !entry || !privateRoot || !['seed', 'restore', 'seed-saved', 'restore-saved', 'seed-compaction', 'probe-compaction', 'restore-compaction'].includes(mode ?? '')) throw Error('Invalid history child arguments');
 registerSchemes(); app.enableSandbox(); app.setPath('userData', profile);
 app.on('before-quit', event => event.preventDefault());
 void app.whenReady().then(async () => {
+  const report = (value: unknown): void => { process.stdout.write(`${JSON.stringify(value)}\n`); };
+  if (mode === 'probe-compaction') {
+    const source = await openSaveSource(entry, await readFile(entry));
+    try { const plan = await prepareCompactionRecovery(privateRoot, source); plan.cancel(); report({ state: 'unexpectedly-acquired' }); }
+    catch (error) { assert.match(String(error), /DRAFT_PROFILE_IN_USE/); report({ state: 'blocked' }); }
+    app.exit(0); return;
+  }
   requireEditorProfile(); const outputRoot = resolve(__dirname, '..');
   const saves = await createSavePreparationStore(privateRoot, undefined, mode === 'seed-saved'
     ? await createWindowsReplacer(join(outputRoot, 'native/ReplaceHelper.exe')) : undefined);
-  const store = await createDraftCheckpointStore(privateRoot, undefined, saves);
-  const report = (value: unknown): void => { process.stdout.write(`${JSON.stringify(value)}\n`); };
+  const store = await createDraftCheckpointStore(privateRoot, async step => {
+    if (mode === 'seed-compaction' && step === 'compaction-after-origin.bin') throw Error('test interrupted compaction');
+  }, saves);
+  if (mode === 'seed-compaction') {
+    const bytes = await readFile(entry); const source = await openSaveSource(entry, bytes); const sessionId = randomUUID();
+    const history = createTextHistory(bytes, { projectId: sessionId, documentId: randomUUID(), generation: 1 }, digest);
+    store.claimSession(sessionId); const node = history.source.nodes.find(node => node.parentTag === 'h1')!;
+    for (const text of ['B', 'C', 'D']) {
+      history.commit(history.prepareEdit({ identity: history.source.identity, baseHash: history.source.baseHash,
+        nodeId: node.nodeId, expectedText: history.textFor(node.nodeId)!, newText: text }));
+      const result = await store.write(source, history.source, history.candidate, sessionId, history.revision, history.capture());
+      assert.equal(result.status, 'persisted'); assert.equal(result.cleanupPending, text === 'D');
+    }
+    report({ state: 'compaction-seeded', sessionId, revision: history.revision }); setInterval(() => {}, 1000); return;
+  }
+  if (mode === 'restore-compaction') {
+    const bytes = await readFile(entry); const source = await openSaveSource(entry, bytes);
+    const plan = await prepareCompactionRecovery(privateRoot, source); assert.equal((await plan.commit()).status, 'resolved');
+    const document = await prepareDocument(outputRoot, entry, 1, new AbortController().signal, store, recoveryId);
+    try {
+      assert.equal(await document.preview.contents.executeJavaScript('document.querySelector("h1").textContent'), 'D');
+      const before = document.input.snapshot();
+      await document.input.history({ stateRevision: before.stateRevision, draftRevision: before.draftRevision, direction: 'undo' });
+      assert.equal(await document.preview.contents.executeJavaScript('document.querySelector("h1").textContent'), 'C');
+      assert.equal((await document.persistence!.settle()).status, 'persisted');
+      const undo = document.input.snapshot();
+      await document.input.history({ stateRevision: undo.stateRevision, draftRevision: undo.draftRevision, direction: 'redo' });
+      assert.equal(await document.preview.contents.executeJavaScript('document.querySelector("h1").textContent'), 'D');
+      assert.equal((await document.persistence!.settle()).status, 'persisted'); assert.deepEqual(await readFile(entry), bytes);
+      report({ state: 'compaction-restored', sessionId: document.checkpointSessionId, revision: document.draft.revision, ...document.history!.summary() });
+    } finally { await document.close(); }
+    app.exit(0); return;
+  }
   if (mode === 'seed' || mode === 'seed-saved') {
     const bytes = await readFile(entry); const source = await openSaveSource(entry, bytes); const sessionId = randomUUID();
     const history = createTextHistory(bytes, { projectId: sessionId, documentId: randomUUID(), generation: 1 }, digest);

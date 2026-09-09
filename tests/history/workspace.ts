@@ -16,6 +16,8 @@ import { createSavePreparationStore } from '../../src/main/storage/preparation.t
 import { createDraftCheckpointStore } from '../../src/main/storage/checkpoints.ts';
 import { createOriginalSaver } from '../../src/main/storage/original.ts';
 import { createWindowsReplacer } from '../../src/platform/windows-replacement.ts';
+import { prepareCompactionRecovery } from '../../src/main/storage/compaction-recovery.ts';
+import { openSaveSource } from '../../src/platform/save-source.ts';
 
 const original = Buffer.from('\ufeff<!doctype html>\r\n<html><head><meta charset="utf-8"><link rel="stylesheet" href="keep.css"></head><body><h1>A &#38; 😀</h1><p>重复</p><p id="target">重复</p><!-- keep --><script>window.existing=41</script></body></html>');
 const css = Buffer.from('body{font:24px sans-serif;padding:20px;color:rgb(12,34,56)}');
@@ -244,16 +246,45 @@ export async function runHistoryWorkspace(outputRoot: string, results: string, p
     assert.equal(stopped.queuedRevision, writing.current().draft.revision); assert.deepEqual(await readdir(interrupted.privateRoot), names);
     assert.equal(await writing.text(), 'E'); assert.deepEqual(await readFile(interrupted.entry), original);
     if (process.platform === 'win32') assert.equal((await writing.save()).code, 'SAVE_LOCKED');
+    await assert.rejects(prepareCompactionRecovery(interrupted.privateRoot, writing.current().saveSource), /DRAFT_STORAGE_ACTIVE/);
     assert.deepEqual(await readFile(interrupted.entry), original);
     pass('a compaction failure reports the exact persisted revision with a cleanup warning, does not invalidate current input, keeps later edits only in memory and stops automatic writes and native Save at the retained lock');
   } finally { await writing.close(); }
 
+  const authorized = await openSaveSource(interrupted.entry, original); const beforeRecovery = await readdir(interrupted.privateRoot);
+  assert.throws(() => prepareCompactionRecovery(interrupted.project, authorized), /DRAFT_PROFILE_ROOT_MISMATCH/);
+  const review = await prepareCompactionRecovery(interrupted.privateRoot, authorized);
+  assert.deepEqual(await readdir(interrupted.privateRoot), beforeRecovery); assert.equal(review.cancel(), true);
+  assert.deepEqual(await readdir(interrupted.privateRoot), beforeRecovery);
+  const staleProfile = await prepareCompactionRecovery(interrupted.privateRoot, authorized); const originalProfile = app.getPath('userData');
+  try {
+    app.setPath('userData', interrupted.root);
+    assert.deepEqual(await staleProfile.commit(), { status: 'failed', code: 'DRAFT_PROFILE_IN_USE' });
+  } finally { app.setPath('userData', originalProfile); staleProfile.cancel(); }
+  assert.deepEqual(await readdir(interrupted.privateRoot), beforeRecovery);
+  const resolution = await prepareCompactionRecovery(interrupted.privateRoot, authorized);
+  assert.equal((await resolution.commit()).status, 'resolved');
+  interrupted.control.draftStep = async () => {};
+  const recovered = await interrupted.connect(resolution.summary.sessionId);
+  try {
+    assert.equal(await recovered.text(), 'D'); assert.equal(recovered.current().history!.summary().undoCount, 3);
+    assert.ok((await recovered.move('undo')).ok); await recovered.settle(); assert.equal(await recovered.text(), 'C');
+    assert.deepEqual(await readFile(interrupted.entry), original);
+    if (process.platform === 'win32') {
+      assert.equal((await recovered.save()).outcome, 'saved'); await recovered.settle();
+      assert.deepEqual(await readFile(interrupted.entry), Buffer.from(original.toString().replace('A &#38; 😀', 'C')));
+    }
+    assert.deepEqual(await readFile(join(interrupted.project, 'keep.css')), css);
+    assert.deepEqual(await recovered.ui.webContents.executeJavaScript('[typeof haeWorkspace.unlock,typeof haeWorkspace.prepareCompactionRecovery]'), ['undefined', 'undefined']);
+    pass('explicit profile-bound Main compaction recovery refuses an active document or foreign root, cancels without writes, then permits production Workspace restore/Undo and explicit native Save while preserving the latest actually durable text');
+  } finally { await recovered.close(); }
+
   const processRoot = await mkdtemp(join(results, 'history-restart-')); const profile = join(processRoot, 'profile');
   const privateRoot = join(profile, 'private'); await mkdir(privateRoot, { recursive: true });
   const entry = join(processRoot, 'report.html'); await writeFile(entry, original); await writeFile(join(processRoot, 'keep.css'), css);
-  const start = (mode: string, sessionId?: string) => {
+  const start = (mode: string, sessionId?: string, location = { profile, entry, privateRoot }) => {
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-    const child = spawn(process.execPath, [join(outputRoot, 'history-child/index.cjs'), mode, profile, entry, privateRoot, ...(sessionId ? [sessionId] : [])],
+    const child = spawn(process.execPath, [join(outputRoot, 'history-child/index.cjs'), mode, location.profile, location.entry, location.privateRoot, ...(sessionId ? [sessionId] : [])],
       { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let text = ''; let diagnostic = ''; let message: { state: string; sessionId?: string; revision: number; undoCount?: number; redoCount?: number } | null = null;
     child.stdout.on('data', value => {
@@ -289,4 +320,22 @@ export async function runHistoryWorkspace(outputRoot: string, results: string, p
     assert.deepEqual(await readFile(entry), baseline);
     pass('a separate Electron process killed after native commit but before a clean checkpoint can restart into a newly sealed history, install an empty Text, confirm Undo/Redo and preserve the already saved HTML bytes');
   }
+
+  const resolutionRoot = await mkdtemp(join(results, 'compaction-restart-'));
+  const location = { profile: join(resolutionRoot, 'profile'), privateRoot: join(resolutionRoot, 'profile/private'), entry: join(resolutionRoot, 'report.html') };
+  await mkdir(location.privateRoot, { recursive: true }); await writeFile(location.entry, original); await writeFile(join(resolutionRoot, 'keep.css'), css);
+  const interruptedProcess = start('seed-compaction', undefined, location); let retainedId: string;
+  try {
+    const message = await interruptedProcess.ready(); assert.equal(message.state, 'compaction-seeded'); retainedId = message.sessionId!;
+    const competitor = start('probe-compaction', undefined, location);
+    try { assert.equal((await competitor.ready()).state, 'blocked'); assert.equal(await competitor.exited, 0); }
+    finally { await competitor.stop(); }
+  } finally { await interruptedProcess.stop(); }
+  const restarted = start('restore-compaction', retainedId, location);
+  try {
+    const message = await restarted.ready(); assert.equal(message.state, 'compaction-restored');
+    assert.equal(message.undoCount, 3); assert.equal(message.redoCount, 0); assert.equal(await restarted.exited, 0);
+  } finally { await restarted.stop(); }
+  assert.deepEqual(await readFile(location.entry), original); assert.deepEqual(await readFile(join(resolutionRoot, 'keep.css')), css);
+  pass('a live Electron profile blocks a competing compaction resolver; after actual process termination a new Main explicitly resolves the interrupted cleanup and restores/undoes/redoes the latest full history without writing HTML');
 }

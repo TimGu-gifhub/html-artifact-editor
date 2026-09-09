@@ -48,5 +48,10 @@ export function checkpointRemoval(root: CheckedDirectory) {
     async journal(proof: Omit<FileRemovalProof, 'name'>, onVerified: () => Promise<void>) {
       await removeFile(root, 'compaction.json', proof, COMPACTION_LIMIT, onVerified);
     },
+    // Explicit Main recovery holds exclusive profile/namespace ownership and a
+    // verified durable receipt. This is not a general stale-lock unlock method.
+    async recoveryLock(proof: Omit<FileRemovalProof, 'name'>, onVerified: () => Promise<void>) {
+      await removeFile(root, 'active.lock', proof, 1024, onVerified);
+    },
   });
 }

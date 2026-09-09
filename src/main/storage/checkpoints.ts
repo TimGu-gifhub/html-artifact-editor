@@ -20,6 +20,8 @@ import { readDraftHeader, readDraftRetirement, freezeDraftCheckpoint as freeze }
 import { draftOwnership } from './draft-ownership.ts';
 import { compactCheckpoints } from './checkpoint-compaction.ts';
 import { COMPACTION_LIMIT } from '../../contracts/checkpoint-compaction.ts';
+import { resolutionFile } from '../../contracts/compaction-resolution.ts';
+import { readCompactionResolutions } from './compaction-resolutions.ts';
 
 const STORE_LIMIT = 200 * 1024 * 1024;
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.stringify(value)}\n`);
@@ -49,6 +51,7 @@ export type CheckpointGroup = Readonly<{
 const errorCode = (error: unknown): string => {
   const value = error as { code?: string; message?: string } | null;
   if (value?.code === 'EEXIST') return 'DRAFT_STORAGE_LOCKED';
+  if (value?.message === 'STORAGE_MAINTENANCE') return 'DRAFT_STORAGE_MAINTENANCE';
   if (value?.code === 'ENOSPC') return 'DRAFT_STORAGE_FULL';
   if (value?.code === 'EACCES' || value?.code === 'EPERM') return 'DRAFT_STORAGE_PERMISSION_DENIED';
   return /^DRAFT_[A-Z_]+$/u.test(value?.message ?? '') ? value!.message! : 'DRAFT_STORAGE_FAILED';
@@ -116,8 +119,10 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
   };
   const inventory = async () => {
     const items = await root.entries(512); let used = 0;
-    const entries: { name: string; type: 'draft' | 'save' | 'unknown' | 'lock' | 'compaction' }[] = [];
+    const resolutions = await readCompactionResolutions(root, items.map(item => item.name));
+    const entries: { name: string; type: 'draft' | 'save' | 'unknown' | 'lock' | 'compaction' | 'resolution' }[] = [];
     for (const item of items) {
+      if (resolutionFile(item.name)) { used += item.size; entries.push({ name: item.name, type: 'resolution' }); continue; }
       if (item.name === 'active.lock' && item.kind === 'file') { used += item.size; entries.push({ name: item.name, type: 'lock' }); continue; }
       if (item.name === 'compaction.json' && item.kind === 'file') {
         if (item.size > COMPACTION_LIMIT) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
@@ -136,12 +141,14 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       entries.push({ name: item.name, type });
       if (used > STORE_LIMIT) throw new Error('DRAFT_STORAGE_LIMIT');
     }
-    return { entries, used };
+    if (used > STORE_LIMIT) throw new Error('DRAFT_STORAGE_LIMIT');
+    return { entries, used, resolutions };
   };
   const records = async () => {
-    const { entries, used } = await inventory(); const known = []; const unclassified: string[] = [];
+    const { entries, used, resolutions } = await inventory(); const known = [];
+    const unclassified: string[] = resolutions.filter(row => !row.seal).map(row => row.name);
     for (const item of entries) {
-      if (item.type === 'lock' || item.type === 'save') continue;
+      if (item.type === 'lock' || item.type === 'save' || item.type === 'resolution') continue;
       if (item.type === 'compaction') { unclassified.push(item.name); continue; }
       try {
         const header = await readDraftHeader(root, item.name);
@@ -270,7 +277,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
     async scan() {
       const { entries } = await inventory(); const records = [];
       for (const item of entries) {
-        if (item.type === 'lock' || item.type === 'save' || item.type === 'compaction') continue;
+        if (item.type === 'lock' || item.type === 'save' || item.type === 'compaction' || item.type === 'resolution') continue;
         const result = await inspect(item.name); const checkpoint = result.checkpoint;
         // Listing retains metadata and counts, not every document's text/bytes.
         const summary = checkpoint ? Object.freeze({ checkpointId: checkpoint.checkpointId, sessionId: checkpoint.sessionId,
@@ -284,9 +291,11 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       fullHistory?: HistoryCheckpoint): Promise<CheckpointWrite> {
       let checkpointId: string | null = null; let lock: OwnedLock | undefined; let sealing = false; let acquiringLock = false;
       let resultHash = ''; let persisted = false; let cleanupPending = false; let code: string | null = null; let retainLock = false;
+      let releaseOperation: (() => void) | undefined;
       if (busy) return Object.freeze({ status: 'failed', checkpointId, draftRevision, resultHash, code: 'DRAFT_STORAGE_BUSY', cleanupPending });
       busy = true;
       try {
+        releaseOperation = ownership.claimOperation();
         // Freeze/validate synchronously before awaiting I/O. An external source
         // edit must not prevent retaining a draft of the originally opened bytes.
         const history = fullHistory === undefined ? undefined : freezeHistoryCheckpoint(fullHistory);
@@ -309,9 +318,10 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
             if (result?.status === 'failed' || result?.status === 'unknown') { retainLock = result.retainLock; throw new Error(result.code!); }
           } catch (error) { cleanupPending = true; throw error; }
         };
-        let { entries, used } = await inventory(); let count = 0; let existingId: string | null = null;
+        let { entries, used, resolutions } = await inventory(); let count = 0; let existingId: string | null = null;
+        if (resolutions.some(row => !row.seal)) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
         for (const item of entries) {
-          if (item.type === 'lock') continue;
+          if (item.type === 'lock' || item.type === 'resolution') continue;
           if (item.type === 'compaction') throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
           const folder = await root.directory(item.name);
           const priorFile = await folder.read(item.type === 'save' ? 'intent.json' : 'record.json',
@@ -380,7 +390,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
           catch { cleanupPending = true; code = 'DRAFT_CLEANUP_PENDING'; }
         }
         else if (retainLock || (acquiringLock && code !== 'DRAFT_STORAGE_LOCKED')) cleanupPending = true;
-        busy = false;
+        busy = false; releaseOperation?.();
       }
       return Object.freeze({ status: persisted ? 'persisted' : sealing ? 'unknown' : 'failed', checkpointId, draftRevision, resultHash, code, cleanupPending });
     },
@@ -484,11 +494,13 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
     // It retires private recovery data; it never saves or deletes HTML/bytes.
     async retire(source: SaveSource, sessionId: string, draftRevision: number, reason: DraftRetirement['reason']): Promise<CheckpointRetirement> {
       let lock: OwnedLock | undefined; let acquiringLock = false; let writing = false;
+      let releaseOperation: (() => void) | undefined;
       let checkpointId: string | null = null; let status: CheckpointRetirement['status'] = 'failed';
       let code: string | null = null; let cleanupPending = false;
       if (busy) return Object.freeze({ status, checkpointId, code: 'DRAFT_STORAGE_BUSY', cleanupPending });
       busy = true;
       try {
+        releaseOperation = ownership.claimOperation();
         if (!isTransactionId(sessionId) || !Number.isSafeInteger(draftRevision) || draftRevision < 1
           || !['discarded', 'copied'].includes(reason)) throw new Error('DRAFT_RETIREMENT_INVALID');
         acquiringLock = true;
@@ -530,7 +542,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
           try { await onStep('release-lock'); await lock.removeOwned(); }
           catch { cleanupPending = true; code = 'DRAFT_CLEANUP_PENDING'; }
         } else if (acquiringLock && code !== 'DRAFT_STORAGE_LOCKED') cleanupPending = true;
-        busy = false;
+        busy = false; releaseOperation?.();
       }
       return Object.freeze({ status, checkpointId, code, cleanupPending });
     },

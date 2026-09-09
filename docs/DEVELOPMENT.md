@@ -79,6 +79,8 @@ HAE-011 第七阶段增加来源重建与历史单元检查，完整逻辑记录
 
 第十一阶段增加 [检查点有界清理](CHECKPOINT_COMPACTION.md)：八项存储用例及两组真实窗口用例，历史实验共 27 组。逐项等待 24 次持久化、清理故障、完整历史重开与强杀后证据保留纳入本地检查；历史窗口全套期限为 90 秒，各 Worker/IPC 等待仍保持原有期限。
 
+第十二阶段增加 [清理中断后的显式恢复](COMPACTION_RECOVERY.md)。compaction-resolution.test.mjs 同时纳入开发/内嵌 Node，覆盖七项存储行为；真实历史窗口实验增加 Main 恢复后生产 Workspace Undo/Save，以及独立 Electron profile 竞争/重启恢复，共 29 组。存储用例中的 profile 回调替身与实际 Electron 进程锁验证分别记录。
+
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
 ## 运行边界与证据
