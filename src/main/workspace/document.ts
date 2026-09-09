@@ -12,6 +12,7 @@ import type { createDraftCheckpointStore } from '../storage/checkpoints.ts';
 import { requireEditorProfile } from '../../platform/editor-profile.ts';
 import type { DraftPersistence } from '../draft/persistence.ts';
 import { isTransactionId } from '../../contracts/save-record.ts';
+import { createSourceDiffReader } from '../draft/source-diff.ts';
 
 export type DraftStore = Awaited<ReturnType<typeof createDraftCheckpointStore>>;
 
@@ -35,6 +36,7 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
   let input: ReturnType<typeof createInputController> | undefined;
   let releaseOwnership: (() => void) | undefined;
   let persistence: DraftPersistence | null = null;
+  let sourceDiff: ReturnType<typeof createSourceDiffReader> | undefined;
   try {
     const checkpointSessionId = recoverySessionId ?? preview.identity.sessionId;
     releaseOwnership = checkpoints?.claimSession(checkpointSessionId);
@@ -54,12 +56,19 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
       candidate: draft.candidate, revision: recovery.draftRevision, checkpointId: recovery.checkpointId,
     } : undefined) : null;
     input = createInputController(mapping, draft);
+    sourceDiff = createSourceDiffReader(outputRoot, index, () => ({ candidate: draft.candidate, revision: draft.revision, phase: draft.phase }));
     let closing: Promise<void> | undefined;
     const close = (): Promise<void> => {
       if (!closing) {
         lifetime.abort();
         input!.close();
-        closing = (async () => { await persistence?.close(); await preview.close(); releaseOwnership?.(); })();
+        const endingDiff = sourceDiff!.close();
+        closing = (async () => {
+          const settled = await Promise.allSettled([persistence?.close(), endingDiff]);
+          const failed = settled.find(result => result.status === 'rejected');
+          if (failed?.status === 'rejected') throw failed.reason;
+          await preview.close(); releaseOwnership?.();
+        })();
       }
       return closing;
     };
@@ -81,11 +90,11 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
     };
     signal.throwIfAborted(); signal.removeEventListener('abort', abortPreparation);
     return Object.freeze({ id: preview.identity.sessionId, name: basename(entry), entry, project, onState,
-      preview, mapping, draft, input, writer, saveSource, persistence, checkpointSessionId, verifyRecovery, close });
+      preview, mapping, draft, input, writer, saveSource, persistence, sourceDiff, checkpointSessionId, verifyRecovery, close });
   } catch (error) {
     signal.removeEventListener('abort', abortPreparation); lifetime.abort();
     input?.close(); mapping?.close();
-    await persistence?.close(); await preview.close(); releaseOwnership?.();
+    await sourceDiff?.close(); await persistence?.close(); await preview.close(); releaseOwnership?.();
     throw error;
   }
 }

@@ -17,6 +17,7 @@ const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUS
   'DRAFT_PROFILE_IN_USE', 'DRAFT_SESSION_ACTIVE', 'DRAFT_RECOVERY_UNAVAILABLE', 'DRAFT_RECOVERY_CONFLICT',
   'DRAFT_STORAGE_LOCKED', 'DRAFT_STORAGE_REVIEW_REQUIRED', 'DRAFT_CHECKPOINT_CHANGED', 'DRAFT_CHECKPOINT_INVALID',
   'DRAFT_RESTORE_UNAVAILABLE', 'DRAFT_RESTORE_REJECTED', 'DRAFT_RESTORE_OUTCOME_UNKNOWN',
+  'STALE_SOURCE_DIFF', 'SOURCE_DIFF_CANCELLED', 'SOURCE_DIFF_FAILED', 'SOURCE_DIFF_TIMEOUT', 'SOURCE_DIFF_STOP_FAILED', 'DRAFT_UNAVAILABLE',
   'RESOURCE_BLOCKED',
   'COPY_FAILED', 'COPY_OUTCOME_UNKNOWN', 'INPUT_MAPPING_LOST', 'INVALID_TEXT_NUL', 'INVALID_UNICODE', 'TEXT_SIZE_LIMIT']);
 
@@ -32,9 +33,12 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         let copy: WorkspaceResult['copy'] = null;
         let outcome: WorkspaceResult['outcome'] = null;
         let recovery: WorkspaceResult['recovery'] = null;
+        let diff: WorkspaceResult['diff'] = null;
         const documentId = 'documentId' in command ? command.documentId : null;
         try {
-          if (command.kind === 'recovery-list') {
+          if (command.kind === 'source-diff') {
+            diff = await workspace.readDiff(command.documentId, command.draftRevision, command.candidateHash);
+          } else if (command.kind === 'recovery-list') {
             recovery = await workspace.listRecovery();
           } else if (command.kind === 'restore') {
             const result = await workspace.restore(command.stateRevision, command.recoverySessionId, (operationSignal) =>
@@ -56,7 +60,7 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
               chooseProjectEntry(current.preview.grant, projectChoices.chooseEntry, operationSignal));
             outcome = result.status === 'opened' ? 'opened' : 'cancelled';
           } else if (command.kind === 'save') {
-            const result = await workspace.save(command.stateRevision, command.documentId);
+            const result = await workspace.save(command.stateRevision, command.documentId, command.review);
             const report = result.state.lastSave;
             // Cleanup warnings remain in lastSave. A verified file and new
             // baseline are a successful Save even when evidence cleanup is pending.
@@ -81,7 +85,7 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         } catch (error) {
           code = error instanceof Error && publicErrors.has(error.message) ? error.message : 'WORKSPACE_COMMAND_FAILED';
         }
-        return { ok: code === null, code, state: workspace.snapshot(), documentId, copy, outcome, recovery };
+        return { ok: code === null, code, state: workspace.snapshot(), documentId, copy, outcome, recovery, diff };
       },
     });
 }

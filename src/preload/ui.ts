@@ -122,7 +122,8 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
     open: (stateRevision) => request({ kind: 'open', stateRevision }),
     openDirectory: (stateRevision) => request({ kind: 'open-directory', stateRevision }),
     switchEntry: (documentId, stateRevision) => request({ kind: 'switch-entry', documentId, stateRevision }),
-    save: (documentId, stateRevision) => request({ kind: 'save', documentId, stateRevision }),
+    readDiff: (documentId, draftRevision, candidateHash) => request({ kind: 'source-diff', documentId, draftRevision, candidateHash }),
+    save: (documentId, stateRevision, review) => request({ kind: 'save', documentId, stateRevision, ...(review === undefined ? {} : { review }) }),
     retryPersistence: (documentId, draftRevision) => request({ kind: 'retry-persistence', documentId, draftRevision }),
     edit: (documentId, value) => request({ kind: 'edit', documentId, value }),
     onState: (listener) => {

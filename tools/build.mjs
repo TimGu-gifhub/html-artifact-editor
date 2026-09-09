@@ -17,6 +17,7 @@ const entries = {
   mapping: ['tests/mapping/main.ts', 'out/mapping'],
   patch: ['tests/patch/main.ts', 'out/patch'],
   'draft-worker': ['src/main/draft/worker.ts', 'out/draft-worker'],
+  'diff-worker': ['src/main/draft/diff-worker.ts', 'out/diff-worker'],
   draft: ['tests/draft/main.ts', 'out/draft'],
   editor: ['tests/editor/main.ts', 'out/editor'],
   'editor-probe': ['tests/editor/probe.ts', 'out/editor/probe'],
@@ -27,8 +28,9 @@ const entries = {
   'save-session': ['tests/save-session/main.ts', 'out/save-session'],
   recovery: ['tests/draft-restore/main.ts', 'out/recovery'],
   'recovery-child': ['tests/draft-restore/child.ts', 'out/recovery-child'],
+  'source-diff': ['tests/source-diff/main.ts', 'out/source-diff'],
 };
-const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'native'];
+const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'diff-worker', 'native'];
 const requested = process.argv.slice(2);
 for (const target of requested.length ? requested : defaultTargets) {
   if (target === 'native') {

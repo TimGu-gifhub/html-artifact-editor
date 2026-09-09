@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建实验。
+日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建、HAE-011 的草稿检查点/恢复与源码 Diff 实验。
 
 ## 固定版本
 
@@ -40,7 +40,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 
 | 命令 | 产物或检查 |
 | --- | --- |
-| `npm run build` | 八个 JS/页面构建目标，另构建 Windows 原生替换助手 |
+| `npm run build` | 九个 JS/页面构建目标（含 Diff Worker），另构建 Windows 原生替换助手 |
 | `npm run build:main` | out/main/index.cjs |
 | `npm run build:native` | Windows .NET Framework 编译原生替换助手；其他 OS 明示不支持 |
 | `npm run build:preload:ui` | out/preload/ui/index.cjs，独立单文件 CJS |
@@ -49,7 +49,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run build:preview` | out/preview，固定静态样例 |
 | `npm run typecheck` | 核心、主进程、preload、UI 四套 strict 编译边界；仅 preload/渲染器含 DOM 类型 |
 | `npm run check:boundaries` | AST 检查跨层 import/export/动态加载与核心平台全局变量 |
-| `npm test` | 契约、分层、资源路径/句柄/快照/撤销、UTF-8、源码索引、纯字节 Patch 与拒绝反例 |
+| `npm test` | 契约、分层、资源路径/句柄/快照/撤销、UTF-8、源码索引、纯字节 Patch 与拒绝反例；最多四个测试文件并行 |
 | `npm run test:smoke` | 已构建应用的 Electron 冒烟，独立 out/smoke 入口 |
 | `npm run test:security` | 已构建 preload 的真实项目协议、两种模式、恶意请求和 IPC 测试；独立 out/security 入口 |
 | `npm run test:mapping` | 构建 worker/preload/mapping，真实 Chromium 树、原生点击、世代/对象失效与解析故障实验 |
@@ -62,6 +62,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:storage` | Electron 内嵌 Node 执行真实文件准备、Windows 原生替换/备份恢复、权限/占用、事务故障及进程强杀；仅覆盖自制临时 HTML，无产品窗口 |
 | `npm run test:save-session` | Windows 真实 Electron 窗口、生产 IPC、原文件保存/重建、崩溃/未知结果/外部冲突/清理警告；无产品控件或真实 IME |
 | `npm run test:recovery` | 真实 Electron 的恢复列表/重新授权/新映射安装、进程所有权、恢复后编辑与 Windows 保存去重；自制空白 transport 页面，无产品验收 |
+| `npm run test:source-diff` | 真实 Electron 生产接口读取完整源码 Diff、拒绝旧确认、重连及 Windows 保存字节/冲突检查；无产品 Diff 面板 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run preview:directory` | 原生选择根目录及其中 HTML，保留嵌套相对资源路径；只读校稿预览，诊断输出到终端 |
@@ -69,7 +70,9 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 草稿恢复 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 草稿恢复 → 源码 Diff → 许可证 |
+
+开发 Node 的单元套件使用 `--test-concurrency=4`，避免随主机 CPU 数量增加而同时启动过多原生文件/子进程实验。此限制只控制测试文件调度，不改变用例内部的并发竞态、故障断言和单项期限。超时或取消仍使门槛失败，须保留日志并定位后重跑。
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
@@ -99,7 +102,7 @@ HAE-010 第一阶段增加 10 项真实存储/进程测试，当时共 151 单�
 
 第四阶段新增 `tests/unit/save-recovery.test.mjs`，验证 Main 备份恢复的 v1/v2 记录、当前文件再次备份、实际恢复/反向恢复、来源损坏/换名/同文改写、外部冲突、互斥、故障和三个真实 Main 强杀点。该阶段 Windows 的 `test:storage` 在 Electron 内嵌 Node 执行准备、提交、恢复三份测试文件；其他平台只重跑准备文件并标记原生替换 unsupported，不据此宣称恢复已在其他平台验证。
 
-HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备、检查点存储和生命周期文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。第二阶段增加七项队列/Apply 单元行为及实际会话实验，验证有界排队、准确版本、错误/重试、Save/关闭协调和 renderer 崩溃。第三阶段增加九项生命周期行为，覆盖最新修订、结束标记、损坏证据、共用锁、配额与实际进程强杀。第四阶段增加七项离开协调单元和十组真实窗口行为；`test:save-session` 共 26 组，整套期限为 90 秒，各交互等待仍单独有界。开发 Node、内嵌 Node 与会话结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。仍未接入正常入口、恢复窗口、结束失败后的恢复操作、清理或历史/Diff。
+HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备、检查点存储和生命周期文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。第二阶段增加七项队列/Apply 单元行为及实际会话实验，验证有界排队、准确版本、错误/重试、Save/关闭协调和 renderer 崩溃。第三阶段增加九项生命周期行为，覆盖最新修订、结束标记、损坏证据、共用锁、配额与实际进程强杀。第四阶段增加七项离开协调单元和十组真实窗口行为；`test:save-session` 共 26 组，整套期限为 90 秒，各交互等待仍单独有界。开发 Node、内嵌 Node 与会话结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。第五阶段新增真实恢复安装与进程占用检查。第六阶段增加冻结字节的源码 Diff Worker、可信读取和 Save review，默认构建目标增加到九个；结果写入 test-results/source-diff.json，完整门槛记录见 [HAE-011](implementation/HAE-011.md)。正常产品入口、恢复/Diff 控件、结束失败后的处理、清理和历史仍待接入。
 
 单文件原生选择器以 HTML 父目录为根；目录入口先明确授权根，再选择根内 HTML，切换入口保留原根身份。两种方式都不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 

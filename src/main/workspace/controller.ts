@@ -7,6 +7,8 @@ import type { ProjectSource } from '../protocol/project-files.ts';
 import type { OriginalSaver, OriginalSaveResult } from '../storage/original.ts';
 import { isTransactionId } from '../../contracts/save-record.ts';
 import type { WorkspaceRecoveryCatalog } from '../../contracts/recovery.ts';
+import { isDiffReview } from '../../contracts/source-diff.ts';
+import type { DiffReview, WorkspaceDiff } from '../../contracts/source-diff.ts';
 
 export type WorkspaceDecisions = Readonly<{
   review: (value: LeaveReview) => Promise<unknown>;
@@ -266,9 +268,20 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       inputReady(current.input.snapshot());
       current.persistence.retry(draftRevision);
     },
-    async save(expectedRevision: number, documentId: string): Promise<Readonly<{ status: WorkspaceSaveReport['status']; state: WorkspaceSnapshot }>> {
+    async readDiff(documentId: string, draftRevision: number, candidateHash: string): Promise<WorkspaceDiff> {
+      const value = current;
+      if (disposed || !value || value.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (!isDiffReview({ draftRevision, candidateHash })) throw new Error('STALE_SOURCE_DIFF');
+      const diff = await value.sourceDiff.read(draftRevision, candidateHash);
+      if (disposed || current !== value) throw new Error('STALE_DOCUMENT');
+      if (value.draft.revision !== draftRevision || value.draft.candidate.resultHash !== candidateHash) throw new Error('STALE_SOURCE_DIFF');
+      return Object.freeze({ ...diff, documentId, draftRevision });
+    },
+    async save(expectedRevision: number, documentId: string, reviewed?: DiffReview): Promise<Readonly<{ status: WorkspaceSaveReport['status']; state: WorkspaceSnapshot }>> {
       const leaving = current;
       if (!leaving || leaving.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (reviewed !== undefined && (!isDiffReview(reviewed) || reviewed.draftRevision !== leaving.draft.revision
+        || reviewed.candidateHash !== leaving.draft.candidate.resultHash)) throw new Error('STALE_SOURCE_DIFF');
       if (!saveOriginal) throw new Error('SAVE_PLATFORM_UNSUPPORTED');
       if (lastSave?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
       const before = leaving.input.snapshot();

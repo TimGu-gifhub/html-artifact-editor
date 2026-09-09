@@ -16,14 +16,17 @@
 | `open(stateRevision)` | 按窗口状态版本请求 Main 文件选择器，完整准备后处理旧文档离开确认 |
 | `openDirectory(stateRevision)` | Main 先选择并固定根目录身份，再选择根内 HTML；取消任一步保持当前文档 |
 | `switchEntry(documentId, stateRevision)` | 只在操作所属 current 文档的既有根内选择入口，不能自动重新授权或接受 UI 路径 |
-| `save(documentId, stateRevision)` | Main 显式保存该文档已应用的候选，核验提交并重建基线；未应用输入/组合态拒绝，不隐式 Apply |
+| `readDiff(documentId, draftRevision, candidateHash)` | 读取指定已应用候选的完整源码 Diff；不改变输入、不写检查点或 HTML，过期结果拒绝 |
+| `save(documentId, stateRevision, review?)` | Main 显式保存已应用候选并重建基线；review 绑定所显示 Diff 的 draftRevision/candidateHash，过期确认拒绝；未应用输入/组合态拒绝，不隐式 Apply |
 | `retryPersistence(documentId, draftRevision)` | 只重试当前文档最新已应用草稿的私有检查点；不接受路径/候选、不写 HTML，完成状态经 read/onState 读取 |
 | `edit(documentId, value)` | documentId 必须是该操作所属快照的 current.id；value 只允许 begin/change/apply/resolve/save-copy 的既有精确 schema |
 | `onState(listener)` | 返回取消订阅函数；先订阅再 read；最多 32 个订阅，通知只含纯状态 |
 
 documentId 必须随用户操作一起捕获，不能在迟到回调中自动换成新文件 ID。即便新旧文档恰有相同输入 revision，旧 ID 也会以 STALE_DOCUMENT 拒绝，不调用新文件的输入或选择器。编辑值仍须通过 [输入合同](../src/contracts/input.ts)；文件身份不能替代 Text 身份、editToken 和版本核验。
 
-返回 `{ok, code, state, documentId, copy, outcome, recovery}`：state 是窗口最新快照；documentId 说明本次 edit/switchEntry/save/retryPersistence 的目标，copy 说明本次编辑请求；outcome 包含 opened/restored/cancelled，以及保存的 saved/unchanged/rebase-required。recovery 仅在列表成功时返回摘要，其余为 null 或未提供。保存成功后，返回的 documentId 仍是请求的旧目标，state.current.id 已是新基线文档。状态可能已前进，不能把旧请求结果提示到另一份文档。只有本次 copy.status=created 表示副本核验成功，原入口保存点不变。授权拒绝返回 RESOURCE_BLOCKED；未列入公开错误集的内部异常使用固定 WORKSPACE_COMMAND_FAILED，不泄漏路径或原始错误。
+返回 `{ok, code, state, documentId, copy, outcome, recovery, diff}`：state 是窗口最新快照；documentId 说明本次 edit/switchEntry/save/retryPersistence/readDiff 的目标，copy 说明本次编辑请求；outcome 包含 opened/restored/cancelled，以及保存的 saved/unchanged/rebase-required。recovery 仅在列表成功时返回摘要；diff 仅在读取成功时返回所请求的文档/修订/候选及完整源码切片，其余为 null 或未提供。保存成功后，返回的 documentId 仍是请求的旧目标，state.current.id 已是新基线文档。状态可能已前进，不能把旧请求结果提示到另一份文档。只有本次 copy.status=created 表示副本核验成功，原入口保存点不变。授权拒绝返回 RESOURCE_BLOCKED；未列入公开错误集的内部异常使用固定 WORKSPACE_COMMAND_FAILED，不泄漏路径或原始错误。
+
+Diff 基于打开/最近保存时的原始字节和同一冻结候选，由有限 Worker 计算；不包含未应用输入。UI 必须按文字显示原始源码，不执行它，范围仅用于显示，不能作为文件写入权限。产品从 Diff 发起 Save 时须携带实际显示的 review；即使后来候选 hash 相同，旧修订也不能确认新保存。该校验不替代磁盘冲突、备份或输入保护。完整字段、缓存、取消与错误合同见 [源码 Diff](SOURCE_DIFF.md)。
 
 `current.project` 是只读显示摘要：根目录名称、根内相对 entry 和有界 resources 诊断。诊断变化也推进 Workspace 状态版本并经 onState 发送。它不含本机绝对路径、目录身份或授权对象；entry/诊断 target 不能回传为文件操作参数。具体类型、脱敏和截断规则见 [目录资源合同](PROJECT_RESOURCES.md)。
 
@@ -82,3 +85,5 @@ HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoint
 第四阶段再加入 [十组窗口离开实验](../tests/save-session/departure.ts)：关闭排空与结束标记、三处挂载失败、取消/失效确认与核验副本、三处结束写入异常、标记开始前后两次实际 renderer 崩溃、归零失败与显式重试、清理警告。源 HTML/CSS 与候选按独立期望字节核对；每个等待仍有界，保存会话整套运行上限扩为 90 秒。
 
 第五阶段将恢复摘要与新 Preview 安装接入相同生产 transport，方法数为十个。恢复延续原 checkpointSessionId 和修订，生成新的 UI 文档身份，不重复写检查点；挂载前后验证源文件及同一最新记录。新文档的映射在准备完成后由自身生命周期管理，旧 chooser 的撤销不会在已经开始的离开提交期间销毁它。`npm run test:recovery` 执行独立 Electron 进程占用/强杀、真实恢复与后续编辑、原记录结束、授权取消/错误来源、原生挂载回滚、动态支持范围拒绝、源变化及新记录竞态、Windows 恢复后保存去重。完整合同与失败边界见 [草稿检查点](DRAFT_CHECKPOINTS.md)；空白 transport 页面、测试选择器回调仍不代替产品 UI 和人工验收。
+
+第六阶段增加 readDiff，生产 API 共十一个方法，Save 可携带 Diff review。`npm run test:source-diff` 执行八组真实 Electron 实验：干净只读、恢复后的完整词法差异、未应用/组合态保护、新修订拒绝旧确认、净变更归零、renderer 重连/旧文档拒绝，以及 Windows 保存字节一致性和外部冲突。文档清理同时等待 Diff Worker 终止和持久化排空；终止失败保留占用，不报告释放成功。产品面板、历史与真实 IME 仍待接入。
