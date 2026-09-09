@@ -9,11 +9,14 @@ import type { ProjectPreview } from './project-preview.ts';
 import { createEditGuard } from './edit-guard.ts';
 import { isMappingRestore, isMappingRestoreResult, MAPPING_RESTORE, MAPPING_RESTORE_RESULT } from '../../contracts/mapping-restore.ts';
 import type { MappingRestore, MappingRestoreChange } from '../../contracts/mapping-restore.ts';
+import { isMappingHistory, isMappingHistoryResult, MAPPING_HISTORY, MAPPING_HISTORY_RESULT } from '../../contracts/mapping-history.ts';
+import type { MappingHistory } from '../../contracts/mapping-history.ts';
+import type { SourceLineage } from '../../core/parser/source-index.ts';
 
 const installed = new WeakSet<object>();
 
 export async function createPreviewMapping(outputRoot: string, preview: ProjectPreview,
-  signal: AbortSignal = new AbortController().signal) {
+  signal: AbortSignal = new AbortController().signal, lineage?: SourceLineage) {
   if (preview.identity.mode !== 'proofread') throw new Error('INTERACTIVE_PREVIEW_READ_ONLY');
   if (installed.has(preview.contents)) throw new Error('MAPPING_ALREADY_INSTALLED');
   installed.add(preview.contents);
@@ -24,7 +27,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
   if (signal.aborted || !preview.isActive() || preview.contents.isDestroyed()) parsing.abort();
   const source = await parseSource(outputRoot, preview.sourceBytes(), {
     projectId: preview.identity.sessionId, documentId: randomUUID(), generation: preview.identity.generation,
-  }, parsing.signal).finally(() => {
+  }, parsing.signal, lineage).finally(() => {
     preview.contents.removeListener('destroyed', abortParse);
     signal.removeEventListener('abort', abortParse);
   });
@@ -40,6 +43,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
   const checks = new Map<string, { request: MappingCheck; finish: (valid: boolean) => void }>();
   let mutation: { request: MappingApply; finish: (outcome: MappingApplyOutcome) => void } | undefined;
   let restoration: { request: MappingRestore; finish: (outcome: MappingApplyOutcome) => void } | undefined;
+  let historical: { request: MappingHistory; finish: (outcome: MappingApplyOutcome) => void } | undefined;
   let editGuard: ReturnType<typeof createEditGuard> | undefined;
   let finishBinding: () => void = () => {};
   const bound = new Promise<void>((resolveBound) => { finishBinding = resolveBound; });
@@ -48,6 +52,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     for (const pending of checks.values()) pending.finish(false);
     mutation?.finish('unknown');
     restoration?.finish('unknown');
+    historical?.finish('unknown');
     editGuard?.reset();
     finishBinding();
   };
@@ -85,6 +90,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
       || payload.nextRevision !== revision + 1 || selection?.nodeId !== payload.nodeId) {
       fail('DRAFT_OUTCOME_UNKNOWN'); return;
     }
+    editableIds.set(payload.nodeId, pending.request.newText);
     revision = payload.nextRevision;
     selection = Object.freeze({ identity, revision, nodeId: payload.nodeId });
     pending.finish('applied');
@@ -98,7 +104,21 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     if (payload.outcome !== 'applied' || status !== 'ready' || revision !== 1 || payload.nextRevision !== 2 || selection !== null) {
       fail('DRAFT_RESTORE_OUTCOME_UNKNOWN'); return;
     }
+    for (const change of pending.request.changes) editableIds.set(change.nodeId, change.newText);
     revision = 2; pending.finish('applied');
+    for (const listener of listeners) listener({ kind: 'selection', identity, revision, nodeId: null });
+  };
+  const onHistory = (event: IpcMainEvent, payload: unknown): void => {
+    if (!active() || !acceptsPreviewSender(preview, event) || !isMappingHistoryResult(payload) || !sameMapping(payload.identity, identity)) return;
+    const pending = historical;
+    if (!pending || pending.request.requestId !== payload.requestId || pending.request.nodeId !== payload.nodeId
+      || pending.request.revision !== payload.revision) return;
+    if (payload.outcome === 'rejected') { pending.finish('rejected'); return; }
+    if (payload.outcome !== 'applied' || status !== 'ready' || revision !== payload.revision || payload.nextRevision !== revision + 1) {
+      fail('HISTORY_OUTCOME_UNKNOWN'); return;
+    }
+    editableIds.set(payload.nodeId, pending.request.newText);
+    revision = payload.nextRevision; selection = null; pending.finish('applied');
     for (const listener of listeners) listener({ kind: 'selection', identity, revision, nodeId: null });
   };
   const close = (): void => {
@@ -111,6 +131,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     ipcMain.removeListener(MAPPING_CHECK_RESULT, onCheck);
     ipcMain.removeListener(MAPPING_APPLY_RESULT, onApply);
     ipcMain.removeListener(MAPPING_RESTORE_RESULT, onRestore);
+    ipcMain.removeListener(MAPPING_HISTORY_RESULT, onHistory);
     preview.contents.removeListener('destroyed', close);
     signal.removeEventListener('abort', close);
     try { if (!preview.contents.isDestroyed()) preview.contents.send(MAPPING_REVOKE, identity); }
@@ -118,7 +139,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
   };
   const timeout = setTimeout(() => fail('MAPPING_BIND_TIMEOUT'), 3000);
   editGuard = createEditGuard(preview, identity, {
-    ready: () => active() && status === 'ready', mutating: () => !!mutation || !!restoration,
+    ready: () => active() && status === 'ready', mutating: () => !!mutation || !!restoration || !!historical,
     knownId: (nodeId) => editableIds.has(nodeId),
     selection: () => selection, revision: () => revision, fail,
     transition: (nodeId, nextRevision) => {
@@ -132,9 +153,12 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
   ipcMain.on(MAPPING_CHECK_RESULT, onCheck);
   ipcMain.on(MAPPING_APPLY_RESULT, onApply);
   ipcMain.on(MAPPING_RESTORE_RESULT, onRestore);
+  ipcMain.on(MAPPING_HISTORY_RESULT, onHistory);
   preview.contents.once('destroyed', close);
   signal.addEventListener('abort', close, { once: true });
-  try { preview.contents.send(MAPPING_INSTALL, { identity, tree: source.tree }); }
+  try { preview.contents.send(MAPPING_INSTALL, { identity, tree: source.tree, ...(source.lineage ? {
+    emptyTextIndices: source.nodes.filter(node => node.editable && node.startByte === node.endByte).map(node => node.treeIndex),
+  } : {}) }); }
   catch { close(); throw new Error('MAPPING_CLOSED'); }
   await bound;
   clearTimeout(timeout);
@@ -143,6 +167,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     identity, source,
     get status() { return status; },
     get reason() { return reason; },
+    get revision() { return revision; },
     get selection(): MappingSelection | null { return active() && status === 'ready' ? selection : null; },
     get editing() { return editGuard!.state; },
     beginEditing: editGuard.begin, finishEditing: editGuard.finish, onEditState: editGuard.onState,
@@ -150,7 +175,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     // A point-in-time identity check, not a write lease. applyText performs its own
     // synchronous registry check after Main has prepared a verified byte candidate.
     validateSelection(candidate: MappingSelection): Promise<boolean> {
-      if (!active() || status !== 'ready' || restoration || checks.size >= 8 || !sameMapping(candidate.identity, identity)
+      if (!active() || status !== 'ready' || restoration || historical || checks.size >= 8 || !sameMapping(candidate.identity, identity)
         || candidate.nodeId !== selection?.nodeId || candidate.revision !== selection.revision) return Promise.resolve(false);
       return new Promise((resolveCheck) => {
         const request = Object.freeze({ ...candidate, requestId: randomUUID() });
@@ -162,7 +187,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     },
     applyText(candidate: MappingSelection, expectedText: string, newText: string): Promise<MappingApplyOutcome> {
       const request = Object.freeze({ ...candidate, requestId: randomUUID(), expectedText, newText });
-      if (!active() || status !== 'ready' || mutation || restoration || editGuard?.busy || !isMappingApply(request) || !sameMapping(candidate.identity, identity)
+      if (!active() || status !== 'ready' || mutation || restoration || historical || editGuard?.busy || !isMappingApply(request) || !sameMapping(candidate.identity, identity)
         || candidate.nodeId !== selection?.nodeId || candidate.revision !== selection.revision) return Promise.resolve('rejected');
       return new Promise((resolveApply) => {
         const deadline = setTimeout(() => fail('DRAFT_OUTCOME_UNKNOWN'), 2000);
@@ -176,7 +201,7 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
     restoreTexts(changes: readonly MappingRestoreChange[]): Promise<MappingApplyOutcome> {
       const request: MappingRestore = Object.freeze({ identity, requestId: randomUUID(), revision,
         changes: Object.freeze(changes.map(change => Object.freeze({ ...change }))) });
-      if (!active() || status !== 'ready' || revision !== 1 || selection !== null || mutation || restoration
+      if (!active() || status !== 'ready' || revision !== 1 || selection !== null || mutation || restoration || historical
         || editGuard?.busy || editGuard?.state !== null || !isMappingRestore(request)
         || request.changes.some(change => editableIds.get(change.nodeId) !== change.expectedText)) return Promise.resolve('rejected');
       return new Promise(resolveRestore => {
@@ -184,6 +209,17 @@ export async function createPreviewMapping(outputRoot: string, preview: ProjectP
         const finish = (outcome: MappingApplyOutcome): void => { clearTimeout(deadline); restoration = undefined; resolveRestore(outcome); };
         restoration = { request, finish };
         try { preview.contents.send(MAPPING_RESTORE, request); } catch { fail('DRAFT_RESTORE_OUTCOME_UNKNOWN'); }
+      });
+    },
+    applyHistory(expectedRevision: number, change: MappingRestoreChange): Promise<MappingApplyOutcome> {
+      const request = Object.freeze({ ...change, identity, requestId: randomUUID(), revision: expectedRevision });
+      if (!active() || status !== 'ready' || mutation || restoration || historical || editGuard?.busy || editGuard?.state !== null
+        || revision !== expectedRevision || !isMappingHistory(request) || editableIds.get(change.nodeId) !== change.expectedText) return Promise.resolve('rejected');
+      return new Promise(resolveHistory => {
+        const deadline = setTimeout(() => fail('HISTORY_OUTCOME_UNKNOWN'), 2000);
+        const finish = (outcome: MappingApplyOutcome): void => { clearTimeout(deadline); historical = undefined; resolveHistory(outcome); };
+        historical = { request, finish };
+        try { preview.contents.send(MAPPING_HISTORY, request); } catch { fail('HISTORY_OUTCOME_UNKNOWN'); }
       });
     },
     close,

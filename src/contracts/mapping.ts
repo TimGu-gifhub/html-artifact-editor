@@ -1,6 +1,8 @@
 import { isPreviewIdentity } from './preview.ts';
 import type { PreviewIdentity } from './preview.ts';
 import type { SourceTree } from './source-tree.ts';
+import { HTML_NAMESPACE, MAX_TREE_NODES } from './source-tree.ts';
+import { MAX_DRAFT_INTENTS } from './draft-checkpoint.ts';
 
 export const MAPPING_INSTALL = 'hae:mapping-install';
 export const MAPPING_REVOKE = 'hae:mapping-revoke';
@@ -10,7 +12,7 @@ export const MAPPING_CHECK_RESULT = 'hae:mapping-check-result';
 export const MAPPING_APPLY = 'hae:mapping-apply';
 export const MAPPING_APPLY_RESULT = 'hae:mapping-apply-result';
 export type MappingIdentity = Readonly<{ preview: PreviewIdentity; documentId: string; baseHash: string }>;
-export type MappingInstall = Readonly<{ identity: MappingIdentity; tree: SourceTree }>;
+export type MappingInstall = Readonly<{ identity: MappingIdentity; tree: SourceTree; emptyTextIndices?: readonly number[] }>;
 export type MappingEvent = Readonly<{ identity: MappingIdentity; revision: number }> & (
   | Readonly<{ kind: 'ready'; editableCount: number }>
   | Readonly<{ kind: 'invalidated'; reason: MappingFailure }>
@@ -38,6 +40,25 @@ export function sameMapping(a: MappingIdentity, b: MappingIdentity): boolean {
   return a.documentId === b.documentId && a.baseHash === b.baseHash
     && a.preview.sessionId === b.preview.sessionId && a.preview.generation === b.preview.generation
     && a.preview.mode === b.preview.mode && a.preview.version === b.preview.version;
+}
+// Main-to-isolated-preload only. These are positions in a freshly proven tree,
+// never source offsets. The registry must first match the actual DOM with these
+// missing Texts omitted, before it may install any empty objects.
+export function isMappingInstall(value: unknown): value is MappingInstall {
+  if (!object(value) || !isMappingIdentity(value.identity) || !Array.isArray(value.tree) || !value.tree.length
+    || value.tree.length > MAX_TREE_NODES || Object.keys(value).some(key => !['identity', 'tree', 'emptyTextIndices'].includes(key))) return false;
+  if (!Object.hasOwn(value, 'emptyTextIndices')) return true;
+  if (!Array.isArray(value.emptyTextIndices) || value.emptyTextIndices.length > MAX_DRAFT_INTENTS) return false;
+  let previous = -1;
+  for (const index of value.emptyTextIndices) {
+    if (!Number.isSafeInteger(index) || index <= previous || index < 1 || index >= value.tree.length) return false;
+    const node = value.tree[index]; const parent = node && value.tree[node.parent];
+    if (!node || node.kind !== 'text' || node.value !== '' || node.editable !== true || node.readOnlyReason !== null
+      || node.nodeId !== `n${MAX_TREE_NODES + index}` || !Number.isSafeInteger(node.parent) || node.parent >= index || node.parent < 0
+      || !parent || parent.kind !== 'element' || parent.namespace !== HTML_NAMESPACE) return false;
+    previous = index;
+  }
+  return true;
 }
 export function isMappingEvent(value: unknown): value is MappingEvent {
   if (!object(value) || !isMappingIdentity(value.identity) || !revision(value.revision) || Object.keys(value).length !== 4) return false;

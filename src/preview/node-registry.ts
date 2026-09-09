@@ -1,14 +1,17 @@
 import { HTML_NAMESPACE, MAX_TREE_DEPTH, MAX_TREE_NODES, orderedAttributes } from '../contracts/source-tree.ts';
 import type { SourceTree, TreeNode } from '../contracts/source-tree.ts';
 import type { MappingApply, MappingApplyResult, MappingCheck, MappingEvent, MappingFailure, MappingIdentity } from '../contracts/mapping.ts';
-import { sameMapping } from '../contracts/mapping.ts';
+import { isMappingInstall, sameMapping } from '../contracts/mapping.ts';
 import type { MappingEditIntent, MappingEditRequest, MappingEditResult } from '../contracts/edit-guard.ts';
 import type { MappingRestore, MappingRestoreResult } from '../contracts/mapping-restore.ts';
 import { isMappingRestore } from '../contracts/mapping-restore.ts';
+import { isMappingHistory } from '../contracts/mapping-history.ts';
+import type { MappingHistory, MappingHistoryResult } from '../contracts/mapping-history.ts';
 
 // Called only from the isolated preload. There is no page-world bridge or marker.
 export function createNodeRegistry(root: Document, identity: MappingIdentity, expected: SourceTree,
-  emit: (event: MappingEvent) => void, emitIntent: (intent: MappingEditIntent) => void = () => {}) {
+  emit: (event: MappingEvent) => void, emitIntent: (intent: MappingEditIntent) => void = () => {},
+  emptyTextIndices: readonly number[] = []) {
   let revision = 0;
   let active = true;
   let selected: string | null = null;
@@ -52,8 +55,8 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
       || selection.anchorNode?.nodeType !== Node.TEXT_NODE);
   };
   const onSelectionChange = (): void => { if (selected && crossesText()) select(null); };
-  const hasGeneratedContent = (text: Node): boolean => {
-    for (let element = text.parentElement; element; element = element.parentElement) {
+  const hasGeneratedAncestor = (start: Element | null): boolean => {
+    for (let element = start; element; element = element.parentElement) {
       for (const pseudo of ['::before', '::after', '::marker']) {
         const content = root.defaultView!.getComputedStyle(element, pseudo).content;
         if (content && content !== 'none' && content !== 'normal' && content !== '""') return true;
@@ -61,6 +64,7 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
     }
     return false;
   };
+  const hasGeneratedContent = (text: Node): boolean => hasGeneratedAncestor(text.parentElement);
   const onClick = (event: MouseEvent): void => {
     if (!event.isTrusted || !drain() || event.button !== 0) return;
     if (crossesText()) { select(null); return; }
@@ -81,11 +85,13 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
     select(nodeId);
   };
   observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
-  const stack: { node: Node; parent: number; depth: number }[] = [{ node: root, parent: -1, depth: 0 }];
-  let position = 0;
-  try {
+  const matchTree = (omitted: ReadonlySet<number>): Map<number, Node> => {
+    const objects = new Map<number, Node>();
+    const stack: { node: Node; parent: number; depth: number }[] = [{ node: root, parent: -1, depth: 0 }];
+    let position = 0;
     while (stack.length && active) {
       const { node, parent, depth } = stack.pop()!;
+      while (omitted.has(position)) ++position;
       const index = position++;
       if (index >= MAX_TREE_NODES || depth > MAX_TREE_DEPTH) { invalidate('UNSUPPORTED_DOM'); break; }
       const source = expected[index];
@@ -112,15 +118,55 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
       else if (node.nodeType === Node.TEXT_NODE && source?.kind === 'text') {
         actual = { parent, kind: 'text', value: node.nodeValue ?? '', nodeId: source.nodeId,
           editable: source.editable, readOnlyReason: source.readOnlyReason };
-        if (source.editable) {
-          if (byId.has(source.nodeId)) { invalidate('TREE_MISMATCH'); break; }
-          byId.set(source.nodeId, node as Text); byObject.set(node as Text, source.nodeId); valueById.set(source.nodeId, source.value);
-        }
       } else { invalidate('TREE_MISMATCH'); break; }
       if (JSON.stringify(actual) !== JSON.stringify(source)) { invalidate('TREE_MISMATCH'); break; }
+      objects.set(index, node);
       for (let i = children.length - 1; i >= 0; i--) stack.push({ node: children[i]!, parent: index, depth: depth + 1 });
     }
+    while (omitted.has(position)) ++position;
     if (active && position !== expected.length) invalidate('TREE_MISMATCH');
+    return objects;
+  };
+  try {
+    if (!isMappingInstall({ identity, tree: expected, emptyTextIndices })) invalidate('TREE_MISMATCH');
+    const omitted = new Set(emptyTextIndices);
+    let objects = matchTree(omitted);
+    if (omitted.size && drain()) {
+      const following = new Map<number, Node>();
+      const plans: { index: number; parent: Element; before: Node | null }[] = [];
+      // Plan against the entire verified DOM, before the first insertion. The
+      // nearest surviving sibling is an object, never a selector or a text search.
+      for (let index = expected.length - 1; index >= 0; --index) {
+        const source = expected[index]!;
+        if (!omitted.has(index)) { following.set(source.parent, objects.get(index)!); continue; }
+        const parent = objects.get(source.parent); const before = following.get(source.parent) ?? null;
+        if (!parent || parent.nodeType !== Node.ELEMENT_NODE || !parent.isConnected || parent.getRootNode() !== root
+          || (before && before.parentNode !== parent) || hasGeneratedAncestor(parent as Element)) {
+          invalidate('UNSUPPORTED_DOM'); break;
+        }
+        plans.push({ index, parent: parent as Element, before });
+      }
+      for (const { parent, before } of plans.reverse()) {
+        if (!drain()) break;
+        const previous = before ? before.previousSibling : parent.lastChild;
+        const node = root.createTextNode('');
+        parent.insertBefore(node, before);
+        const records = observer.takeRecords(); const record = records[0];
+        if (records.length !== 1 || record?.type !== 'childList' || record.target !== parent
+          || record.addedNodes.length !== 1 || record.addedNodes[0] !== node || record.removedNodes.length !== 0
+          || record.previousSibling !== previous || record.nextSibling !== before || node.parentNode !== parent
+          || node.data !== '' || node.getRootNode() !== root) { invalidate('DOM_MUTATED'); break; }
+      }
+      if (drain()) objects = matchTree(new Set());
+    }
+    if (drain()) {
+      for (const [index, node] of objects) {
+        const source = expected[index]!;
+        if (source.kind !== 'text' || !source.editable) continue;
+        if (byId.has(source.nodeId)) { invalidate('TREE_MISMATCH'); break; }
+        byId.set(source.nodeId, node as Text); byObject.set(node as Text, source.nodeId); valueById.set(source.nodeId, source.value);
+      }
+    }
     if (drain()) {
       root.addEventListener('click', onClick, true);
       root.addEventListener('selectionchange', onSelectionChange);
@@ -163,6 +209,26 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
           valueById.set(change.nodeId, change.newText);
         }
         ++revision; return result('applied');
+      } catch { invalidate('DOM_MUTATED'); return result('unknown'); }
+    },
+    history(request: MappingHistory): MappingHistoryResult {
+      const result = (outcome: MappingHistoryResult['outcome']): MappingHistoryResult => ({ identity,
+        requestId: request.requestId, nodeId: request.nodeId, revision: request.revision, nextRevision: revision, outcome });
+      if (!isMappingHistory(request) || !drain() || editToken || !sameMapping(request.identity, identity)
+        || request.revision !== revision) return result('rejected');
+      const node = byId.get(request.nodeId);
+      if (!node || !node.isConnected || node.getRootNode() !== root || byObject.get(node) !== request.nodeId
+        || node.data !== request.expectedText || valueById.get(request.nodeId) !== request.expectedText
+        || hasGeneratedContent(node)) return result('rejected');
+      try {
+        node.data = request.newText;
+        const records = observer.takeRecords();
+        if (records.length !== 1 || records[0]!.type !== 'characterData' || records[0]!.target !== node
+          || node.data !== request.newText || !node.isConnected || node.getRootNode() !== root) {
+          invalidate('DOM_MUTATED'); return result('unknown');
+        }
+        valueById.set(request.nodeId, request.newText); selected = null; ++revision;
+        return result('applied');
       } catch { invalidate('DOM_MUTATED'); return result('unknown'); }
     },
     edit(request: MappingEditRequest): MappingEditResult {

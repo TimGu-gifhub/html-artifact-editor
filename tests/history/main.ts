@@ -17,6 +17,7 @@ import { createDraftCheckpointStore } from '../../src/main/storage/checkpoints.t
 import { createOriginalSaver } from '../../src/main/storage/original.ts';
 import { openSaveSource } from '../../src/platform/save-source.ts';
 import { createWindowsReplacer } from '../../src/platform/windows-replacement.ts';
+import { runHistoryPreview } from './preview.ts';
 
 registerSchemes(); app.enableSandbox(); app.on('before-quit', event => event.preventDefault());
 const outputRoot = resolve(__dirname, '..'); const results = resolve(outputRoot, '../test-results');
@@ -168,9 +169,10 @@ async function run(): Promise<void> {
     } finally { await previews.close(); }
     pass('restoring a saved empty Text containing script/image-looking text remains literal after native Save and real Chromium reopening, including read-only interactive preview');
   } else pending.push('Windows saved empty Text restoration with script/image-looking text');
+  await runHistoryPreview(outputRoot, pass);
   evidence.original = hash(original); evidence.css = hash(css);
   await writeFile(join(results, 'history.json'), JSON.stringify({ status: 'passed', passed, pending, evidence,
-    scope: 'Pure history, production workers and Main native Save ports; no Workspace history command, durable history store or product UI',
+    scope: 'Pure history, production workers, Main native Save ports and isolated historical Text installation/mutation; no Workspace history command, durable history store or product UI',
     commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     dirty: !!execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim(),
     platform: { os: type(), release: release(), arch: arch() }, versions: process.versions }, null, 2));

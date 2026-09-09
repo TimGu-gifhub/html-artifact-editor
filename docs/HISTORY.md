@@ -1,6 +1,6 @@
 # 逻辑历史与保存后的来源重建
 
-日期：2026-09-09；HAE-011 第七阶段。已实现纯核心历史、保存点重建、私有逻辑记录的验证/往返，以及真实 Worker、Windows 保存事务和 Chromium 重开实验。正常应用与 Workspace 尚无历史命令，持久化完整历史的存储适配器、空 Text 的 Preview 安装和产品控件仍待接入。此文件不代表 M2 验收完成。
+日期：2026-09-09；HAE-011 第七至八阶段。已实现纯核心历史、保存点重建、私有逻辑记录的验证/往返、隔离 Preview 空 Text 安装及历史文字确认，以及真实 Worker、Windows 保存事务和 Chromium 实验。正常应用与 Workspace 尚无历史命令，输入协调、完整历史存储及产品控件仍待接入。此文件不代表 M2 验收完成。
 
 ## 逻辑操作与确认
 
@@ -34,7 +34,17 @@ rebaseSaved 是纯内存操作，不能检查磁盘提交记录。Main 必须先
 
 只有此证明产生的空目标允许 `startByte === endByte`。它仍使用纯文本编码、输出大小、未修改字节、重解析和完整语义树检查；普通 SourceIndex 或伪造空节点继续拒绝。多个空目标不会把后续节点编号偏移误当作另一个同文目标。清空导致解析器移动其他节点时仍拒绝，例如缺少明确 body 边界的某些首段与注释组合。
 
-lineage 不是外部输入能力或已认证的文件来源。最初字节须来自 Main 保留的打开快照，或已验证文件身份、schema、hash 的私有历史记录；页面和 UI 不能提交这些字节、值或位置。当前实现没有改变 DOM；后续 Preview 接线还必须先验证当前真实 DOM，再建立受控空 Text 身份及已有的只读支持检查。
+lineage 不是外部输入能力或已认证的文件来源。最初字节须来自 Main 保留的打开快照，或已验证文件身份、schema、hash 的私有历史记录；页面和 UI 不能提交这些字节、值或位置。
+
+## 隔离 Preview 的空 Text 与历史操作
+
+Main [createPreviewMapping](../src/main/preview/source-mapping.ts) 可在第四参数接收内部 lineage。有限 Parser Worker 重建来源证明后，Main 保留最初字节/逻辑值的不可变副本，只把新树及已证明的 emptyTextIndices 发给隔离 preload。索引指向本次预期树，不是 HTML 范围、选择器或页面可提交的写入位置。
+
+[安装合同](../src/contracts/mapping.ts) 限定最多 1000 个有序、唯一的空位置，必须是新的空 Text 身份、HTML 父元素、可编辑且无只读原因。[registry](../src/preview/node-registry.ts) 先省略这些位置匹配整个真实 DOM；匹配失败、绑定前发生过 DOM 改动、Shadow DOM、生成内容等不受支持的目标都在插入前拒绝。全部目标先验证父对象和后继兄弟对象，再同步逐个插入空 Text；观察器保持连接，每次只消费这一个新增 Text 对应的 childList 记录。随后重新匹配完整树，才登记对象并发布 ready。仅发送增强后的树不能创建空节点。
+
+Main `applyHistory(mappingRevision, change)` 接收已准备的单 Text 历史变更。它与普通 Apply、首次恢复和编辑 guard 互斥；当前映射版本、节点旧值和规范文字必须一致。隔离侧独立检查真实 Text 对象、连接关系、根、旧值和生成内容，然后核对唯一 characterData 记录。该操作不要求目标被点击选中，因此可以恢复没有可点击文字的空节点；成功后清空选择并推进映射版本。普通 Apply 和首次恢复也同步更新 Main 保留的旧值。
+
+此方法不生成 Patch、不推进逻辑历史、不处理未应用输入，也不写 HTML。调用方须先冻结版本并验证 Worker 候选，再等待 applied 才 commit 历史；rejected 保留原记录，unknown 必须同时保留旧历史和待确认候选，映射失效后不能自动重试。编辑 token 存在时直接拒绝；后续 InputController/Workspace 接线还须处理组合态、输入焦点与应用/取消决定。新通道仅在 Main 与隔离 preload 间使用，没有增加可信 UI 或页面 API。
 
 ## 私有记录与边界
 
@@ -56,6 +66,6 @@ HistoryRecord 是严格的 v1 **历史记录**，与现有 v1 **草稿检查点*
 
 ## 执行证据与下一步
 
-[来源测试](../tests/unit/history-source.test.mjs) 与 [历史测试](../tests/unit/text-history.test.mjs) 覆盖重复文字、多个空目标、Unicode/BOM/实体、pre 与混合行尾、一万行来源、变长后的新范围、保存点/分支、迟到/伪造准备、损坏记录及容量。新历史候选由既有 Draft/Diff Worker 重建；[Electron 实验](../tests/history/main.ts) 使用自制文件和实际 Main/Windows 保存端口验证明确保存、取消、外部冲突、未知结果，以及 Chromium 重开后的字节/文字安全。它没有调用 Workspace Undo/Redo 或产品 UI。具体命令、结果及首次失败证据见 [HAE-011](implementation/HAE-011.md)。
+[来源测试](../tests/unit/history-source.test.mjs) 与 [历史测试](../tests/unit/text-history.test.mjs) 覆盖重复文字、多个空目标、Unicode/BOM/实体、pre 与混合行尾、一万行来源、变长后的新范围、保存点/分支、迟到/伪造准备、损坏记录及容量。新历史候选由既有 Draft/Diff Worker 重建；[Electron 保存实验](../tests/history/main.ts) 验证显式保存、取消、外部冲突、未知结果，以及 Chromium 重开后的字节/文字安全。[预览实验](../tests/history/preview.ts) 验证缺席 Text 的安装、反向文字确认、原生选择与编辑锁、确认丢失、来源/DOM 变化及外来确认拒绝。它们使用自制文件，没有调用 Workspace Undo/Redo 或产品 UI。具体命令、结果及首次失败证据见 [HAE-011](implementation/HAE-011.md)。
 
-下一步将此核心接入 Main 文档/输入历史命令，完成空 Text 的隔离 Preview 安装与持久化完整历史。产品界面仍须由 Kimi 在选稿后实施。真实 IME/对话框/报告、Windows 10/macOS、全尺寸性能、实际磁盘满和断电均未验收；HAE-011 与 M2 保持未完成。
+下一步将此核心及隔离 Preview 接入 Main 文档/输入历史命令，并持久化完整历史。产品界面仍须由 Kimi 在选稿后实施。真实 IME/对话框/报告、Windows 10/macOS、全尺寸性能、实际磁盘满和断电均未验收；HAE-011 与 M2 保持未完成。

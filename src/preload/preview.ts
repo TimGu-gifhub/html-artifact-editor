@@ -1,12 +1,12 @@
 import { ipcRenderer } from 'electron';
 import { BOOTSTRAP_CHANNEL, CONTRACT_VERSION } from '../contracts/bootstrap.ts';
 import { isPreviewIdentity, PREVIEW_ARGUMENT, PREVIEW_READY_CHANNEL } from '../contracts/preview.ts';
-import { isMappingApply, isMappingCheck, isMappingIdentity, MAPPING_APPLY, MAPPING_APPLY_RESULT, MAPPING_CHECK, MAPPING_CHECK_RESULT, MAPPING_EVENT, MAPPING_INSTALL, MAPPING_REVOKE, sameMapping } from '../contracts/mapping.ts';
+import { isMappingApply, isMappingCheck, isMappingIdentity, isMappingInstall, MAPPING_APPLY, MAPPING_APPLY_RESULT, MAPPING_CHECK, MAPPING_CHECK_RESULT, MAPPING_EVENT, MAPPING_INSTALL, MAPPING_REVOKE, sameMapping } from '../contracts/mapping.ts';
 import type { MappingIdentity, MappingInstall } from '../contracts/mapping.ts';
-import { MAX_TREE_NODES } from '../contracts/source-tree.ts';
 import { createNodeRegistry } from '../preview/node-registry.ts';
 import { isMappingEditRequest, MAPPING_EDIT, MAPPING_EDIT_INTENT, MAPPING_EDIT_RESULT } from '../contracts/edit-guard.ts';
 import { isMappingRestore, MAPPING_RESTORE, MAPPING_RESTORE_RESULT } from '../contracts/mapping-restore.ts';
+import { isMappingHistory, MAPPING_HISTORY, MAPPING_HISTORY_RESULT } from '../contracts/mapping-history.ts';
 
 // Runs in the isolated world. Deliberately exposes nothing to the page world.
 const argument = process.argv.find((value) => value.startsWith(PREVIEW_ARGUMENT));
@@ -32,8 +32,7 @@ if (argument) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchParsedTree, { once: true });
     else watchParsedTree();
     ipcRenderer.on(MAPPING_INSTALL, (_event, message: MappingInstall) => {
-      if (installed || !isMappingIdentity(message?.identity) || !Array.isArray(message.tree)
-        || message.tree.length > MAX_TREE_NODES || document.readyState === 'loading'
+      if (installed || !isMappingInstall(message) || document.readyState === 'loading'
         || message.identity.preview.sessionId !== identity.sessionId
         || message.identity.preview.generation !== identity.generation) return;
       installed = true;
@@ -45,7 +44,7 @@ if (argument) {
         return;
       }
       registry = createNodeRegistry(document, message.identity, message.tree,
-        (event) => ipcRenderer.send(MAPPING_EVENT, event), (intent) => ipcRenderer.send(MAPPING_EDIT_INTENT, intent));
+        (event) => ipcRenderer.send(MAPPING_EVENT, event), (intent) => ipcRenderer.send(MAPPING_EDIT_INTENT, intent), message.emptyTextIndices);
     });
     ipcRenderer.on(MAPPING_CHECK, (_event, request: unknown) => {
       if (!isMappingCheck(request)) return;
@@ -66,6 +65,13 @@ if (argument) {
       if (!isMappingRestore(request) || !mappingIdentity || !sameMapping(request.identity, mappingIdentity)) return;
       ipcRenderer.send(MAPPING_RESTORE_RESULT, registry?.restore(request) ?? {
         identity: request.identity, requestId: request.requestId, revision: request.revision, nextRevision: request.revision, outcome: 'rejected',
+      });
+    });
+    ipcRenderer.on(MAPPING_HISTORY, (_event, request: unknown) => {
+      if (!isMappingHistory(request) || !mappingIdentity || !sameMapping(request.identity, mappingIdentity)) return;
+      ipcRenderer.send(MAPPING_HISTORY_RESULT, registry?.history(request) ?? {
+        identity: request.identity, requestId: request.requestId, nodeId: request.nodeId,
+        revision: request.revision, nextRevision: request.revision, outcome: 'rejected',
       });
     });
     ipcRenderer.on(MAPPING_REVOKE, (_event, value: unknown) => {
