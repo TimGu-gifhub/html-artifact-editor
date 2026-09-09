@@ -6,16 +6,23 @@ import { freezeCandidate } from './prepare.ts';
 
 type Pending = Readonly<{ candidate: PatchCandidate; revision: number }>;
 type Writer = (candidate: PatchCandidate, revision: number) => Promise<CheckpointWrite>;
+type Seed = Pending & Readonly<{ checkpointId: string }>;
 
 // One active write plus the latest pending candidate. Completion is independent
 // of input revisions: background storage must not revoke a user's edit proof.
-export function createDraftPersistence(write: Writer) {
+export function createDraftPersistence(write: Writer, seed?: Seed) {
   let latest: Pending | null = null; let queued: Pending | null = null;
   let writing: Pending | null = null; let active: Promise<void> | null = null;
   let persisted: DraftPersistenceState['persisted'] = null;
   let status: DraftPersistenceState['status'] = 'idle'; let code: string | null = null;
   let cleanupPending = false; let halted = false; let enqueueFailed = false;
   let closing: Promise<DraftPersistenceState> | null = null;
+  if (seed) {
+    if (!isTransactionId(seed.checkpointId) || !Number.isSafeInteger(seed.revision) || seed.revision < 1
+      || seed.revision >= Number.MAX_SAFE_INTEGER) throw new Error('DRAFT_PERSISTENCE_SEED_INVALID');
+    latest = Object.freeze({ candidate: freezeCandidate(seed.candidate), revision: seed.revision });
+    persisted = Object.freeze({ draftRevision: seed.revision, resultHash: latest.candidate.resultHash }); status = 'persisted';
+  }
   const listeners = new Set<() => void>(); const waiters = new Set<(state: DraftPersistenceState) => void>();
   const snapshot = (): DraftPersistenceState => Object.freeze({ status, draftRevision: latest?.revision ?? 1,
     writingRevision: writing?.revision ?? null, queuedRevision: queued?.revision ?? null, persisted,

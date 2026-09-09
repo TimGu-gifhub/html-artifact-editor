@@ -56,6 +56,37 @@ test('drafts publish only after acknowledged mutation; no-op, merging, empty/ref
   assert.deepEqual(Buffer.from(f.session.candidate.bytes), baseline);
   assert.deepEqual(Buffer.from(f.mapping.source.bytes), baseline);
 });
+
+test('restoring a verified candidate preserves source bytes and revision, publishes only after Preview confirmation and does not write a duplicate checkpoint', async () => {
+  const writes = []; const f = setup(undefined, { enqueue: (...args) => writes.push(args) });
+  f.mapping.selection = null;
+  const candidate = createPatchEngine(f.mapping.source, hash).apply({ identity: f.mapping.source.identity,
+    baseHash: f.mapping.source.baseHash, nodeId: f.target.nodeId, expectedText: f.target.decodedText, newText: '恢复 <&> 🧪' });
+  let received; let finish;
+  f.mapping.restoreTexts = value => { received = value; return new Promise(done => { finish = done; }); };
+  const restored = f.session.restore(candidate, 7);
+  assert.equal(f.session.phase, 'applying'); assert.equal(f.session.revision, 1);
+  assert.equal(f.session.candidate.patches.length, 0); assert.deepEqual(received, [{ nodeId: f.target.nodeId, expectedText: 'A & 😀', newText: '恢复 <&> 🧪' }]);
+  finish('applied'); await restored; assert.equal(f.session.revision, 7); assert.equal(f.session.phase, 'idle');
+  assert.deepEqual(Buffer.from(f.session.candidate.bytes), Buffer.from(candidate.bytes)); assert.deepEqual(Buffer.from(f.mapping.source.bytes), baseline);
+  assert.equal(writes.length, 0); await assert.rejects(f.session.restore(candidate, 7), /DRAFT_RESTORE_UNAVAILABLE/); f.session.close();
+});
+
+test('invalid recovery candidates never reach Preview; rejected or unknown restoration retains baseline and the uncertain candidate when needed', async () => {
+  for (const outcome of ['rejected', 'unknown', 'throw']) {
+    const f = setup(); f.mapping.selection = null; let calls = 0;
+    const candidate = createPatchEngine(f.mapping.source, hash).apply({ identity: f.mapping.source.identity,
+      baseHash: f.mapping.source.baseHash, nodeId: f.target.nodeId, expectedText: f.target.decodedText, newText: 'B' });
+    f.mapping.restoreTexts = async () => { calls++; if (outcome === 'throw') throw Error('lost renderer'); return outcome; };
+    const corrupt = { ...candidate, bytes: new Uint8Array(candidate.bytes.length) };
+    await assert.rejects(f.session.restore(corrupt, 2)); await assert.rejects(f.session.restore(candidate, Number.MAX_SAFE_INTEGER)); assert.equal(calls, 0);
+    await assert.rejects(f.session.restore(candidate, 2), /DRAFT_RESTORE_REJECTED|DRAFT_RESTORE_OUTCOME_UNKNOWN/);
+    assert.equal(calls, 1); assert.equal(f.session.revision, 1); assert.deepEqual(Buffer.from(f.session.candidate.bytes), baseline);
+    assert.equal(f.session.phase, outcome === 'rejected' ? 'idle' : 'uncertain');
+    if (outcome !== 'rejected') assert.equal(f.session.uncertainCandidate.resultHash, candidate.resultHash);
+    f.session.close();
+  }
+});
 test('only acknowledged changed Apply requests enqueue persistence, including return to baseline; rejected/unknown edits never masquerade as confirmed', async () => {
   const writes = []; const f = setup(undefined, { enqueue: (value, revision) => { writes.push({ value, revision }); } });
   await f.session.apply(f.input('A & 😀')); assert.equal(writes.length, 0);

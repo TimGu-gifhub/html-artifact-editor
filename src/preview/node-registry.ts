@@ -3,6 +3,8 @@ import type { SourceTree, TreeNode } from '../contracts/source-tree.ts';
 import type { MappingApply, MappingApplyResult, MappingCheck, MappingEvent, MappingFailure, MappingIdentity } from '../contracts/mapping.ts';
 import { sameMapping } from '../contracts/mapping.ts';
 import type { MappingEditIntent, MappingEditRequest, MappingEditResult } from '../contracts/edit-guard.ts';
+import type { MappingRestore, MappingRestoreResult } from '../contracts/mapping-restore.ts';
+import { isMappingRestore } from '../contracts/mapping-restore.ts';
 
 // Called only from the isolated preload. There is no page-world bridge or marker.
 export function createNodeRegistry(root: Document, identity: MappingIdentity, expected: SourceTree,
@@ -133,6 +135,36 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
   };
   return {
     check,
+    restore(request: MappingRestore): MappingRestoreResult {
+      const result = (outcome: MappingRestoreResult['outcome']): MappingRestoreResult => ({
+        identity, requestId: request.requestId, revision: request.revision, nextRevision: revision, outcome,
+      });
+      // Restoration is only for a fresh, unpublished mapping. It never invents a
+      // native selection or reuses this operation to replace an active draft.
+      if (!isMappingRestore(request) || !drain() || revision !== 1 || selected !== null || editToken
+        || !sameMapping(request.identity, identity)) return result('rejected');
+      const targets: { change: MappingRestore['changes'][number]; node: Text }[] = [];
+      for (const change of request.changes) {
+        const node = byId.get(change.nodeId);
+        if (!node || !node.isConnected || node.getRootNode() !== root || byObject.get(node) !== change.nodeId
+          || node.data !== change.expectedText || valueById.get(change.nodeId) !== change.expectedText || hasGeneratedContent(node)) return result('rejected');
+        targets.push({ change, node });
+      }
+      try {
+        // Check every target before the first assignment. Keep the observer on
+        // through this synchronous batch and account for each native Text write.
+        for (const { change, node } of targets) {
+          node.data = change.newText;
+          const records = observer.takeRecords();
+          if (records.length !== 1 || records[0]!.type !== 'characterData' || records[0]!.target !== node
+            || node.data !== change.newText || !node.isConnected || node.getRootNode() !== root) {
+            invalidate('DOM_MUTATED'); return result('unknown');
+          }
+          valueById.set(change.nodeId, change.newText);
+        }
+        ++revision; return result('applied');
+      } catch { invalidate('DOM_MUTATED'); return result('unknown'); }
+    },
     edit(request: MappingEditRequest): MappingEditResult {
       const result = (accepted: boolean): MappingEditResult => ({
         identity, requestId: request.requestId, nodeId: request.nodeId, revision: request.revision,

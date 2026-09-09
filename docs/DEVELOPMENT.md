@@ -61,6 +61,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:project` | 生产 preload/IPC 上的目录授权、嵌套资源、CSP/API 诊断、入口切换/另存/撤销及根目录替换；选择器仍为 Main 测试回调 |
 | `npm run test:storage` | Electron 内嵌 Node 执行真实文件准备、Windows 原生替换/备份恢复、权限/占用、事务故障及进程强杀；仅覆盖自制临时 HTML，无产品窗口 |
 | `npm run test:save-session` | Windows 真实 Electron 窗口、生产 IPC、原文件保存/重建、崩溃/未知结果/外部冲突/清理警告；无产品控件或真实 IME |
+| `npm run test:recovery` | 真实 Electron 的恢复列表/重新授权/新映射安装、进程所有权、恢复后编辑与 Windows 保存去重；自制空白 transport 页面，无产品验收 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run preview:directory` | 原生选择根目录及其中 HTML，保留嵌套相对资源路径；只读校稿预览，诊断输出到终端 |
@@ -68,7 +69,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 草稿恢复 → 许可证 |
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 

@@ -117,6 +117,8 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
   };
   const api: WorkspaceAPI = Object.freeze({
     read: () => request({ kind: 'read' }),
+    listRecovery: () => request({ kind: 'recovery-list' }),
+    restore: (recoverySessionId, stateRevision, sourceMode = 'file') => request({ kind: 'restore', recoverySessionId, stateRevision, sourceMode }),
     open: (stateRevision) => request({ kind: 'open', stateRevision }),
     openDirectory: (stateRevision) => request({ kind: 'open-directory', stateRevision }),
     switchEntry: (documentId, stateRevision) => request({ kind: 'switch-entry', documentId, stateRevision }),

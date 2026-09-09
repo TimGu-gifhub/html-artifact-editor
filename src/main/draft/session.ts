@@ -5,8 +5,10 @@ import type { PreviewMapping } from '../preview/source-mapping.ts';
 import { freezeCandidate, prepareDraft } from './prepare.ts';
 import type { NewFileOutcome, NewFileWriter } from '../../platform/new-file.ts';
 import type { OriginalSaveResult } from '../storage/original.ts';
+import { createHash } from 'node:crypto';
+import { captureTextIntents } from '../../core/history/checkpoint.ts';
 
-type MappingPort = Pick<PreviewMapping, 'source' | 'identity' | 'status' | 'selection' | 'applyText'>;
+type MappingPort = Pick<PreviewMapping, 'source' | 'identity' | 'status' | 'selection' | 'applyText' | 'restoreTexts'>;
 type Phase = 'idle' | 'preparing' | 'applying' | 'saving' | 'uncertain' | 'closed';
 export function createDraftSession(outputRoot: string, mapping: MappingPort, prepare = prepareDraft,
   persistence?: Readonly<{ enqueue: (candidate: PatchCandidate, revision: number) => void }>) {
@@ -29,6 +31,24 @@ export function createDraftSession(outputRoot: string, mapping: MappingPort, pre
     get revision() { return revision; },
     get phase(): Phase { return phase; },
     textFor,
+    async restore(candidate: PatchCandidate, restoredRevision: number): Promise<void> {
+      if (closed || phase !== 'idle' || revision !== 1 || current.patches.length || mapping.status !== 'ready' || mapping.selection !== null
+        || !Number.isSafeInteger(restoredRevision) || restoredRevision < 1 || restoredRevision >= Number.MAX_SAFE_INTEGER) throw new Error('DRAFT_RESTORE_UNAVAILABLE');
+      const frozen = freezeCandidate(candidate);
+      const intents = captureTextIntents(source, frozen, bytes => createHash('sha256').update(bytes).digest('hex'));
+      if (!intents.length) throw new Error('DRAFT_RESTORE_EMPTY');
+      phase = 'applying';
+      try {
+        let outcome;
+        try { outcome = await mapping.restoreTexts(intents.map(({ nodeId, expectedText, newText }) => ({ nodeId, expectedText, newText }))); }
+        catch { outcome = 'unknown'; }
+        if (outcome === 'unknown' || closed) { uncertain = frozen; phase = 'uncertain'; throw new Error('DRAFT_RESTORE_OUTCOME_UNKNOWN'); }
+        if (outcome !== 'applied') throw new Error('DRAFT_RESTORE_REJECTED');
+        current = frozen; revision = restoredRevision;
+        // The existing checkpoint already owns durability. Its validated session
+        // and revision seed the queue when the unpublished document is prepared.
+      } finally { if (!uncertain) phase = closed ? 'closed' : 'idle'; }
+    },
     async apply(input: unknown): Promise<Readonly<{ changed: boolean; draftRevision: number }>> {
       if (closed || phase !== 'idle' || mapping.status !== 'ready') throw new Error('DRAFT_UNAVAILABLE');
       if (!isDraftApply(input) || input.draftRevision !== revision || !sameMapping(input.selection.identity, mapping.identity)) {

@@ -112,6 +112,13 @@ export async function checkDeparture({ use, until, barrier, pass, original, expe
         assert.equal(f.runtime.workspace.snapshot().lastDeparture!.requiresReview, false);
       }
       await f.runtime.reloadUI(); assert.equal((await f.read()).current!.id, f.current().id); await unchanged(f);
+      assert.equal(f.current().mapping.status, 'ready');
+      // Publication must preserve a live mapping after the old operation signal
+      // was revoked; document identity alone does not prove a usable session.
+      f.control.draftStep = async () => {};
+      await f.select('#date'); assert.equal((await f.change('2026-09-09')).ok, true); await f.apply();
+      await f.current().persistence!.settle(); assert.equal(f.current().draft.textFor(f.current().mapping.selection!.nodeId), '2026-09-09');
+      await unchanged(f);
     } finally { hold.release(); }
     pass(`${stage}: actual renderer crash cancels departure before retirement starts or lets Main finish an already authorized marker; production preload reconnects to the settled document`);
   }, true);

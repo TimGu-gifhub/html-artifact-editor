@@ -50,7 +50,7 @@
 
 ## 5. Apply 持久化与会话协调
 
-Main 给 [createWorkspaceSession](../src/main/workspace/session.ts) 提供同目录的 checkpoints 端口后，每份文档创建独立 [持久化队列](../src/main/draft/persistence.ts)，固定打开时 SaveSource、SourceIndex 和文档会话 ID。没有此端口时 current.persistence=null；正常产品入口尚未安装这个端口。
+Main 给 [createWorkspaceSession](../src/main/workspace/session.ts) 提供同目录的 checkpoints 端口后，每份文档创建独立 [持久化队列](../src/main/draft/persistence.ts)，固定打开时 SaveSource、SourceIndex 和 checkpointSessionId。普通打开时它等于文档会话 ID；恢复时沿用原持久化序列，UI 文档身份独立更新。没有此端口时 current.persistence=null；正常产品入口尚未安装这个端口。
 
 确认成功且确有变化的 Apply 同步固定候选后异步启动私有写入。no-op、验证拒绝或 Preview 应用结果 unknown 都不会冒充已确认版本；回到原文的变更仍排入零净变化检查点。队列最多保留一个正在写的候选和一个最新待写候选，后来的 Apply 替代尚未开始的中间版本，不取消或覆盖已经开始的写入。
 
@@ -94,8 +94,24 @@ retired 表示标记已核验；没有该会话记录返回 empty，不生成持
 
 结束操作保留原 record/baseline/seal 和全部 HTML 字节，不释放记录配额。后续清理必须先处理该会话其他记录，不能先移除结束标记及其锚点而留下旧点，否则会丢失会话已结束的证据。当前没有任何自动裁剪、删除或遗留锁处理。
 
-## 8. 后续接线与验收
+## 8. 恢复到窗口
 
-仍待实现恢复列表与 Preview 安装、结束操作失败后的恢复、历史/跨保存撤销重做、源码 Diff 及正常产品状态控件。结束失败/未知时保留的冻结会话目前不能由用户在产品中继续处理；没有强制离开、自动解锁或绕过标记的重试。未应用输入仍是既有 Main 内存状态；没有持久化它，也没有持久化未获 Preview 确认的 uncertainCandidate。解析重建目前由 Main 调用纯核心，Worker 接线与性能预算仍需验证。
+可信 [Workspace API](WORKSPACE_SESSION.md) 的 listRecovery 返回 [纯摘要](../src/contracts/recovery.ts)：entries 中只有 sessionId/name/draftRevision/status/active，另有 locked/reviewRequired。不含路径、目标键、检查点 ID、字节或写入位置；多个并发列表请求共用一次进行中的扫描。未选择源文件时不能核验提交或当前基线，dirty 只说明检查点有净意图，不能直接显示成“可恢复”或“尚未保存”。active 是扫描结束时 Main 的会话占用摘要，恢复时仍重新检查。
+
+restore(sessionId, stateRevision, sourceMode) 要求明确 Main 选择器授权，sourceMode 为 file 或 directory，preload 默认 file；不从记录推导路径，也不把 UI 字符串当作目录权限。单文件模式仍以 HTML 父目录为根，目录模式重新选择根与入口。当前窗口仍适用原有离开确认、版本、组合态、输入冻结和故障保护。
+
+[prepareDocument](../src/main/workspace/document.ts) 生成新 Preview 和 SourceIndex，claim 原持久化序列，再由 resolveLatest 取得最新完整 dirty 候选及 Main 私有核验函数。恢复时重查原始文件身份/hash、逻辑目标和完整候选字节；只接收第 6 节的最新点。隔离 registry 的 [restore 协议](../src/contracts/mapping-restore.ts) 只允许 revision=1、无选择或编辑锁的新映射，一批最多 1000 个唯一 Text、每项新文本 64 Ki UTF-16 单元，整批有源大小限制；不含路径或 offset。所有 DOM 目标与旧值在第一次赋值前核验，保持 MutationObserver 开启并逐项核对实际 Text 写入，完成后映射修订变为 2。它不是页面 API，也不伪造用户点击。
+
+Main 只在收到准确确认后发布内存候选；恢复批次若失败或未知，关闭尚未发布的视图并保留原私有记录，不写 HTML。未知异常可能已经改变候选视图的一部分，不能把内部 DOM 操作宣称为原子事务。安装前后再次核验源版本、最新记录 ID/修订/记录 hash 和完整候选 hash；较新检查点或外部文件变化使安装失败。旧草稿的结束标记已确认而新恢复证明失效时，回滚到保留的旧视图，准确保留 retired 状态和故障原因，冻结旧输入并要求恢复，不把新视图报成已安装。
+
+恢复成功时 current.id、source/mapping 身份均为新值；checkpointSessionId 和草稿修订沿用原记录。队列以已核验候选初始化 persisted，不立即重写检查点；下一次有变化的 Apply 推进原修订序列，之后丢弃也结束该原序列，避免旧点再次出现。显式 Save 继续走备份/提交事务，并以实际 committed 新文件版本阻止重复恢复；保存后使用新基线和新的持久化会话。
+
+持久文档准备通过 [Electron profile 所有权](../src/platform/editor-profile.ts) 排除同 userData 的另一编辑进程；其底层 API 见 [Electron 官方文档](https://www.electronjs.org/docs/latest/api/app#apprequestsingleinstancelockadditionaldata)。[Main 所有权注册表](../src/main/storage/draft-ownership.ts) 按完整私有目录身份链和 sessionId 排除本进程另一窗口/存储对象。进程锁由 Electron 持有至退出，不按 PID/时间删除锁；会话占用只在文档和队列关闭成功后释放。底层只读提取/存储测试端口不自动取得文档所有权；此约束适用于合作的持久编辑进程，并不防御其他同权限程序直接修改私有文件。
+
+打开请求的 abort 只管理准备过程。准备完成交给 Workspace 后，文档持有独立映射生命周期；取消未开始的切换仍由 Workspace 关闭候选，而结束标记开始后的 UI 崩溃不会关闭即将安装的映射。真实 renderer 崩溃测试现已进一步验证重连后仍能选择并 Apply。
+
+## 9. 后续接线与验收
+
+仍待实现产品恢复控件、结束操作失败后的处理、历史/跨保存撤销重做、源码 Diff 及正常产品入口。结束失败/未知时保留的冻结会话目前不能由用户在产品中继续处理；没有强制离开、自动解锁或绕过标记的重试。未应用输入仍是既有 Main 内存状态；没有持久化它，也没有持久化未获 Preview 确认的 uncertainCandidate。检查点候选重建仍由 Main 调用纯核心，Worker 接线与性能预算尚需验证。
 
 证据使用自制文件，覆盖完整候选字节、外部冲突、记录损坏、写入异常、实际进程强杀与原生保存去重。未执行正常产品 UI、真实 IME、Windows 10/macOS、真实磁盘满或断电验收；HAE-011 和 M2 保持未完成。

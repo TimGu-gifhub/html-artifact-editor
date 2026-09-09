@@ -13,6 +13,7 @@ import type { CheckedDirectory } from '../../platform/storage-files.ts';
 import type { SaveSource, SaveTargetState } from '../../platform/save-source.ts';
 import type { createSavePreparationStore } from './preparation.ts';
 import { readDraftHeader, readDraftRetirement } from './draft-records.ts';
+import { draftOwnership } from './draft-ownership.ts';
 
 const STORE_LIMIT = 200 * 1024 * 1024;
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.stringify(value)}\n`);
@@ -51,6 +52,7 @@ const errorCode = (error: unknown): string => {
 // is independently sealed; incomplete writes cannot replace an earlier one.
 export async function createDraftCheckpointStore(path: string, onStep: (step: string) => Promise<void> = async () => {}, saves?: SaveRecords) {
   const root = await checkedDirectory(path); let busy = false;
+  const ownership = draftOwnership(root.identityChain.map(value => `${value.dev}:${value.ino}`).join('/'));
   if (saves && (saves.namespace.length !== root.identityChain.length || saves.namespace.some((entry, index) =>
     entry.dev !== root.identityChain[index]!.dev || entry.ino !== root.identityChain[index]!.ino))) throw new Error('DRAFT_STORAGE_ROOT_MISMATCH');
   const load = async (checkpointId: string) => {
@@ -148,7 +150,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
     if (retirement && matches.some(row => row.header.checkpoint.draftRevision > retirement.draftRevision)) throw new Error('DRAFT_RETIREMENT_INVALID');
     return retirement;
   };
-  const operations = { inspect,
+  const operations = { inspect, claimSession: ownership.claim, isSessionActive: ownership.isActive,
     async catalog(readTarget?: () => Promise<SaveTargetState>) {
       const all = await records(); const groups: CheckpointGroup[] = [];
       const sessions = new Set(all.known.map(row => row.header.checkpoint.sessionId));
@@ -296,7 +298,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       await source.verify(); const candidate = rebuildCheckpoint(index, checkpoint, digest); await source.verify(); await assertActive();
       return candidate;
     },
-    async restoreLatest(sessionId: string, source: SaveSource, index: SourceIndex): Promise<PatchCandidate> {
+    async resolveLatest(sessionId: string, source: SaveSource, index: SourceIndex) {
       if (!isTransactionId(sessionId)) throw new Error('DRAFT_CHECKPOINT_INVALID');
       const select = async () => {
         const catalog = await operations.catalog(source.current);
@@ -307,10 +309,19 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
         return group;
       };
       const before = await select(); const candidate = await operations.restoreCandidate(before.checkpointId!, source, index);
-      const after = await select();
-      if (before.checkpointId !== after.checkpointId || before.draftRevision !== after.draftRevision
-        || before.recordHash !== after.recordHash || candidate.resultHash !== after.resultHash) throw new Error('DRAFT_CHECKPOINT_CHANGED');
-      return candidate;
+      const verifySource = async (): Promise<void> => {
+        try { await source.verify(); } catch { throw new Error('DRAFT_RECOVERY_CONFLICT'); }
+      };
+      const verify = async (): Promise<void> => {
+        await verifySource(); const after = await select(); await verifySource();
+        if (before.checkpointId !== after.checkpointId || before.draftRevision !== after.draftRevision
+          || before.recordHash !== after.recordHash || candidate.resultHash !== after.resultHash) throw new Error('DRAFT_CHECKPOINT_CHANGED');
+      };
+      await verify();
+      return Object.freeze({ candidate, sessionId, checkpointId: before.checkpointId!, draftRevision: before.draftRevision, verify });
+    },
+    async restoreLatest(sessionId: string, source: SaveSource, index: SourceIndex): Promise<PatchCandidate> {
+      return (await operations.resolveLatest(sessionId, source, index)).candidate;
     },
     // Main calls this only after an explicit discard or verified save-copy
     // decision, with that session's writes drained and further edits frozen.

@@ -12,6 +12,18 @@ const node = source.nodes.find(node => node.decodedText === 'A & 😀');
 const candidate = text => createPatchEngine(source, digest).apply({ identity: source.identity, baseHash: source.baseHash,
   nodeId: node.nodeId, expectedText: node.decodedText, newText: text });
 const turn = () => new Promise(setImmediate);
+
+test('verified restored checkpoints seed durability without duplicate writes and next edits advance the existing revision', async () => {
+  const writes = []; const restored = candidate('B');
+  const queue = createDraftPersistence(async (value, revision) => {
+    writes.push(revision); return { status: 'persisted', checkpointId: randomUUID(), draftRevision: revision,
+      resultHash: value.resultHash, code: null, cleanupPending: false };
+  }, { candidate: restored, revision: 7, checkpointId: randomUUID() });
+  const state = await queue.settle(); assert.equal(state.status, 'persisted'); assert.equal(state.persisted.draftRevision, 7);
+  assert.equal(state.persisted.resultHash, restored.resultHash); await turn(); assert.deepEqual(writes, []);
+  queue.enqueue(candidate('C'), 8); await queue.settle(); assert.deepEqual(writes, [8]); assert.equal(queue.snapshot().persisted.draftRevision, 8); await queue.close();
+  for (const revision of [0, NaN, Number.MAX_SAFE_INTEGER]) assert.throws(() => createDraftPersistence(async () => {}, { candidate: restored, revision, checkpointId: randomUUID() }), /DRAFT_PERSISTENCE_SEED_INVALID/);
+});
 function fixture() {
   const writes = []; const queue = createDraftPersistence((value, revision) => new Promise((resolve, reject) => {
     writes.push({ value, revision, reject, finish: (status = 'persisted', extras = {}) => resolve({

@@ -24,6 +24,7 @@ function doc(name, dirty = false) {
     },
     async close() { value.closed++; value.update({ phase: 'closed' }); },
   };
+  value.checkpointSessionId = value.id;
   return value;
 }
 async function fixture() {
@@ -38,6 +39,24 @@ async function fixture() {
   await workspace.open(workspace.snapshot().stateRevision, async () => 'first');
   return { first, second, controls, calls, workspace, open, get mounted() { return mounted; } };
 }
+
+test('recovery is verified around native staging and a restored draft retires its persisted sequence rather than its new UI identity', async () => {
+  const f = await fixture(); f.first.checkpointSessionId = randomUUID(); let calls = 0;
+  f.second.verifyRecovery = async () => { calls++; };
+  await f.open(); assert.equal(calls, 2); assert.equal(f.calls[0][1], f.first.checkpointSessionId); await f.workspace.dispose();
+});
+
+test('a changed recovery proof rolls back the candidate; an already confirmed old retirement remains visible and freezes the retained old draft', async () => {
+  for (const failureAt of [1, 2]) {
+    const f = await fixture(); let calls = 0;
+    f.second.verifyRecovery = async () => { if (++calls === failureAt) throw Error('DRAFT_CHECKPOINT_CHANGED'); };
+    await assert.rejects(f.open(), /DRAFT_CHECKPOINT_CHANGED/); assert.equal(f.workspace.current, f.first); assert.equal(f.mounted, f.first);
+    assert.equal(f.first.closed, 0); assert.equal(f.second.closed, 1); assert.equal(f.calls.length, failureAt - 1);
+    assert.equal(f.first.input.snapshot().phase, failureAt === 1 ? 'idle' : 'leaving');
+    if (failureAt === 2) { assert.equal(f.workspace.snapshot().lastDeparture.status, 'retired'); assert.equal(f.workspace.snapshot().lastDeparture.code, 'DRAFT_CHECKPOINT_CHANGED'); assert.equal(f.workspace.snapshot().lastDeparture.requiresReview, true); }
+    await f.workspace.dispose();
+  }
+});
 
 test('departure drains the queue under an input hold, stages activation, then publishes only the verified original-session retirement', async () => {
   const f = await fixture(); const draining = gate(); const started = gate(); const written = gate();

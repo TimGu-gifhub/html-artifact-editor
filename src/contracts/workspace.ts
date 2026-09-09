@@ -23,7 +23,7 @@ export type WorkspaceSnapshot = Readonly<{
   lastDeparture: WorkspaceDepartureReport | null; canSave: boolean;
 }>;
 export type WorkspaceOutcome = Readonly<{
-  status: 'opened' | 'closed' | 'cancelled'; state: WorkspaceSnapshot;
+  status: 'opened' | 'restored' | 'closed' | 'cancelled'; state: WorkspaceSnapshot;
 }>;
 export function isLeaveDecision(value: unknown): value is LeaveDecision {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;

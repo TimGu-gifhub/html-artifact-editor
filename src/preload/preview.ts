@@ -6,6 +6,7 @@ import type { MappingIdentity, MappingInstall } from '../contracts/mapping.ts';
 import { MAX_TREE_NODES } from '../contracts/source-tree.ts';
 import { createNodeRegistry } from '../preview/node-registry.ts';
 import { isMappingEditRequest, MAPPING_EDIT, MAPPING_EDIT_INTENT, MAPPING_EDIT_RESULT } from '../contracts/edit-guard.ts';
+import { isMappingRestore, MAPPING_RESTORE, MAPPING_RESTORE_RESULT } from '../contracts/mapping-restore.ts';
 
 // Runs in the isolated world. Deliberately exposes nothing to the page world.
 const argument = process.argv.find((value) => value.startsWith(PREVIEW_ARGUMENT));
@@ -60,6 +61,12 @@ if (argument) {
     ipcRenderer.on(MAPPING_EDIT, (_event, request: unknown) => {
       if (!isMappingEditRequest(request) || !mappingIdentity || !sameMapping(request.identity, mappingIdentity) || !registry) return;
       ipcRenderer.send(MAPPING_EDIT_RESULT, registry.edit(request));
+    });
+    ipcRenderer.on(MAPPING_RESTORE, (_event, request: unknown) => {
+      if (!isMappingRestore(request) || !mappingIdentity || !sameMapping(request.identity, mappingIdentity)) return;
+      ipcRenderer.send(MAPPING_RESTORE_RESULT, registry?.restore(request) ?? {
+        identity: request.identity, requestId: request.requestId, revision: request.revision, nextRevision: request.revision, outcome: 'rejected',
+      });
     });
     ipcRenderer.on(MAPPING_REVOKE, (_event, value: unknown) => {
       if (mappingIdentity && isMappingIdentity(value) && sameMapping(mappingIdentity, value)) registry?.close();

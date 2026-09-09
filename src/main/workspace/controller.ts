@@ -6,6 +6,7 @@ import type { DraftStore, OpenDocument, prepareDocument } from './document.ts';
 import type { ProjectSource } from '../protocol/project-files.ts';
 import type { OriginalSaver, OriginalSaveResult } from '../storage/original.ts';
 import { isTransactionId } from '../../contracts/save-record.ts';
+import type { WorkspaceRecoveryCatalog } from '../../contracts/recovery.ts';
 
 export type WorkspaceDecisions = Readonly<{
   review: (value: LeaveReview) => Promise<unknown>;
@@ -30,6 +31,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
   let lastSave: WorkspaceSaveReport | null = null;
   let lastDeparture: WorkspaceDepartureReport | null = null;
   let retainedSave: OriginalSaveResult | null = null;
+  let listing: Promise<WorkspaceRecoveryCatalog> | null = null;
   const listeners = new Set<() => void>();
   // Keep objects whose teardown failed as evidence; block further opens instead
   // of accumulating unbounded views or pretending cleanup succeeded.
@@ -165,7 +167,13 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       inputReady(current?.input.snapshot());
     };
     checkInput();
-    if (!leaving?.persistence || !checkpoints || !proof) return install(next, checkInput);
+    if (!leaving?.persistence || !checkpoints || !proof) {
+      if (!next?.verifyRecovery) return install(next, checkInput);
+      await next.verifyRecovery(); checkInput();
+      const staged = stageInstall(next, checkInput);
+      try { await next.verifyRecovery(); checkInput(); return staged.publish(); }
+      catch (error) { staged.rollback(); throw error; }
+    }
     const release = leaving.input.holdDeparture(proof.input.stateRevision);
     const frozen = leaving.input.snapshot();
     phase = 'committing'; notify();
@@ -186,10 +194,11 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       }
       // Stage the native view first. Failed attachment must never mark a live
       // draft as discarded. Keep its input and current identity until settlement.
+      await next?.verifyRecovery?.(); check();
       staged = stageInstall(next, () => check());
       if (proof.reason !== null) {
         check(); started = true;
-        const result = await checkpoints.retire(leaving.saveSource, leaving.id, frozen.draftRevision, proof.reason);
+        const result = await checkpoints.retire(leaving.saveSource, leaving.checkpointSessionId, frozen.draftRevision, proof.reason);
         if (!result || !['retired', 'empty', 'failed', 'unknown'].includes(result.status) || typeof result.cleanupPending !== 'boolean'
           || (result.status === 'retired' && !isTransactionId(result.checkpointId)) || (result.status === 'empty' && result.checkpointId !== null)) {
           throw new Error('DRAFT_RETIREMENT_UNKNOWN');
@@ -203,10 +212,11 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
         cleanupPending: durable.cleanupPending, requiresReview: durable.cleanupPending });
       // Once an authorized marker starts, renderer loss cannot revoke that disk
       // decision. Main finishes a verified result, as with an original-file Save.
+      await next?.verifyRecovery?.();
       check(started); const previous = staged.publish(); published = true; return previous;
     } catch (error) {
       try { staged?.rollback(); } catch { error = new Error('DOCUMENT_ACTIVATION_UNKNOWN'); }
-      const afterMarkerCode = error instanceof Error && ['DOCUMENT_ACTIVATION_UNKNOWN', 'WORKSPACE_CANCELLED', 'STALE_DOCUMENT_REVIEW'].includes(error.message)
+      const afterMarkerCode = error instanceof Error && /^(DOCUMENT_ACTIVATION_UNKNOWN|WORKSPACE_CANCELLED|STALE_DOCUMENT_REVIEW|DRAFT_[A-Z_]+)$/u.test(error.message)
         ? error.message : 'DRAFT_RETIREMENT_UNKNOWN';
       if (started) lastDeparture = Object.freeze({ documentId: leaving.id, status: lastDeparture?.status ?? 'unknown',
         code: lastDeparture?.code ?? afterMarkerCode, cleanupPending: lastDeparture?.cleanupPending ?? true, requiresReview: true });
@@ -218,6 +228,27 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     }
   };
   const finish = (): void => { pending = null; review = null; phase = disposed ? 'disposed' : 'idle'; notify(); };
+  const openDocument = async (expectedRevision: number, choose: (signal: AbortSignal) => Promise<ProjectSource | undefined>,
+    recoverySessionId?: string): Promise<WorkspaceOutcome> => {
+    const operation = begin(expectedRevision, 'choosing');
+    lastDeparture = null;
+    let candidate: OpenDocument | null = null;
+    let status: WorkspaceOutcome['status'] = 'cancelled';
+    try {
+      const path = await ask(operation, () => choose(operation.signal)); live(operation);
+      if (path) {
+        phase = 'opening'; notify();
+        candidate = await prepare(outputRoot, path, ++generation, operation.signal, checkpoints, recoverySessionId); live(operation);
+        const proof = await permission('open', candidate, operation);
+        if (proof !== false) {
+          const previous = await depart(candidate, proof, operation);
+          candidate = null;
+          await retire(previous); status = recoverySessionId ? 'restored' : 'opened';
+        }
+      }
+    } finally { await retire(candidate); finish(); }
+    return { status, state: snapshot() };
+  };
   return Object.freeze({
     snapshot,
     get current() { return current; },
@@ -287,25 +318,22 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       } finally { await retire(next); rebuilding = null; finish(); }
       return { status, state: snapshot() };
     },
-    async open(expectedRevision: number, choose: (signal: AbortSignal) => Promise<ProjectSource | undefined>): Promise<WorkspaceOutcome> {
-      const operation = begin(expectedRevision, 'choosing');
-      lastDeparture = null;
-      let candidate: OpenDocument | null = null;
-      let status: WorkspaceOutcome['status'] = 'cancelled';
-      try {
-        const path = await ask(operation, () => choose(operation.signal)); live(operation);
-        if (path) {
-          phase = 'opening'; notify();
-          candidate = await prepare(outputRoot, path, ++generation, operation.signal, checkpoints); live(operation);
-          const proof = await permission('open', candidate, operation);
-          if (proof !== false) {
-            const previous = await depart(candidate, proof, operation);
-            candidate = null;
-            await retire(previous); status = 'opened';
-          }
-        }
-      } finally { await retire(candidate); finish(); }
-      return { status, state: snapshot() };
+    open: openDocument,
+    async restore(expectedRevision: number, sessionId: string, choose: (signal: AbortSignal) => Promise<ProjectSource | undefined>): Promise<WorkspaceOutcome> {
+      if (!isTransactionId(sessionId)) throw new Error('DRAFT_CHECKPOINT_INVALID');
+      if (!checkpoints) throw new Error('DRAFT_PERSISTENCE_UNAVAILABLE');
+      if (checkpoints.isSessionActive(sessionId)) throw new Error('DRAFT_SESSION_ACTIVE');
+      return openDocument(expectedRevision, choose, sessionId);
+    },
+    async listRecovery(): Promise<WorkspaceRecoveryCatalog> {
+      if (disposed) throw new Error('WORKSPACE_BUSY');
+      if (!checkpoints) throw new Error('DRAFT_PERSISTENCE_UNAVAILABLE');
+      listing ??= checkpoints.catalog().then(catalog => Object.freeze({
+        entries: Object.freeze(catalog.groups.map(({ sessionId, name, draftRevision, status }) =>
+          Object.freeze({ sessionId, name, draftRevision, status, active: checkpoints.isSessionActive(sessionId) }))),
+        locked: catalog.locked, reviewRequired: catalog.reviewRequired,
+      })).finally(() => { listing = null; });
+      return listing;
     },
     async requestClose(expectedRevision: number): Promise<WorkspaceOutcome> {
       const operation = begin(expectedRevision, 'reviewing');

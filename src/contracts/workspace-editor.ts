@@ -1,25 +1,30 @@
 import { isEditorCommand } from './editor.ts';
 import type { EditorCommand, EditorCopyResult } from './editor.ts';
 import type { WorkspaceSnapshot } from './workspace.ts';
+import type { WorkspaceRecoveryCatalog } from './recovery.ts';
 
 export const WORKSPACE_CONNECT = 'hae:workspace-connect';
 export const WORKSPACE_COMMAND = 'hae:workspace-command';
 export const WORKSPACE_STATE = 'hae:workspace-state';
 export type DocumentCommand = Exclude<EditorCommand, Readonly<{ kind: 'read' }>>;
-export type WorkspaceCommand = Readonly<{ kind: 'read' }>
+export type WorkspaceCommand = Readonly<{ kind: 'read' | 'recovery-list' }>
   | Readonly<{ kind: 'open' | 'open-directory'; stateRevision: number }>
+  | Readonly<{ kind: 'restore'; stateRevision: number; recoverySessionId: string; sourceMode: 'file' | 'directory' }>
   | Readonly<{ kind: 'switch-entry' | 'save'; stateRevision: number; documentId: string }>
   | Readonly<{ kind: 'retry-persistence'; draftRevision: number; documentId: string }>
   | Readonly<{ kind: 'edit'; documentId: string; value: DocumentCommand }>;
 export type WorkspaceRequest = Readonly<{ sessionId: string; sequence: number; command: WorkspaceCommand }>;
 export type WorkspaceResult = Readonly<{
   ok: boolean; code: string | null; state: WorkspaceSnapshot | null;
-  documentId: string | null; copy: EditorCopyResult | null; outcome: 'opened' | 'cancelled' | 'saved' | 'unchanged' | 'rebase-required' | null;
+  documentId: string | null; copy: EditorCopyResult | null; outcome: 'opened' | 'restored' | 'cancelled' | 'saved' | 'unchanged' | 'rebase-required' | null;
+  recovery?: WorkspaceRecoveryCatalog | null;
 }>;
 export type WorkspaceConnection = Readonly<{ sessionId: string; state: WorkspaceSnapshot }>;
 export type WorkspaceReply = Readonly<{ sessionId: string; sequence: number; result: WorkspaceResult }>;
 export type WorkspaceAPI = Readonly<{
   read: () => Promise<WorkspaceResult>;
+  listRecovery: () => Promise<WorkspaceResult>;
+  restore: (recoverySessionId: string, stateRevision: number, sourceMode?: 'file' | 'directory') => Promise<WorkspaceResult>;
   open: (stateRevision: number) => Promise<WorkspaceResult>;
   openDirectory: (stateRevision: number) => Promise<WorkspaceResult>;
   switchEntry: (documentId: string, stateRevision: number) => Promise<WorkspaceResult>;
@@ -34,7 +39,11 @@ export function isWorkspaceCommand(value: unknown): value is WorkspaceCommand {
   if (!object(value)) return false;
   const count = Object.keys(value).length;
   switch (value.kind) {
-    case 'read': return count === 1;
+    case 'read':
+    case 'recovery-list': return count === 1;
+    case 'restore': return count === 4 && identity(value.recoverySessionId)
+      && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0
+      && (value.sourceMode === 'file' || value.sourceMode === 'directory');
     case 'open':
     case 'open-directory': return count === 2 && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
     case 'save':

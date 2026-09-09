@@ -25,6 +25,8 @@ const entries = {
   'session-probe': ['tests/session/probe.ts', 'out/session/probe'],
   project: ['tests/project/main.ts', 'out/project'],
   'save-session': ['tests/save-session/main.ts', 'out/save-session'],
+  recovery: ['tests/draft-restore/main.ts', 'out/recovery'],
+  'recovery-child': ['tests/draft-restore/child.ts', 'out/recovery-child'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'native'];
 const requested = process.argv.slice(2);

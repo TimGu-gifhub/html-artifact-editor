@@ -14,6 +14,9 @@ const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUS
   'SAVE_PLATFORM_UNSUPPORTED', 'UNAPPLIED_INPUT',
   'DRAFT_PERSISTENCE_UNAVAILABLE', 'DRAFT_PERSISTENCE_RETRY_UNAVAILABLE', 'STALE_DRAFT_REQUEST',
   'DRAFT_PERSISTENCE_REQUIRED', 'DRAFT_RETIREMENT_FAILED', 'DRAFT_RETIREMENT_UNKNOWN',
+  'DRAFT_PROFILE_IN_USE', 'DRAFT_SESSION_ACTIVE', 'DRAFT_RECOVERY_UNAVAILABLE', 'DRAFT_RECOVERY_CONFLICT',
+  'DRAFT_STORAGE_LOCKED', 'DRAFT_STORAGE_REVIEW_REQUIRED', 'DRAFT_CHECKPOINT_CHANGED', 'DRAFT_CHECKPOINT_INVALID',
+  'DRAFT_RESTORE_UNAVAILABLE', 'DRAFT_RESTORE_REJECTED', 'DRAFT_RESTORE_OUTCOME_UNKNOWN',
   'RESOURCE_BLOCKED',
   'COPY_FAILED', 'COPY_OUTCOME_UNKNOWN', 'INPUT_MAPPING_LOST', 'INVALID_TEXT_NUL', 'INVALID_UNICODE', 'TEXT_SIZE_LIMIT']);
 
@@ -28,9 +31,18 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         let code: string | null = null;
         let copy: WorkspaceResult['copy'] = null;
         let outcome: WorkspaceResult['outcome'] = null;
+        let recovery: WorkspaceResult['recovery'] = null;
         const documentId = 'documentId' in command ? command.documentId : null;
         try {
-          if (command.kind === 'open') {
+          if (command.kind === 'recovery-list') {
+            recovery = await workspace.listRecovery();
+          } else if (command.kind === 'restore') {
+            const result = await workspace.restore(command.stateRevision, command.recoverySessionId, (operationSignal) =>
+              command.sourceMode === 'directory'
+                ? chooseProjectDirectory(projectChoices, operationSignal, [app.getPath('userData'), app.getPath('sessionData')])
+                : active() ? chooseOpen() : Promise.resolve(undefined));
+            outcome = result.status === 'restored' ? 'restored' : 'cancelled';
+          } else if (command.kind === 'open') {
             const result = await workspace.open(command.stateRevision, async () => active() ? chooseOpen() : undefined);
             outcome = result.status === 'opened' ? 'opened' : 'cancelled';
           } else if (command.kind === 'open-directory') {
@@ -69,7 +81,7 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         } catch (error) {
           code = error instanceof Error && publicErrors.has(error.message) ? error.message : 'WORKSPACE_COMMAND_FAILED';
         }
-        return { ok: code === null, code, state: workspace.snapshot(), documentId, copy, outcome };
+        return { ok: code === null, code, state: workspace.snapshot(), documentId, copy, outcome, recovery };
       },
     });
 }
