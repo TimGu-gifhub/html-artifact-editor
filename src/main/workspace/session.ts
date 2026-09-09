@@ -13,7 +13,7 @@ import type { OriginalSaver } from '../storage/original.ts';
 import type { DraftStore } from './document.ts';
 import type { BackupRestorer } from '../storage/backups.ts';
 
-type SessionPorts = WorkspaceDecisions & Readonly<{
+export type SessionPorts = WorkspaceDecisions & Readonly<{
   chooseOpen: () => Promise<string | undefined>;
   bounds: () => Rectangle;
   reportError: (code: string) => void;
@@ -38,21 +38,35 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
     return host.swap(next?.preview.view ?? null);
   }, ports.saveOriginal, ports.checkpoints, ports.backups);
   let bridge: ReturnType<typeof createWorkspaceBridge>;
+  const bridges = new Set<ReturnType<typeof createWorkspaceBridge>>();
+  const connect = () => {
+    const value = createWorkspaceBridge(window.webContents, workspace, ports.chooseOpen, ports.chooseCopy, projectChoices);
+    bridges.add(value); return value;
+  };
   let guard: ReturnType<typeof bindWorkspaceWindow>;
   try {
-    bridge = createWorkspaceBridge(window.webContents, workspace, ports.chooseOpen, ports.chooseCopy, projectChoices);
+    bridge = connect();
     try { guard = bindWorkspaceWindow(window, workspace, ports.reportError); }
     catch (error) { bridge.close(); throw error; }
   } catch (error) { host.dispose(); void workspace.dispose(); throw error; }
   let disposed = false;
+  let disposal: Promise<void> | undefined;
   let reloading = false;
   const onClosed = (): void => { void dispose().catch(() => {
     try { ports.reportError('DOCUMENT_CLEANUP_REQUIRED'); } catch { /* Teardown cannot force a write. */ }
   }); };
-  const dispose = async (): Promise<void> => {
-    if (disposed) return;
+  const dispose = (): Promise<void> => {
+    if (disposal) return disposal;
     disposed = true; bridge.close(); guard.detach(); window.removeListener('closed', onClosed);
-    try { host.dispose(); } finally { await workspace.dispose(); }
+    disposal = (async () => {
+      try { host.dispose(); } finally {
+        const ended = await Promise.allSettled([workspace.dispose(), ...Array.from(bridges, value => value.drain())]);
+        const failed = ended.find(result => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
+        bridges.clear();
+      }
+    })();
+    return disposal;
   };
   window.once('closed', onClosed);
   return Object.freeze({
@@ -65,7 +79,9 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
       if (disposed || window.isDestroyed() || reloading || !bridge.closed) throw new Error('EDITOR_RELOAD_UNAVAILABLE');
       reloading = true;
       try {
-        bridge = createWorkspaceBridge(window.webContents, workspace, ports.chooseOpen, ports.chooseCopy, projectChoices);
+        const previous = bridge;
+        bridge = connect();
+        void previous.drain().then(() => { bridges.delete(previous); });
         await window.loadURL(EDITOR_URL);
       } catch (error) { bridge.close(); throw error; }
       finally { reloading = false; }

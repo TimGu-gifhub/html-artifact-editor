@@ -186,15 +186,36 @@ test('cleanup failure after committed replacement reports the new document and b
   assert.equal(f.workspace.current, second); assert.equal(first.calls.closed, 1);
   await assert.rejects(f.open('third'), /DOCUMENT_CLEANUP_REQUIRED/);
 });
-test('forced process teardown during preparation rejects late success and retains the original evidence reference', async () => {
+test('forced teardown joins late preparation and candidate retirement before completing, retaining original evidence', async () => {
   const f = setup(); const first = f.add('first'); const second = f.add('second'); await f.open('first'); first.dirty();
   const waiting = deferred(); const started = deferred();
   f.controls.prepare = async () => { started.resolve(); return waiting.promise; };
   const opening = f.open('second'); await started.promise;
-  await f.workspace.dispose(); waiting.resolve(second);
-  await assert.rejects(opening, /WORKSPACE_CANCELLED/);
+  const rejected = assert.rejects(opening, /WORKSPACE_CANCELLED/);
+  let complete = false; const disposal = f.workspace.dispose().then(() => { complete = true; });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(complete, false); assert.equal(first.calls.closed, 0);
+  waiting.resolve(second); await rejected; await disposal;
   assert.equal(second.calls.closed, 1); assert.equal(f.workspace.snapshot().phase, 'disposed');
   assert.equal(f.workspace.current, first); assert.equal(first.input.snapshot().input.text, '保留输入');
+});
+test('teardown joins an already started original Save and retains its late unknown result before reporting completion', async () => {
+  const previous = source('previous'); const started = deferred(); const held = deferred();
+  previous.saveSource = {}; previous.mapping = { status: 'ready' };
+  previous.draft = { candidate: { resultHash: 'b'.repeat(64), patches: [{}] } };
+  previous.input.saveOriginal = async (_revision, write) => write(previous.draft.candidate);
+  const workspace = createWorkspace('test-output', { review: async () => assert.fail('no review'), chooseCopy: async () => undefined },
+    async () => previous, undefined, async () => { started.resolve(); return held.promise; });
+  await workspace.open(workspace.snapshot().stateRevision, async () => 'first');
+  previous.update({ changes: [{ nodeId: 'n1', oldText: 'base', newText: 'changed' }], canSaveCopy: true });
+  const saving = workspace.save(workspace.snapshot().stateRevision, previous.id); await started.promise;
+  let complete = false; const disposal = workspace.dispose().then(() => { complete = true; });
+  await Promise.resolve(); await Promise.resolve(); assert.equal(complete, false); assert.equal(previous.calls.closed, 0);
+  const unknown = { status: 'unknown', code: 'SAVE_OUTCOME_UNKNOWN', transactionId: randomUUID(), expectedHash: 'b'.repeat(64),
+    cleanupPending: true, requiresReview: true, verifySaved: null };
+  held.resolve(unknown); assert.equal((await saving).status, 'unknown'); await disposal;
+  assert.equal(previous.calls.closed, 1); assert.equal(workspace.retainedSave, unknown);
+  assert.equal(workspace.snapshot().lastSave.requiresReview, true); assert.equal(workspace.snapshot().phase, 'disposed');
 });
 test('teardown cancels a non-returning leave review, retires its prepared candidate and ignores a late discard', async () => {
   const f = setup(); const first = f.add('first'); const second = f.add('second'); await f.open('first'); first.dirty();

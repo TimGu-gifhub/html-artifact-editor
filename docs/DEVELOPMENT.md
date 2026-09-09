@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-10。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建、HAE-011 的草稿检查点/恢复/有界清理、源码 Diff、Main 历史与保存点实验。
+日期：2026-09-10。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存、文档/窗口保护与固定存储启动，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建、HAE-011 的草稿检查点/恢复/有界清理、源码 Diff、Main 历史与保存点实验。
 
 ## 固定版本
 
@@ -61,6 +61,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:project` | 生产 preload/IPC 上的目录授权、嵌套资源、CSP/API 诊断、入口切换/另存/撤销及根目录替换；选择器仍为 Main 测试回调 |
 | `npm run test:storage` | Electron 内嵌 Node 执行真实文件准备、Windows 原生替换/备份恢复、权限/占用、事务故障及进程强杀；仅覆盖自制临时 HTML，无产品窗口 |
 | `npm run test:save-session` | Windows 真实 Electron 窗口、生产 IPC、原文件保存/备份恢复/重建、崩溃/未知结果/外部冲突/清理警告；无产品控件或真实 IME |
+| `npm run test:startup` | Main 固定目录/服务装配、跨窗口/进程恢复、五处校稿/Diff/保存/Undo/备份恢复，以及窗口销毁期间的写入排空和占用保留；无产品启动界面 |
 | `npm run test:recovery` | 真实 Electron 的恢复列表/重新授权/新映射安装、进程所有权、恢复后编辑与 Windows 保存去重；自制空白 transport 页面，无产品验收 |
 | `npm run test:source-diff` | 真实 Electron 生产接口读取完整源码 Diff、拒绝旧确认、重连及 Windows 保存字节/冲突检查；无产品 Diff 面板 |
 | `npm run test:history` | 逻辑历史通过真实 Worker、Main Windows 保存端口和隔离 Preview，验证空 Text 安装/恢复、保存点/分支、原生选择/编辑锁、确认丢失及来源/DOM 拒绝；另含可信 Workspace history、v2 检查点和实际进程重启；无产品控件 |
@@ -71,7 +72,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 草稿恢复 → 源码 Diff → 逻辑历史/保存重开 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 固定存储启动 → 草稿恢复 → 源码 Diff → 逻辑历史/保存重开 → 许可证 |
 
 开发 Node 与 Electron 内嵌 Node 的存储套件使用 `--test-concurrency=4`，避免随主机 CPU 数量增加而同时启动过多原生文件/子进程实验。此限制只控制测试文件调度，不改变用例内部的并发竞态和故障断言。检查点清理的 48 次逐项同步写盘压力用例上限为 120 秒，内嵌存储全套上限为 180 秒；超时或取消仍使门槛失败，须保留日志并定位后重跑。生产 Worker/IPC/原生助手的期限不受测试预算调整影响。
 
@@ -82,6 +83,8 @@ HAE-011 第七阶段增加来源重建与历史单元检查，完整逻辑记录
 第十二阶段增加 [清理中断后的显式恢复](COMPACTION_RECOVERY.md)。compaction-resolution.test.mjs 同时纳入开发/内嵌 Node，覆盖七项存储行为；真实历史窗口实验增加 Main 恢复后生产 Workspace Undo/Save，以及独立 Electron profile 竞争/重启恢复，共 29 组。存储用例中的 profile 回调替身与实际 Electron 进程锁验证分别记录。
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
+
+HAE-005 第六阶段增加 [持久化启动工厂](PERSISTENT_STARTUP.md)。test:startup 在一个固定 profile 下复用 workspace-records，另用独立 Electron 进程测试竞争、强杀/恢复和原生提交后的销毁；11 组结果写入 test-results/startup.json。测试包含原生点击和实际 Windows 文件替换，选择/确认仍由 Main 测试回调提供；不代表正常产品入口或用户退出/输入法验收。全套期限维持 45 秒，其他 Worker/IPC 期限不变。
 
 ## 运行边界与证据
 

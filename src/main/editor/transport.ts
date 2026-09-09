@@ -27,6 +27,7 @@ export function createEditorTransport<State, Command, Result>(contents: WebConte
   let connectInstalled = false;
   let commandInstalled = false;
   let unsubscribe = (): void => {};
+  const executing = new Set<Promise<void>>();
   const authority = { contents, session: contents.session, frame: () => frame, isActive: () => !closed };
   const active = (): boolean => !!frame && acceptsEditorSender(authority,
     { sender: contents, senderFrame: frame } as IpcMainInvokeEvent);
@@ -67,10 +68,18 @@ export function createEditorTransport<State, Command, Result>(contents: WebConte
       const request = args[0];
       if (request.sessionId !== sessionId || request.sequence <= lastSequence) return null;
       lastSequence = request.sequence;
-      const result = await handlers.execute(request.command, active, lifetime.signal);
-      return active() ? { sessionId, sequence: request.sequence, result } : null;
+      let finish!: () => void;
+      const done = new Promise<void>(resolveDone => { finish = resolveDone; }); executing.add(done);
+      try {
+        const result = await handlers.execute(request.command, active, lifetime.signal);
+        return active() ? { sessionId, sequence: request.sequence, result } : null;
+      } finally { executing.delete(done); finish(); }
     });
     commandInstalled = true;
   } catch (error) { close(); throw error; }
-  return Object.freeze({ close, get active() { return active(); }, get closed() { return closed; } });
+  return Object.freeze({ close,
+    // Main teardown calls close first. Revocation removes handlers immediately;
+    // already authorized commands must settle even if their renderer is gone.
+    async drain(): Promise<void> { await Promise.all(executing); },
+    get active() { return active(); }, get closed() { return closed; } });
 }

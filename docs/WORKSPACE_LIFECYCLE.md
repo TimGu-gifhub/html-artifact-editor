@@ -40,6 +40,8 @@ dispose 仅用于进程/测试的强制清理，保留当前对象引用并取�
 
 ## 验证范围
 
+HAE-005 第六阶段补充 Main teardown 排空：dispose 先撤销等待权限，再等待打开准备、保存/恢复事务及候选清理，最后关闭当前文档；迟到结果不能发布新 current，未知保存结果仍保留。统一会话还等待包括旧重连在内的已接受 IPC 命令；完整顺序与实例释放条件见 [持久化启动](PERSISTENT_STARTUP.md)。这不是用户侧强制关闭操作。
+
 `npm run test:workspace` 在 Electron 44.2.0 中执行七组真实预览、源解析深度失败、确认竞争、另存/重开和 window.close 事件实验；保存前后按独立完整字节期望核对，原 HTML/CSS 均未改变。创建文件后注入错误时，部分文件、草稿及原窗口保留，后续打开被阻止。报告为忽略的 `test-results/workspace.json`。
 
 另有十五项单元反例，含解析准备取消、旧确认、清理失败、不返回的回调、迟到结果、激活失败/回滚及连接撤销，见 [状态测试](../tests/unit/workspace.test.mjs) 与 [Electron 实验](../tests/workspace/main.ts)。第五阶段的十组窗口/IPC/挂载实验见 [统一会话](WORKSPACE_SESSION.md)。文件选择和用户决定采用测试回调；没有维护者点击原生关闭按钮、真实对话框或 IME 操作记录。HAE-005 和 M2 仍未整体通过。

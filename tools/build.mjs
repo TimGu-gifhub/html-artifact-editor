@@ -27,6 +27,8 @@ const entries = {
   'session-probe': ['tests/session/probe.ts', 'out/session/probe'],
   project: ['tests/project/main.ts', 'out/project'],
   'save-session': ['tests/save-session/main.ts', 'out/save-session'],
+  startup: ['tests/startup/main.ts', 'out/startup'],
+  'startup-child': ['tests/startup/child.ts', 'out/startup-child'],
   recovery: ['tests/draft-restore/main.ts', 'out/recovery'],
   'recovery-child': ['tests/draft-restore/child.ts', 'out/recovery-child'],
   'source-diff': ['tests/source-diff/main.ts', 'out/source-diff'],

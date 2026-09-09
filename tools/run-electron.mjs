@@ -16,11 +16,12 @@ const kind = process.argv.includes('--smoke') ? 'smoke'
               : process.argv.includes('--session') ? 'session'
                 : process.argv.includes('--project') ? 'project'
                   : process.argv.includes('--save-session') ? 'save-session'
-                    : process.argv.includes('--recovery') ? 'recovery'
-                      : process.argv.includes('--source-diff') ? 'source-diff'
-                        : process.argv.includes('--history') ? 'history'
+                    : process.argv.includes('--startup') ? 'startup'
+                      : process.argv.includes('--recovery') ? 'recovery'
+                        : process.argv.includes('--source-diff') ? 'source-diff'
+                          : process.argv.includes('--history') ? 'history'
     : process.argv.includes('--preview') ? 'preview-tool' : 'main';
-const smoke = ['smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project', 'save-session', 'recovery', 'source-diff', 'history'].includes(kind);
+const smoke = ['smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project', 'save-session', 'startup', 'recovery', 'source-diff', 'history'].includes(kind);
 const entry = resolve(root, `out/${kind}/index.cjs`);
 if (!existsSync(entry)) throw new Error('Build output missing. Run npm run build first.');
 const reportPath = resolve(root, `test-results/${kind}.json`);

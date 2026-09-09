@@ -35,6 +35,8 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
   let disposal: Promise<void> | undefined;
   let review: LeaveReview | null = null;
   let pending: AbortController | null = null;
+  let operationDone: Promise<void> | undefined;
+  let finishOperation: (() => void) | undefined;
   let rebuilding: AbortController | null = null;
   let lastSave: WorkspaceSaveReport | null = null;
   let lastDeparture: WorkspaceDepartureReport | null = null;
@@ -72,7 +74,9 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     if (activationUncertain || failedCleanup.size) throw new Error('DOCUMENT_CLEANUP_REQUIRED');
     if (lastDeparture?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
     inputReady(current?.input.snapshot());
-    pending = new AbortController(); phase = initialPhase; notify(); return pending;
+    pending = new AbortController();
+    operationDone = new Promise<void>(done => { finishOperation = done; });
+    phase = initialPhase; notify(); return pending;
   };
   const live = (operation: AbortController): void => {
     if (disposed || pending !== operation || operation.signal.aborted) throw new Error('WORKSPACE_CANCELLED');
@@ -238,7 +242,10 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (!published && !started) release();
     }
   };
-  const finish = (): void => { pending = null; review = null; backupReview = null; phase = disposed ? 'disposed' : 'idle'; notify(); };
+  const finish = (): void => {
+    const done = finishOperation; finishOperation = undefined; operationDone = undefined;
+    pending = null; review = null; backupReview = null; phase = disposed ? 'disposed' : 'idle'; notify(); done?.();
+  };
   const openDocument = async (expectedRevision: number, choose: (signal: AbortSignal) => Promise<ProjectSource | undefined>,
     recoverySessionId?: string): Promise<WorkspaceOutcome> => {
     const operation = begin(expectedRevision, 'choosing');
@@ -465,7 +472,9 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     async dispose(): Promise<void> {
       if (disposed) return disposal;
       disposed = true; pending?.abort(); rebuilding?.abort(); unsubscribe(); phase = 'disposed'; notify();
-      disposal = retire(current).finally(() => { listeners.clear(); });
+      // Abort chooser/review waits, then join preparation, authorized file work
+      // and candidate retirement before releasing the current document's owner.
+      disposal = (async () => { await operationDone; await retire(current); })().finally(() => { listeners.clear(); });
       return disposal;
     },
   });
