@@ -1,5 +1,5 @@
 import { basename } from 'node:path';
-import { isInputBegin, isInputChange, isInputResolution, isInputVersion } from '../../contracts/input.ts';
+import { isInputBegin, isInputChange, isInputResolution, isInputVersion, isInputHistory } from '../../contracts/input.ts';
 import type { ActiveInput, InputPhase, InputSnapshot, InputVersion } from '../../contracts/input.ts';
 import type { NewFileWriter } from '../../platform/new-file.ts';
 import type { PreviewMapping } from '../preview/source-mapping.ts';
@@ -41,6 +41,9 @@ export function createInputController(mapping: PreviewMapping, draft: DraftSessi
     const selected = mapping.selection;
     const intent = mapping.editing?.intent;
     const copy = draft.lastCopy;
+    const history = draft.historySummary();
+    const historyReady = draft.historyReady && phase === 'idle' && draft.phase === 'idle' && mapping.status === 'ready' && !intent
+      && (!input || (!input.composing && input.text === input.appliedText && ownsSelection(input)));
     return Object.freeze({ stateRevision, phase, mappingStatus: mapping.status, mappingReason: mapping.reason,
       selection: selected ? Object.freeze({ reference: selected, text: draft.textFor(selected.nodeId)! }) : null,
       input, hasUnappliedInput: !!input && input.text !== input.appliedText,
@@ -52,6 +55,7 @@ export function createInputController(mapping: PreviewMapping, draft: DraftSessi
       lastCopy: copy ? Object.freeze({ status: copy.status, name: basename(copy.path), expectedHash: copy.expectedHash, code: copy.code }) : null,
       canApply: phase === 'idle' && !!input && !input.composing && ownsSelection(input) && draft.phase === 'idle',
       canSaveCopy: phase === 'idle' && (!input || (!input.composing && input.text === input.appliedText)) && draft.phase === 'idle',
+      history: history ? Object.freeze({ ...history, canUndo: historyReady && history.undoCount > 0, canRedo: historyReady && history.redoCount > 0 }) : null,
     });
   };
   return Object.freeze({
@@ -128,6 +132,32 @@ export function createInputController(mapping: PreviewMapping, draft: DraftSessi
       }
       phase = 'saving'; notify();
       try { return await draft.saveCopy(choose, writer); } finally { finish(); }
+    },
+    async history(request: unknown) {
+      idle();
+      if (!isInputHistory(request) || request.stateRevision !== stateRevision) throw new Error('STALE_INPUT_STATE');
+      if (request.draftRevision !== draft.revision) throw new Error('STALE_DRAFT_REQUEST');
+      const value = input;
+      if (value) { notComposing(value); if (value.text !== value.appliedText) throw new Error('UNAPPLIED_INPUT'); }
+      if (mapping.editing?.intent) throw new Error('STALE_EDIT_INTENT');
+      if (value && !ownsSelection(value)) throw new Error('INPUT_MAPPING_LOST');
+      const mappingRevision = mapping.revision;
+      phase = 'history'; notify(); const heldRevision = stateRevision;
+      try {
+        await draft.moveHistory(request.draftRevision, request.direction, async () => {
+          if (closed || input !== value || stateRevision !== heldRevision || mapping.revision !== mappingRevision) throw new Error('STALE_INPUT_STATE');
+          if (mapping.editing?.intent) throw new Error('STALE_EDIT_INTENT');
+          if (!value) return mappingRevision;
+          if (!ownsSelection(value)) throw new Error('INPUT_MAPPING_LOST');
+          if (!await mapping.finishEditing(value.editToken, 'release', null)) throw new Error('INPUT_MAPPING_LOST');
+          // Only our confirmed release may advance the revision. A native click
+          // or selection intent during preparation/release makes this stale.
+          input = null;
+          if (closed || mapping.status !== 'ready' || mapping.editing || mapping.revision !== mappingRevision + 1) throw new Error('STALE_INPUT_STATE');
+          return mappingRevision + 1;
+        });
+      } finally { finish(); }
+      return snapshot();
     },
     async saveOriginal(expectedStateRevision: number, write: (candidate: PatchCandidate) => Promise<OriginalSaveResult>) {
       idle();

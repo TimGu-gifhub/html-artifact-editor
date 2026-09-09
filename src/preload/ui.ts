@@ -63,6 +63,7 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
     change: (value) => request({ kind: 'change', value }),
     apply: (value) => request({ kind: 'apply', value }),
     resolve: (value) => request({ kind: 'resolve', value }),
+    history: (value) => request({ kind: 'history', value }),
     saveCopy: (stateRevision) => request({ kind: 'save-copy', stateRevision }),
     onState: (listener) => {
       if (typeof listener !== 'function' || listeners.size >= 32) throw new Error('INVALID_EDITOR_LISTENER');

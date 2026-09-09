@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
+import { digest } from '../../src/platform/storage-files.ts';
 import { createWorkspace } from '../../src/main/workspace/controller.ts';
 import { isLeaveDecision } from '../../src/contracts/workspace.ts';
 
@@ -53,9 +56,11 @@ function setup() {
 
 test('saved bytes do not publish a new baseline when mapping is invalid before or during native activation', async () => {
   for (const timing of ['prepared', 'verified', 'activated']) {
-    const previous = source('previous'); const next = source('next'); const resultHash = 'b'.repeat(64);
+    const previous = source('previous'); const next = source('next'); const bytes = Buffer.from('<!doctype html><h1>saved</h1>'); const resultHash = digest(bytes);
+    await mkdir(resolve('test-results'), { recursive: true }); const folder = await mkdtemp(resolve('test-results/workspace-rebase-'));
+    previous.entry = join(folder, 'report.html'); await writeFile(previous.entry, bytes);
     previous.preview = { grant: 'authorized-project' }; previous.saveSource = {};
-    previous.mapping = { status: 'ready' }; previous.draft = { candidate: { resultHash, patches: [{}] } };
+    previous.mapping = { status: 'ready' }; previous.draft = { candidate: { resultHash, bytes, patches: [{}] } };
     next.saveSource = {}; next.mapping = { status: timing === 'prepared' ? 'invalidated' : 'ready' };
     previous.input.saveOriginal = async (_revision, write) => {
       const result = await write(previous.draft.candidate); previous.update({ draftPhase: 'uncertain' }); return result;

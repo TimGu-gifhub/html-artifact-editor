@@ -3,10 +3,18 @@ import { isTransactionId } from '../../contracts/save-record.ts';
 import type { PatchCandidate } from '../../core/patch/engine.ts';
 import type { CheckpointWrite } from '../storage/checkpoints.ts';
 import { freezeCandidate } from './prepare.ts';
+import { freezeHistoryCheckpoint } from './history.ts';
+import type { HistoryCheckpoint } from '../../core/history/timeline.ts';
 
-type Pending = Readonly<{ candidate: PatchCandidate; revision: number }>;
-type Writer = (candidate: PatchCandidate, revision: number) => Promise<CheckpointWrite>;
+type Pending = Readonly<{ candidate: PatchCandidate; revision: number; history?: HistoryCheckpoint }>;
+type Writer = (candidate: PatchCandidate, revision: number, history?: HistoryCheckpoint) => Promise<CheckpointWrite>;
 type Seed = Pending & Readonly<{ checkpointId: string }>;
+const freezePending = (candidate: PatchCandidate, revision: number, checkpoint?: HistoryCheckpoint): Pending => {
+  const frozen = freezeCandidate(candidate); const history = checkpoint === undefined ? undefined : freezeHistoryCheckpoint(checkpoint);
+  if (history && (history.record.revision !== revision || history.record.candidateHash !== frozen.resultHash
+    || history.record.baseHash !== frozen.baseHash)) throw new Error('DRAFT_PERSISTENCE_REVISION_INVALID');
+  return Object.freeze({ candidate: frozen, revision, ...(history ? { history } : {}) });
+};
 
 // One active write plus the latest pending candidate. Completion is independent
 // of input revisions: background storage must not revoke a user's edit proof.
@@ -20,7 +28,7 @@ export function createDraftPersistence(write: Writer, seed?: Seed) {
   if (seed) {
     if (!isTransactionId(seed.checkpointId) || !Number.isSafeInteger(seed.revision) || seed.revision < 1
       || seed.revision >= Number.MAX_SAFE_INTEGER) throw new Error('DRAFT_PERSISTENCE_SEED_INVALID');
-    latest = Object.freeze({ candidate: freezeCandidate(seed.candidate), revision: seed.revision });
+    latest = freezePending(seed.candidate, seed.revision, seed.history);
     persisted = Object.freeze({ draftRevision: seed.revision, resultHash: latest.candidate.resultHash }); status = 'persisted';
   }
   const listeners = new Set<() => void>(); const waiters = new Set<(state: DraftPersistenceState) => void>();
@@ -37,7 +45,7 @@ export function createDraftPersistence(write: Writer, seed?: Seed) {
     const item = queued; queued = null; writing = item; status = 'writing'; code = null;
     // The applied candidate is already frozen. Start storage on a later microtask
     // and retain the active promise before observers can enqueue or request Save.
-    active = Promise.resolve().then(() => write(item.candidate, item.revision)).then(result => {
+    active = Promise.resolve().then(() => write(item.candidate, item.revision, item.history)).then(result => {
       if (!result || !['persisted', 'failed', 'unknown'].includes(result.status)
         || result.draftRevision !== item.revision
         || (result.resultHash !== item.candidate.resultHash && (result.status === 'persisted' || result.resultHash !== ''))
@@ -63,11 +71,11 @@ export function createDraftPersistence(write: Writer, seed?: Seed) {
   };
   return Object.freeze({ snapshot, settle,
     onState(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    enqueue(candidate: PatchCandidate, revision: number): void {
+    enqueue(candidate: PatchCandidate, revision: number, history?: HistoryCheckpoint): void {
       if (closing) return;
       try {
         if (!Number.isSafeInteger(revision) || revision <= (latest?.revision ?? 1)) throw new Error('DRAFT_PERSISTENCE_REVISION_INVALID');
-        latest = Object.freeze({ candidate: freezeCandidate(candidate), revision }); queued = latest;
+        latest = freezePending(candidate, revision, history); queued = latest;
         enqueueFailed = false;
         if (cleanupPending) status = 'failed';
         pump(); notify();

@@ -1,5 +1,5 @@
-import { isInputBegin, isInputChange, isInputResolution, isInputVersion } from './input.ts';
-import type { InputBegin, InputChange, InputResolution, InputSnapshot, InputVersion } from './input.ts';
+import { isInputBegin, isInputChange, isInputResolution, isInputVersion, isInputHistory } from './input.ts';
+import type { InputBegin, InputChange, InputResolution, InputSnapshot, InputVersion, InputHistory } from './input.ts';
 
 export const EDITOR_URL = 'editor://app/index.html';
 export const EDITOR_CONNECT = 'hae:editor-connect';
@@ -10,6 +10,7 @@ export type EditorCommand = Readonly<{ kind: 'read' }>
   | Readonly<{ kind: 'change'; value: InputChange }>
   | Readonly<{ kind: 'apply'; value: InputVersion }>
   | Readonly<{ kind: 'resolve'; value: InputResolution }>
+  | Readonly<{ kind: 'history'; value: InputHistory }>
   | Readonly<{ kind: 'save-copy'; stateRevision: number }>;
 export type EditorRequest = Readonly<{ sessionId: string; sequence: number; command: EditorCommand }>;
 export type EditorCopyResult = NonNullable<InputSnapshot['lastCopy']> | Readonly<{ status: 'cancelled' }>;
@@ -22,6 +23,7 @@ export type EditorAPI = Readonly<{
   change: (value: InputChange) => Promise<EditorResult>;
   apply: (value: InputVersion) => Promise<EditorResult>;
   resolve: (value: InputResolution) => Promise<EditorResult>;
+  history: (value: InputHistory) => Promise<EditorResult>;
   saveCopy: (stateRevision: number) => Promise<EditorResult>;
   onState: (listener: (state: InputSnapshot) => void) => () => void;
 }>;
@@ -36,6 +38,7 @@ export function isEditorCommand(value: unknown): value is EditorCommand {
     case 'change': return isInputChange(value.value);
     case 'apply': return isInputVersion(value.value);
     case 'resolve': return isInputResolution(value.value);
+    case 'history': return isInputHistory(value.value);
     case 'save-copy': return Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
     default: return false;
   }

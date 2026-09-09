@@ -134,7 +134,9 @@ export async function checkDeparture({ use, until, barrier, pass, original, expe
     assert.equal((await f.call(`haeWorkspace.retryPersistence(${JSON.stringify(old.id)},3)`)).ok, true); await old.persistence!.settle();
     f.ui.close(); await until(() => f.ui.isDestroyed(), 'clean departure after explicit retry');
     const catalog = await f.checkpoints.catalog(); assert.equal(catalog.groups[0]!.status, 'clean'); assert.equal(catalog.groups[0]!.retirement, null);
-    await assert.rejects(f.checkpoints.restoreLatest(old.id, old.saveSource, old.mapping.source)); await unchanged(f);
+    const latest = await f.checkpoints.resolveLatest(old.checkpointSessionId, old.saveSource, old.mapping.source);
+    assert.equal(latest.candidate.patches.length, 0); assert.deepEqual(Buffer.from(latest.candidate.bytes), original);
+    assert.equal(latest.draftRevision, old.draft.revision); assert.ok(latest.history); await unchanged(f);
     pass('a failed return-to-baseline checkpoint blocks native clean close without discarding older evidence; explicit retry confirms the latest clean point and allows closure');
   }, true);
 

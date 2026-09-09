@@ -5,6 +5,9 @@ import { isSaveIntent, isTransactionId, sameStoredIdentity } from '../../contrac
 import type { RecoveryState } from '../../contracts/save-record.ts';
 import { MAX_SOURCE_BYTES } from '../../contracts/source-tree.ts';
 import { captureTextIntents, rebuildCheckpoint } from '../../core/history/checkpoint.ts';
+import { captureHistoryIntents, rebuildHistoryCheckpoint } from '../../core/history/persistence.ts';
+import type { HistoryCheckpoint } from '../../core/history/timeline.ts';
+import { freezeHistoryCheckpoint } from '../draft/history.ts';
 import type { PatchCandidate } from '../../core/patch/engine.ts';
 import { createSourceIndex } from '../../core/parser/source-index.ts';
 import type { SourceIndex } from '../../core/parser/source-index.ts';
@@ -12,14 +15,13 @@ import { checkedDirectory, digest } from '../../platform/storage-files.ts';
 import type { CheckedDirectory } from '../../platform/storage-files.ts';
 import type { SaveSource, SaveTargetState } from '../../platform/save-source.ts';
 import type { createSavePreparationStore } from './preparation.ts';
-import { readDraftHeader, readDraftRetirement } from './draft-records.ts';
+import { readDraftHeader, readDraftRetirement, freezeDraftCheckpoint as freeze } from './draft-records.ts';
 import { draftOwnership } from './draft-ownership.ts';
 
 const STORE_LIMIT = 200 * 1024 * 1024;
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(`${JSON.stringify(value)}\n`);
 const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-const freeze = (value: DraftCheckpoint): DraftCheckpoint => Object.freeze({ ...value,
-  identity: Object.freeze({ ...value.identity }), intents: Object.freeze(value.intents.map(intent => Object.freeze({ ...intent }))) });
+const historyHash = (value: DraftCheckpoint): string | null => value.version === 2 ? digest(encode(value.history)) : null;
 type SaveRecords = Awaited<ReturnType<typeof createSavePreparationStore>>;
 type OwnedLock = Awaited<ReturnType<CheckedDirectory['writeNew']>>;
 export type CheckpointInspection = Readonly<{
@@ -39,6 +41,7 @@ export type CheckpointGroup = Readonly<{
   status: 'dirty' | 'clean' | 'retired' | 'incomplete' | 'invalid' | 'ambiguous' | 'saved';
   targetState: RecoveryState; retirement: DraftRetirement['reason'] | null;
   resultHash: string | null; recordHash: string | null;
+  historyAvailable: boolean;
 }>;
 const errorCode = (error: unknown): string => {
   const value = error as { code?: string; message?: string } | null;
@@ -62,14 +65,21 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
     const value = decode(file.bytes);
     if (!isDraftCheckpoint(value) || value.checkpointId !== checkpointId) throw new Error('DRAFT_CHECKPOINT_INVALID');
     const checkpoint = freeze(value);
+    const files = await folder.entries(5);
+    const allowed = ['record.json', 'baseline.bin', 'complete.json', 'retired.json', ...(checkpoint.version === 2 ? ['origin.bin'] : [])];
+    if (files.some(file => file.kind !== 'file' || !allowed.includes(file.name))) throw new Error('DRAFT_CHECKPOINT_INVALID');
     const baseline = await folder.read('baseline.bin', MAX_SOURCE_BYTES);
     const sealed = await folder.read('complete.json', 1024); const seal = decode(sealed.bytes);
     if (!isDraftCheckpointSeal(seal) || seal.checkpointId !== checkpointId || seal.recordHash !== file.hash
       || baseline.hash !== checkpoint.baseHash || baseline.bytes.length !== checkpoint.baseSize) throw new Error('DRAFT_CHECKPOINT_INVALID');
-    const source = createSourceIndex(baseline.bytes, { projectId: 'checkpoint', documentId: checkpointId, generation: 1 }, digest);
-    rebuildCheckpoint(source, checkpoint, digest);
+    const identity = { projectId: 'checkpoint', documentId: checkpointId, generation: 1 };
+    let history: HistoryCheckpoint | null = null;
+    if (checkpoint.version === 2) {
+      const origin = await folder.read('origin.bin', MAX_SOURCE_BYTES);
+      history = freezeHistoryCheckpoint(rebuildHistoryCheckpoint(baseline.bytes, identity, checkpoint, origin.bytes, digest).capture());
+    } else rebuildCheckpoint(createSourceIndex(baseline.bytes, identity, digest), checkpoint, digest);
     await folder.verify(); await root.verify();
-    return { checkpoint, baseline: baseline.bytes, recordHash: file.hash };
+    return { checkpoint, baseline: baseline.bytes, recordHash: file.hash, history };
   };
   const classify = async (checkpoint: DraftCheckpoint, readTarget?: () => Promise<SaveTargetState>): Promise<RecoveryState> => {
     if (!readTarget) return 'unavailable';
@@ -111,7 +121,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       const files = await folder.entries(7); const saved = files.some(file => file.name === 'intent.json');
       const type = saved ? 'save' : files.some(file => file.name === 'record.json') ? 'draft' : 'unknown';
       const allowed = saved ? ['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json']
-        : ['record.json', 'baseline.bin', 'complete.json', 'retired.json'];
+        : ['record.json', 'baseline.bin', 'origin.bin', 'complete.json', 'retired.json'];
       for (const file of files) {
         if (file.kind !== 'file' || !allowed.includes(file.name)) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
         used += file.size;
@@ -133,9 +143,10 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
         // different/older header make that session look recoverable again.
         if (invalidRetirement) unclassified.push(item.name);
         // Keep only binding metadata across records, not all documents' intents.
-        const { intents, ...binding } = header.checkpoint;
+        const { history: omittedHistory, ...envelope } = header.checkpoint.version === 2 ? header.checkpoint : { ...header.checkpoint, history: undefined };
+        const { intents, ...binding } = envelope;
         known.push({ header: { folder: header.folder, checkpoint: Object.freeze(binding), hash: header.hash },
-          changeCount: intents.length, retirement, invalidRetirement });
+          changeCount: intents.length, historyHash: historyHash(header.checkpoint), retirement, invalidRetirement });
       } catch { unclassified.push(item.name); }
     }
     await root.verify();
@@ -149,6 +160,16 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
     const retirement = closed[0]?.retirement ?? null;
     if (retirement && matches.some(row => row.header.checkpoint.draftRevision > retirement.draftRevision)) throw new Error('DRAFT_RETIREMENT_INVALID');
     return retirement;
+  };
+  const selectLatest = async (sessionId: string, source: SaveSource): Promise<CheckpointGroup> => {
+    if (!isTransactionId(sessionId)) throw new Error('DRAFT_CHECKPOINT_INVALID');
+    const catalog = await operations.catalog(source.current);
+    if (catalog.locked) throw new Error('DRAFT_STORAGE_LOCKED');
+    if (catalog.unclassified.length) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
+    const group = catalog.groups.find(group => group.sessionId === sessionId);
+    if (!group || (group.status !== 'dirty' && !(group.status === 'clean' && group.historyAvailable))
+      || group.targetState !== 'baseline-matches' || !group.checkpointId) throw new Error('DRAFT_RECOVERY_UNAVAILABLE');
+    return group;
   };
   const operations = { inspect, claimSession: ownership.claim, isSessionActive: ownership.isActive,
     async catalog(readTarget?: () => Promise<SaveTargetState>) {
@@ -164,10 +185,12 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
         let status: CheckpointGroup['status'] = 'incomplete'; let checkpointId: string | null = null;
         let targetState: RecoveryState = 'incomplete'; let retirement: DraftRetirement['reason'] | null = null;
         let resultHash: string | null = null; let recordHash: string | null = null;
+        let historyAvailable = false;
         try {
           if (rows.some(row => row.header.checkpoint.targetKey !== first.targetKey || row.header.checkpoint.baseHash !== first.baseHash
             || !sameStoredIdentity(row.header.checkpoint.identity, first.identity))
-            || latest.some(row => row.header.checkpoint.resultHash !== latestValue.resultHash)) throw new Error('DRAFT_CHECKPOINT_AMBIGUOUS');
+            || latest.some(row => row.header.checkpoint.resultHash !== latestValue.resultHash
+              || row.historyHash !== latest[0]!.historyHash)) throw new Error('DRAFT_CHECKPOINT_AMBIGUOUS');
           const terminal = retirementFor(all.known, sessionId);
           if (terminal) { status = 'retired'; retirement = terminal.reason; targetState = 'unavailable'; }
           else {
@@ -177,6 +200,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
               if (value.phase === 'complete' && value.recordHash === row.header.hash) {
                 checkpointId = value.checkpointId; targetState = value.state;
                 resultHash = value.checkpoint!.resultHash; recordHash = value.recordHash;
+                historyAvailable = value.checkpoint!.version === 2;
                 status = value.state === 'committed-matches' ? 'saved' : value.checkpoint!.intents.length ? 'dirty' : 'clean'; break;
               }
               invalid ||= value.phase !== 'incomplete';
@@ -186,7 +210,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
         } catch (error) {
           status = error instanceof Error && error.message === 'DRAFT_CHECKPOINT_AMBIGUOUS' ? 'ambiguous' : 'invalid'; targetState = 'invalid';
         }
-        groups.push(Object.freeze({ ...summary, checkpointId, status, targetState, retirement, resultHash, recordHash }));
+        groups.push(Object.freeze({ ...summary, checkpointId, status, targetState, retirement, resultHash, recordHash, historyAvailable }));
       }
       return Object.freeze({ groups: Object.freeze(groups), unclassified: Object.freeze(all.unclassified), locked: all.locked,
         reviewRequired: all.unclassified.length > 0 || groups.some(group => ['invalid', 'incomplete', 'ambiguous'].includes(group.status)) });
@@ -204,7 +228,8 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       }
       return Object.freeze({ records: Object.freeze(records), locked: entries.some(item => item.name === 'active.lock') });
     },
-    async write(source: SaveSource, index: SourceIndex, candidate: PatchCandidate, sessionId: string, draftRevision: number): Promise<CheckpointWrite> {
+    async write(source: SaveSource, index: SourceIndex, candidate: PatchCandidate, sessionId: string, draftRevision: number,
+      fullHistory?: HistoryCheckpoint): Promise<CheckpointWrite> {
       let checkpointId: string | null = null; let lock: OwnedLock | undefined; let sealing = false; let acquiringLock = false;
       let resultHash = ''; let persisted = false; let cleanupPending = false; let code: string | null = null;
       if (busy) return Object.freeze({ status: 'failed', checkpointId, draftRevision, resultHash, code: 'DRAFT_STORAGE_BUSY', cleanupPending });
@@ -212,12 +237,14 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       try {
         // Freeze/validate synchronously before awaiting I/O. An external source
         // edit must not prevent retaining a draft of the originally opened bytes.
-        const intents = captureTextIntents(index, candidate, digest); const baseline = source.bytes;
+        const history = fullHistory === undefined ? undefined : freezeHistoryCheckpoint(fullHistory);
+        const intents = history ? captureHistoryIntents(index, candidate, history, digest) : captureTextIntents(index, candidate, digest);
+        const baseline = source.bytes;
         if (source.baseHash !== index.baseHash || digest(baseline) !== index.baseHash) throw new Error('DRAFT_CHECKPOINT_MISMATCH');
         resultHash = candidate.resultHash;
-        const id = randomUUID(); const record = freeze({ version: 1, checkpointId: id, sessionId, draftRevision, createdAt: Date.now(),
+        const id = randomUUID(); const record = freeze({ checkpointId: id, sessionId, draftRevision, createdAt: Date.now(),
           targetKey: source.targetKey, name: source.name, identity: source.identity, baseHash: source.baseHash,
-          baseSize: baseline.length, resultHash, intents });
+          baseSize: baseline.length, resultHash, intents, ...(history ? { version: 2 as const, history: history.record } : { version: 1 as const }) });
         if (!isDraftCheckpoint(record)) throw new Error('DRAFT_CHECKPOINT_INVALID');
         const bytes = encode(record); if (bytes.length > MAX_DRAFT_RECORD_BYTES) throw new Error('DRAFT_STORAGE_LIMIT');
         acquiringLock = true;
@@ -236,6 +263,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
             continue;
           }
           if (!isDraftCheckpoint(prior) || prior.checkpointId !== item.name) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
+          if (prior.version === 1 && (await folder.entries(5)).some(file => file.name === 'origin.bin')) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
           const retirement = await readDraftRetirement({ folder, checkpoint: prior, hash: priorFile.hash });
           if (prior.sessionId === sessionId) {
             if (prior.targetKey !== source.targetKey || prior.baseHash !== source.baseHash
@@ -246,24 +274,28 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
           if (prior.sessionId === sessionId && prior.draftRevision > draftRevision) throw new Error('DRAFT_CHECKPOINT_STALE');
           if (prior.sessionId === sessionId && prior.draftRevision === draftRevision) {
             if (prior.targetKey !== record.targetKey || prior.baseHash !== record.baseHash || prior.resultHash !== record.resultHash
-              || !sameStoredIdentity(prior.identity, record.identity)) throw new Error('DRAFT_CHECKPOINT_STALE');
+              || historyHash(prior) !== historyHash(record) || !sameStoredIdentity(prior.identity, record.identity)) throw new Error('DRAFT_CHECKPOINT_STALE');
             const existing = await inspect(item.name);
             if (existing.phase === 'complete') {
               const actual = existing.checkpoint!;
               if (actual.sessionId !== sessionId || actual.draftRevision !== draftRevision || actual.targetKey !== record.targetKey
                 || actual.baseHash !== record.baseHash || actual.resultHash !== resultHash
-                || !sameStoredIdentity(actual.identity, record.identity)) throw new Error('DRAFT_CHECKPOINT_STALE');
+                || historyHash(actual) !== historyHash(record) || !sameStoredIdentity(actual.identity, record.identity)) throw new Error('DRAFT_CHECKPOINT_STALE');
               existingId = item.name;
             }
           }
         }
         if (existingId) { await lock.verifyOwned(); checkpointId = existingId; persisted = true; }
         else {
-          if (count >= 20 || used + baseline.length + bytes.length + 1024 > STORE_LIMIT) throw new Error('DRAFT_STORAGE_LIMIT');
+          if (count >= 20 || used + baseline.length + (history?.record.originSize ?? 0) + bytes.length + 1024 > STORE_LIMIT) throw new Error('DRAFT_STORAGE_LIMIT');
           const folder = await root.directory(id, true); checkpointId = id;
           await onStep('directory');
           const header = await folder.writeNew('record.json', bytes, step => onStep(`record-${step}`));
           await folder.writeNew('baseline.bin', baseline, step => onStep(`baseline-${step}`));
+          if (history) {
+            await folder.writeNew('origin.bin', history.originBytes, step => onStep(`origin-${step}`));
+            if ((await folder.read('origin.bin', MAX_SOURCE_BYTES)).hash !== history.record.originHash) throw new Error('DRAFT_CHECKPOINT_INVALID');
+          }
           if ((await folder.read('record.json', MAX_DRAFT_RECORD_BYTES)).hash !== header.hash
             || (await folder.read('baseline.bin', MAX_SOURCE_BYTES)).hash !== record.baseHash) throw new Error('DRAFT_CHECKPOINT_INVALID');
           await lock.verifyOwned();
@@ -285,7 +317,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       return Object.freeze({ status: persisted ? 'persisted' : sealing ? 'unknown' : 'failed', checkpointId, draftRevision, resultHash, code, cleanupPending });
     },
     async restoreCandidate(checkpointId: string, source: SaveSource, index: SourceIndex): Promise<PatchCandidate> {
-      const { checkpoint } = await load(checkpointId);
+      const { checkpoint, history } = await load(checkpointId);
       const assertActive = async (): Promise<void> => {
         const all = await records();
         if (all.unclassified.length) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
@@ -295,20 +327,27 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
       const state = await classify(checkpoint, source.current);
       if (state === 'committed-matches') throw new Error('DRAFT_ALREADY_SAVED');
       if (state !== 'baseline-matches' || index.baseHash !== source.baseHash) throw new Error('DRAFT_RECOVERY_CONFLICT');
-      await source.verify(); const candidate = rebuildCheckpoint(index, checkpoint, digest); await source.verify(); await assertActive();
+      await source.verify();
+      const candidate = checkpoint.version === 2
+        ? rebuildHistoryCheckpoint(index.bytes, index.identity, checkpoint, history!.originBytes, digest).candidate
+        : rebuildCheckpoint(index, checkpoint, digest);
+      if (history) captureHistoryIntents(index, candidate, history, digest);
+      await source.verify(); await assertActive();
       return candidate;
     },
+    // Main preflights lineage before creating the unpublished Preview mapping.
+    // The later resolveLatest call reselects/revalidates the complete checkpoint.
+    async readLatestHistory(sessionId: string, source: SaveSource) {
+      const before = await selectLatest(sessionId, source); await source.verify();
+      const loaded = await load(before.checkpointId!); await source.verify();
+      if (loaded.recordHash !== before.recordHash) throw new Error('DRAFT_CHECKPOINT_CHANGED');
+      return loaded.history;
+    },
     async resolveLatest(sessionId: string, source: SaveSource, index: SourceIndex) {
-      if (!isTransactionId(sessionId)) throw new Error('DRAFT_CHECKPOINT_INVALID');
-      const select = async () => {
-        const catalog = await operations.catalog(source.current);
-        if (catalog.locked) throw new Error('DRAFT_STORAGE_LOCKED');
-        if (catalog.unclassified.length) throw new Error('DRAFT_STORAGE_REVIEW_REQUIRED');
-        const group = catalog.groups.find(group => group.sessionId === sessionId);
-        if (!group || group.status !== 'dirty' || group.targetState !== 'baseline-matches' || !group.checkpointId) throw new Error('DRAFT_RECOVERY_UNAVAILABLE');
-        return group;
-      };
+      const select = () => selectLatest(sessionId, source);
       const before = await select(); const candidate = await operations.restoreCandidate(before.checkpointId!, source, index);
+      const loaded = await load(before.checkpointId!);
+      if (loaded.recordHash !== before.recordHash) throw new Error('DRAFT_CHECKPOINT_CHANGED');
       const verifySource = async (): Promise<void> => {
         try { await source.verify(); } catch { throw new Error('DRAFT_RECOVERY_CONFLICT'); }
       };
@@ -318,7 +357,7 @@ export async function createDraftCheckpointStore(path: string, onStep: (step: st
           || before.recordHash !== after.recordHash || candidate.resultHash !== after.resultHash) throw new Error('DRAFT_CHECKPOINT_CHANGED');
       };
       await verify();
-      return Object.freeze({ candidate, sessionId, checkpointId: before.checkpointId!, draftRevision: before.draftRevision, verify });
+      return Object.freeze({ candidate, history: loaded.history, sessionId, checkpointId: before.checkpointId!, draftRevision: before.draftRevision, verify });
     },
     async restoreLatest(sessionId: string, source: SaveSource, index: SourceIndex): Promise<PatchCandidate> {
       return (await operations.resolveLatest(sessionId, source, index)).candidate;

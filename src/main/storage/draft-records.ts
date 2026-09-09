@@ -1,14 +1,19 @@
 import { isDraftCheckpoint, isDraftRetirement, MAX_DRAFT_RECORD_BYTES } from '../../contracts/draft-checkpoint.ts';
 import type { DraftCheckpoint, DraftRetirement } from '../../contracts/draft-checkpoint.ts';
 import type { CheckedDirectory } from '../../platform/storage-files.ts';
+import { freezeHistoryRecord } from '../../contracts/history.ts';
+
+export const freezeDraftCheckpoint = (value: DraftCheckpoint): DraftCheckpoint => Object.freeze({ ...value,
+  identity: Object.freeze({ ...value.identity }), intents: Object.freeze(value.intents.map(intent => Object.freeze({ ...intent }))),
+  ...(value.version === 2 ? { history: freezeHistoryRecord(value.history) } : {}),
+});
 
 const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 export async function readDraftHeader(root: CheckedDirectory, id: string) {
   const folder = await root.directory(id); const file = await folder.read('record.json', MAX_DRAFT_RECORD_BYTES);
   const value = decode(file.bytes);
   if (!isDraftCheckpoint(value) || value.checkpointId !== id) throw new Error('DRAFT_CHECKPOINT_INVALID');
-  const checkpoint: DraftCheckpoint = Object.freeze({ ...value, identity: Object.freeze({ ...value.identity }),
-    intents: Object.freeze(value.intents.map(intent => Object.freeze({ ...intent }))) });
+  const checkpoint = freezeDraftCheckpoint(value);
   return { folder, checkpoint, hash: file.hash };
 }
 export async function readDraftRetirement(header: Readonly<{ folder: CheckedDirectory; hash: string;

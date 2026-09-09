@@ -137,12 +137,14 @@ async function run(): Promise<void> {
       f.ui.close(); await delay(20); assert.equal(f.ui.isDestroyed(), false);
       hold.release(); const saved = await pendingSave; assert.ok(saved.ok, saved.code ?? 'Save failed'); assert.equal(saved.outcome, 'saved');
       assert.deepEqual(await readFile(f.entry), expected); assert.notEqual(f.current().id, old.id);
-      assert.equal(f.current().persistence!.snapshot().status, 'idle');
-      const checkpoint = (await f.checkpoints.scan()).records[0]!;
+      assert.equal((await f.current().persistence!.settle()).status, 'persisted');
+      assert.equal(f.current().draft.revision, old.draft.revision + 1);
+      const checkpoint = (await f.checkpoints.scan()).records.find(record => record.summary?.sessionId === old.checkpointSessionId)!;
       assert.equal((await f.checkpoints.inspect(checkpoint.checkpointId, f.current().saveSource.current)).state, 'committed-matches');
       await f.select('#date'); await f.change('2026-09-09'); await f.apply(); await f.current().persistence!.settle();
-      const next = (await f.checkpoints.scan()).records.find(record => record.summary?.sessionId === f.current().id)!;
-      assert.equal(next.summary!.baseHash, hash(expected)); assert.equal(next.summary!.draftRevision, 2);
+      const next = (await f.checkpoints.scan()).records.filter(record => record.summary?.sessionId === f.current().checkpointSessionId)
+        .sort((a, b) => b.summary!.draftRevision - a.summary!.draftRevision)[0]!;
+      assert.equal(next.summary!.baseHash, hash(expected)); assert.equal(next.summary!.draftRevision, f.current().draft.revision);
       assert.deepEqual(await readFile(f.entry), expected, 'post-save Apply only writes private evidence');
     } finally { hold.release(); await pendingSave; }
     pass('Save waits for the checkpoint writer before taking its shared lock, freezes edits/close, deduplicates the saved checkpoint and persists subsequent edits against the new baseline');
@@ -194,11 +196,15 @@ async function run(): Promise<void> {
     f.control.draftStep = async step => { if (step === 'baseline-created') throw Object.assign(new Error('injected checkpoint failure'), { code: 'ENOSPC' }); };
     await f.dirty(); await f.current().persistence!.settle();
     assert.equal(f.current().persistence!.snapshot().status, 'failed');
+    const failedCheckpoint = (await f.checkpoints.scan()).records[0]!.checkpointId;
     await f.change('仍可显式保存 <&>'); await f.apply();
     const saved = await f.save(); assert.equal(saved.outcome, 'saved'); assert.equal(saved.ok, true);
     assert.deepEqual(await readFile(f.entry), Buffer.from(original.toString().replace('A &amp; 😀', '仍可显式保存 &lt;&amp;&gt;')));
     assert.equal((await f.store.scan()).records[0]!.phase, 'committed');
-    const evidence = await f.checkpoints.scan(); assert.equal(evidence.records.length, 1); assert.notEqual(evidence.records[0]!.phase, 'complete');
+    assert.equal((await f.current().persistence!.settle()).status, 'failed');
+    const evidence = await f.checkpoints.scan(); assert.equal(evidence.records.length, 2);
+    assert.ok(evidence.records.some(record => record.checkpointId === failedCheckpoint));
+    assert.ok(evidence.records.every(record => record.phase !== 'complete'));
     pass('failed checkpoint persistence does not disable an explicit verified Save; the latest applied bytes are saved while incomplete private evidence remains intact');
   }, true);
   await use(async f => {

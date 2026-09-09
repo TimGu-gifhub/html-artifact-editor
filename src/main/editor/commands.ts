@@ -6,7 +6,10 @@ const publicErrors = new Set(['INPUT_BUSY', 'STALE_INPUT', 'INPUT_COMPOSING', 'I
   'STALE_INPUT_BEGIN', 'STALE_SELECTION', 'STALE_EDIT_INTENT', 'STALE_INPUT_STATE', 'UNAPPLIED_INPUT',
   'DRAFT_UNAVAILABLE', 'STALE_DRAFT_REQUEST', 'TARGET_READ_ONLY', 'DRAFT_PREPARE_CANCELLED',
   'DRAFT_PREPARE_FAILED', 'DRAFT_PREPARE_TIMEOUT', 'DRAFT_OUTCOME_UNKNOWN', 'INVALID_TEXT_NUL',
-  'INVALID_UNICODE', 'TEXT_SIZE_LIMIT', 'PATCH_COUNT_LIMIT', 'CANDIDATE_SIZE_LIMIT']);
+  'INVALID_UNICODE', 'TEXT_SIZE_LIMIT', 'PATCH_COUNT_LIMIT', 'CANDIDATE_SIZE_LIMIT',
+  'HISTORY_UNAVAILABLE', 'STALE_HISTORY_TRANSITION', 'HISTORY_PREPARE_CANCELLED', 'HISTORY_PREPARE_FAILED',
+  'HISTORY_PREPARE_TIMEOUT', 'HISTORY_WORKER_STOP_FAILED', 'HISTORY_OPERATION_LIMIT', 'HISTORY_TARGET_LIMIT',
+  'HISTORY_STORAGE_LIMIT', 'HISTORY_REVISION_LIMIT']);
 
 export async function executeEditorCommand(input: InputController, command: EditorCommand,
   chooseCopy: () => Promise<string | undefined>, writer: NewFileWriter, active: () => boolean,
@@ -20,6 +23,7 @@ export async function executeEditorCommand(input: InputController, command: Edit
       case 'change': input.change(command.value); break;
       case 'apply': await input.apply(command.value); break;
       case 'resolve': await input.resolve(command.value); break;
+      case 'history': await input.history(command.value); break;
       case 'save-copy': {
         const outcome = await input.saveCopy(command.stateRevision, () => chooseWhileActive(chooseCopy, active, signal), writer);
         copy = outcome ? input.snapshot().lastCopy! : { status: 'cancelled' };

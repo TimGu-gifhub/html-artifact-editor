@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建、HAE-011 的草稿检查点/恢复与源码 Diff 实验。
+日期：2026-09-09。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存与文档/窗口保护，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建、HAE-011 的草稿检查点/恢复、源码 Diff、Main 历史与保存点实验。
 
 ## 固定版本
 
@@ -40,7 +40,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 
 | 命令 | 产物或检查 |
 | --- | --- |
-| `npm run build` | 九个 JS/页面构建目标（含 Diff Worker），另构建 Windows 原生替换助手 |
+| `npm run build` | 十个 JS/页面构建目标（含 Diff/History Worker），另构建 Windows 原生替换助手 |
 | `npm run build:main` | out/main/index.cjs |
 | `npm run build:native` | Windows .NET Framework 编译原生替换助手；其他 OS 明示不支持 |
 | `npm run build:preload:ui` | out/preload/ui/index.cjs，独立单文件 CJS |
@@ -63,7 +63,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:save-session` | Windows 真实 Electron 窗口、生产 IPC、原文件保存/重建、崩溃/未知结果/外部冲突/清理警告；无产品控件或真实 IME |
 | `npm run test:recovery` | 真实 Electron 的恢复列表/重新授权/新映射安装、进程所有权、恢复后编辑与 Windows 保存去重；自制空白 transport 页面，无产品验收 |
 | `npm run test:source-diff` | 真实 Electron 生产接口读取完整源码 Diff、拒绝旧确认、重连及 Windows 保存字节/冲突检查；无产品 Diff 面板 |
-| `npm run test:history` | 逻辑历史通过真实 Worker、Main Windows 保存端口和隔离 Preview，验证空 Text 安装/恢复、保存点/分支、原生选择/编辑锁、确认丢失及来源/DOM 拒绝；未接 Workspace 历史命令或历史磁盘存储 |
+| `npm run test:history` | 逻辑历史通过真实 Worker、Main Windows 保存端口和隔离 Preview，验证空 Text 安装/恢复、保存点/分支、原生选择/编辑锁、确认丢失及来源/DOM 拒绝；另含可信 Workspace history、v2 检查点和实际进程重启；无产品控件 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run preview:directory` | 原生选择根目录及其中 HTML，保留嵌套相对资源路径；只读校稿预览，诊断输出到终端 |
@@ -75,7 +75,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 
 开发 Node 的单元套件使用 `--test-concurrency=4`，避免随主机 CPU 数量增加而同时启动过多原生文件/子进程实验。此限制只控制测试文件调度，不改变用例内部的并发竞态、故障断言和单项期限。超时或取消仍使门槛失败，须保留日志并定位后重跑。
 
-HAE-011 第七阶段增加来源重建与历史单元检查，完整逻辑记录的内存往返不代表磁盘持久化。`test:history` 的报告位于 test-results/history.json，使用独立实验入口和自制文件；Windows 原生 Save 成功、取消、冲突、未知结果分别断言，其他 OS 对未执行的 Windows 路径标记 pending。第八阶段把来源证明接入有限 Parser Worker 与隔离 Preview，新增八组真实 DOM/确认协议实验，共十六组；窗口命令、输入协调和完整历史存储仍待接通。见 [逻辑历史合同](HISTORY.md) 与 [执行记录](implementation/HAE-011.md)。
+HAE-011 第七阶段增加来源重建与历史单元检查，完整逻辑记录的内存往返不代表磁盘持久化。`test:history` 的报告位于 test-results/history.json，使用独立实验入口和自制文件；Windows 原生 Save 成功、取消、冲突、未知结果分别断言，其他 OS 对未执行的 Windows 路径标记 pending。第八阶段把来源证明接入有限 Parser Worker 与隔离 Preview，新增八组真实 DOM/确认协议实验，共十六组；第九阶段接通 Main 文档/InputController/Workspace 历史与 v2 完整检查点，新增六组窗口/独立进程恢复实验，共二十二组；未验收产品快捷键和真实 IME。见 [逻辑历史合同](HISTORY.md) 与 [执行记录](implementation/HAE-011.md)。
 
 另运行 `python tools/check_docs.py` 与 `git diff --check`。构建目录、安装器、测试截图与临时 profile 均被忽略；不得提交个人 HTML 或私有诊断材料。
 
@@ -105,7 +105,7 @@ HAE-010 第一阶段增加 10 项真实存储/进程测试，当时共 151 单�
 
 第四阶段新增 `tests/unit/save-recovery.test.mjs`，验证 Main 备份恢复的 v1/v2 记录、当前文件再次备份、实际恢复/反向恢复、来源损坏/换名/同文改写、外部冲突、互斥、故障和三个真实 Main 强杀点。该阶段 Windows 的 `test:storage` 在 Electron 内嵌 Node 执行准备、提交、恢复三份测试文件；其他平台只重跑准备文件并标记原生替换 unsupported，不据此宣称恢复已在其他平台验证。
 
-HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备、检查点存储和生命周期文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。第二阶段增加七项队列/Apply 单元行为及实际会话实验，验证有界排队、准确版本、错误/重试、Save/关闭协调和 renderer 崩溃。第三阶段增加九项生命周期行为，覆盖最新修订、结束标记、损坏证据、共用锁、配额与实际进程强杀。第四阶段增加七项离开协调单元和十组真实窗口行为；`test:save-session` 共 26 组，整套期限为 90 秒，各交互等待仍单独有界。开发 Node、内嵌 Node 与会话结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。第五阶段新增真实恢复安装与进程占用检查。第六阶段增加冻结字节的源码 Diff Worker、可信读取和 Save review，默认构建目标增加到九个；结果写入 test-results/source-diff.json，完整门槛记录见 [HAE-011](implementation/HAE-011.md)。正常产品入口、恢复/Diff 控件、结束失败后的处理、清理和历史仍待接入。
+HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备、检查点存储和生命周期文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。第二阶段增加七项队列/Apply 单元行为及实际会话实验，验证有界排队、准确版本、错误/重试、Save/关闭协调和 renderer 崩溃。第三阶段增加九项生命周期行为，覆盖最新修订、结束标记、损坏证据、共用锁、配额与实际进程强杀。第四阶段增加七项离开协调单元和十组真实窗口行为；`test:save-session` 共 26 组，整套期限为 90 秒，各交互等待仍单独有界。开发 Node、内嵌 Node 与会话结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。第五阶段新增真实恢复安装与进程占用检查。第六阶段增加冻结字节的源码 Diff Worker、可信读取和 Save review，默认构建目标增加到九个；结果写入 test-results/source-diff.json，完整门槛记录见 [HAE-011](implementation/HAE-011.md)。第九阶段加入 History Worker 和完整 v2 检查点，默认构建目标为十个；test:storage 另运行 history-persistence.test.mjs，覆盖源证明、干净点/Redo、篡改、写入异常和不可降格。正常产品入口、恢复/历史/Diff 控件、结束失败后的处理、清理和提交后未重建的恢复协调仍待接入。
 
 单文件原生选择器以 HTML 父目录为根；目录入口先明确授权根，再选择根内 HTML，切换入口保留原根身份。两种方式都不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 

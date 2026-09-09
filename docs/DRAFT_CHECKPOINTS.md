@@ -1,6 +1,6 @@
 # 草稿检查点与恢复候选
 
-日期：2026-09-09；HAE-011 第六阶段。已实现纯核心逻辑编辑意图、Main 私有检查点存储、可选窗口持久化端口，以及最新点选择、会话结束标记、窗口离开协调与恢复安装，执行记录见 [HAE-011](implementation/HAE-011.md)。调用者须为 Main；正常产品入口与恢复界面尚未接入。检查点成功仅表示该版本的私有证据完成写入和回读，不表示 HTML 已保存。
+日期：2026-09-09；HAE-011 第九阶段。已实现纯核心逻辑编辑意图、Main 私有检查点存储、可选窗口持久化端口，以及最新点选择、会话结束标记、窗口离开协调与恢复安装，执行记录见 [HAE-011](implementation/HAE-011.md)。调用者须为 Main；正常产品入口与恢复界面尚未接入。检查点成功仅表示该版本的私有证据完成写入和回读，不表示 HTML 已保存。
 
 ## 1. 来源与恢复权限
 
@@ -12,12 +12,13 @@
 
 ## 2. 私有格式与写入结果
 
-每次写入创建独立 UUID 目录，依次创建并同步三个不可覆盖文件：
+每次写入创建独立 UUID 目录，依次创建并同步不可覆盖文件。v1 仅保存净意图，v2 另外保存完整历史：
 
 | 文件 | 内容与校验 |
 | --- | --- |
-| record.json | 严格 v1 schema：checkpointId、sessionId、draftRevision、createdAt、targetKey、显示名称、文件身份、baseHash/baseSize、resultHash、逻辑 intents |
+| record.json | v1 的十二字段绑定：checkpointId、sessionId、draftRevision、createdAt、targetKey、显示名称、文件身份、baseHash/baseSize、resultHash、逻辑 intents；v2 加 history 字段且 version=2 |
 | baseline.bin | 打开时完整原始字节，最多 5 MiB；大小和 hash 必须与 record 相同 |
+| origin.bin（v2 必需） | 最初来源字节，最多 5 MiB；大小/hash 由 history.originSize/originHash 绑定，全树与字节间隔证明重建保存点 |
 | complete.json | v1 seal，关联 checkpointId 及 record.json 的完整 hash；最后写入 |
 | retired.json（可选） | 会话结束时追加的 v1 标记，绑定所在检查点 ID/recordHash、sessionId、结束修订、discarded/copied 原因和时间；最多 2 KiB，严格七字段 |
 
@@ -32,13 +33,13 @@
 | unknown | seal 写入已开始但未确认完整结果；重读证据后才能判断，不自动回放 |
 | cleanupPending | 与上述状态独立；只移除仍能证明属于本次写入的锁，清理失败保留证据；不能把已确认 persisted 改报未持久化 |
 
-相同 sessionId/revision/base/result/文件身份的重试，可独立验证既有完整点并返回同一 ID；未完成点保留，符合相同修订绑定时可用新 UUID 重试。旧修订、同修订另一候选拒绝。同一会话的所有修订必须使用同一目标、基线和文件身份；已有结束标记时禁止该会话继续写入。记录头或结束标记损坏、归属不明时停止写入，不能绕过证据创建另一份“成功”。
+相同 sessionId/revision/base/result/文件身份的重试，可独立验证既有完整点并返回同一 ID；未完成点保留，符合相同修订绑定时可用新 UUID 重试。v2 还核对完整历史记录；同修订同候选但不同操作/Redo 分支也拒绝，不能降格为 v1。旧修订、同修订另一候选拒绝。同一会话的所有修订必须使用同一目标、基线和文件身份；已有结束标记时禁止该会话继续写入。记录头或结束标记损坏、归属不明时停止写入，不能绕过证据创建另一份“成功”。
 
 ## 3. 与保存共用锁和配额
 
 草稿与 [保存事务](SAVE_PREPARATION.md) 必须放在同一个 Main 私有目录。传入保存存储作提交核验时，两者核对完整目录身份链；不同目录被拒绝，不接收来自页面的路径。两类写入共用 active.lock：保存准备未结束时草稿拒绝，草稿写入未结束时保存拒绝。锁仅协调合作实例；遗留锁不按时间、PID 或候选 hash 自动解除。
 
-每目标合计最多 20 份草稿/保存记录，整个目录合计 200 MiB，根最多枚举 512 项。保存目录最多七个已知文件，草稿目录最多上述四个。配额在同一锁内计算，包含不完整和已结束会话的证据；不自动删除最后备份或旧检查点。达到限制明确失败。结束标记追加到既有目录，不占新记录名额，但仍需 2 KiB 的容量余量。清理流程尚未实现；连续长时间校稿可能达到此限制，不能当作可无限持续编辑的产品验收。
+每目标合计最多 20 份草稿/保存记录，整个目录合计 200 MiB，根最多枚举 512 项。保存目录最多七个已知文件，v1 草稿目录最多四个，v2 最多五个；origin.bin 计入相同配额。配额在同一锁内计算，包含不完整和已结束会话的证据；不自动删除最后备份或旧检查点。达到限制明确失败。结束标记追加到既有目录，不占新记录名额，但仍需 2 KiB 的容量余量。清理流程尚未实现；连续长时间校稿可能达到此限制，不能当作可无限持续编辑的产品验收。
 
 两种 scan 分别列出自己的原始记录；检查点 scan 只返回身份、修订、hash 和变更数量等摘要，不提供恢复决策。会话分类与最新候选须用第 6 节的 catalog/restoreLatest。归零后的完整检查点保留零项 intents 和原始 resultHash，不会自动退回旧的有修改点。
 
@@ -52,7 +53,7 @@
 
 Main 给 [createWorkspaceSession](../src/main/workspace/session.ts) 提供同目录的 checkpoints 端口后，每份文档创建独立 [持久化队列](../src/main/draft/persistence.ts)，固定打开时 SaveSource、SourceIndex 和 checkpointSessionId。普通打开时它等于文档会话 ID；恢复时沿用原持久化序列，UI 文档身份独立更新。没有此端口时 current.persistence=null；正常产品入口尚未安装这个端口。
 
-确认成功且确有变化的 Apply 同步固定候选后异步启动私有写入。no-op、验证拒绝或 Preview 应用结果 unknown 都不会冒充已确认版本；回到原文的变更仍排入零净变化检查点。队列最多保留一个正在写的候选和一个最新待写候选，后来的 Apply 替代尚未开始的中间版本，不取消或覆盖已经开始的写入。
+确认成功且确有变化的 Apply、Undo、Redo 同步固定候选与对应完整历史后异步启动私有写入。no-op、验证拒绝或 Preview 应用结果 unknown 都不会冒充已确认版本；回到原文的变更仍排入零净变化检查点。队列最多保留一个正在写的候选和一个最新待写候选，后来的 Apply 替代尚未开始的中间版本，不取消或覆盖已经开始的写入。
 
 写入失败/未知保留上次确认的持久化修订以及最新内存草稿，停止自动启动后续写入；新的 Apply 只更新待写候选，不自动重试。可信 UI 的 retryPersistence(documentId, draftRevision) 必须针对仍为当前文档的最新修订，只重试该冻结候选。已有清理待处理状态禁止重试；不解除遗留锁、不回放 HTML。重试启动成功只表示请求被接受，最后写入状态通过 read/onState 读取。
 
@@ -61,7 +62,7 @@ Main 给 [createWorkspaceSession](../src/main/workspace/session.ts) 提供同目
 | 字段 | 含义 |
 | --- | --- |
 | status | idle / writing / persisted / failed / unknown；描述当前队列结果，不等于原 HTML 保存状态 |
-| draftRevision | 最新已确认 Apply 的草稿修订，初始为 1 |
+| draftRevision | 最新已确认草稿修订，新历史初始为 1；Undo/Redo 与保存点重建也递增 |
 | writingRevision / queuedRevision | 正在写与尚未开始的最新修订；无则为 null |
 | persisted | 最后实际确认的 draftRevision/resultHash；从未确认则为 null |
 | code / cleanupPending / canRetry | 有界错误、私有锁清理状态及当前是否接受重试 |
@@ -78,11 +79,11 @@ lastDeparture 提供 documentId/status/code/cleanupPending/requiresReview，不�
 
 ## 6. 会话目录与最新恢复候选
 
-catalog 按 sessionId 分组，只返回 Main 元数据，不保留整批意图或源字节。选择依据是最大的 draftRevision；createdAt 只作记录，不能用时钟顺序替代修订顺序。同一会话混用目标/基线/文件身份、最高修订出现不同 resultHash 时为 ambiguous。最高修订只有部分或损坏记录时为 incomplete/invalid，不回退旧点；相同绑定和结果的完整重试可替代同修订未完成尝试。
+catalog 按 sessionId 分组，只返回 Main 元数据，不保留整批意图或源字节。选择依据是最大的 draftRevision；createdAt 只作记录，不能用时钟顺序替代修订顺序。同一会话混用目标/基线/文件身份、最高修订出现不同 resultHash 或不同完整历史时为 ambiguous。最高修订只有部分或损坏记录时为 incomplete/invalid，不回退旧点；相同绑定和结果的完整重试可替代同修订未完成尝试。
 
 完整最新点按净意图区分 dirty/clean；只有精确提交证明才为 saved，只有有效结束标记才为 retired。targetState 单独说明当前授权目标的 baseline-matches、conflict、candidate-on-disk、unavailable 等状态。归属不明的记录头或损坏的结束标记同时列入 unclassified，设置 reviewRequired，避免损坏的标记锚点使旧会话重新成为可恢复草稿。locked 独立报告遗留或活动锁。
 
-restoreLatest(sessionId, source, index) 只为 dirty 且 baseline-matches 的最新完整点重建内存候选；有锁或无法归类的证据则拒绝。重建前后重新选择，并要求检查点 ID、修订、记录 hash 和完整候选 hash 一致。明确读取某个点的 restoreCandidate 仍须 Main 授权和源版本复核，也拒绝已结束会话及无法归类的证据；它仅用于提取候选，不能拿旧点读取绕过正常最新点决策。两个接口均不安装 Preview、不写 HTML、不解除锁。
+restoreLatest(sessionId, source, index) 为 dirty 或包含完整历史的 clean v2 最新点重建内存候选，二者均须 baseline-matches；clean v2 只恢复历史/Redo，不采用旧脏候选；有锁或无法归类的证据则拒绝。重建前后重新选择，并要求检查点 ID、修订、记录 hash 和完整候选 hash 一致。明确读取某个点的 restoreCandidate 仍须 Main 授权和源版本复核，也拒绝已结束会话及无法归类的证据；它仅用于提取候选，不能拿旧点读取绕过正常最新点决策。两个接口均不安装 Preview、不写 HTML、不解除锁。
 
 ## 7. 明确结束一个持久化会话
 
@@ -96,11 +97,11 @@ retired 表示标记已核验；没有该会话记录返回 empty，不生成持
 
 ## 8. 恢复到窗口
 
-可信 [Workspace API](WORKSPACE_SESSION.md) 的 listRecovery 返回 [纯摘要](../src/contracts/recovery.ts)：entries 中只有 sessionId/name/draftRevision/status/active，另有 locked/reviewRequired。不含路径、目标键、检查点 ID、字节或写入位置；多个并发列表请求共用一次进行中的扫描。未选择源文件时不能核验提交或当前基线，dirty 只说明检查点有净意图，不能直接显示成“可恢复”或“尚未保存”。active 是扫描结束时 Main 的会话占用摘要，恢复时仍重新检查。
+可信 [Workspace API](WORKSPACE_SESSION.md) 的 listRecovery 返回 [纯摘要](../src/contracts/recovery.ts)：entries 中只有 sessionId/name/draftRevision/status/active/historyAvailable，另有 locked/reviewRequired。不含路径、目标键、检查点 ID、字节或写入位置；多个并发列表请求共用一次进行中的扫描。未选择源文件时不能核验提交或当前基线，dirty 只说明检查点有净意图，不能直接显示成“可恢复”或“尚未保存”。active 是扫描结束时 Main 的会话占用摘要，恢复时仍重新检查。
 
 restore(sessionId, stateRevision, sourceMode) 要求明确 Main 选择器授权，sourceMode 为 file 或 directory，preload 默认 file；不从记录推导路径，也不把 UI 字符串当作目录权限。单文件模式仍以 HTML 父目录为根，目录模式重新选择根与入口。当前窗口仍适用原有离开确认、版本、组合态、输入冻结和故障保护。
 
-[prepareDocument](../src/main/workspace/document.ts) 生成新 Preview 和 SourceIndex，claim 原持久化序列，再由 resolveLatest 取得最新完整 dirty 候选及 Main 私有核验函数。恢复时重查原始文件身份/hash、逻辑目标和完整候选字节；只接收第 6 节的最新点。隔离 registry 的 [restore 协议](../src/contracts/mapping-restore.ts) 只允许 revision=1、无选择或编辑锁的新映射，一批最多 1000 个唯一 Text、每项新文本 64 Ki UTF-16 单元，整批有源大小限制；不含路径或 offset。所有 DOM 目标与旧值在第一次赋值前核验，保持 MutationObserver 开启并逐项核对实际 Text 写入，完成后映射修订变为 2。它不是页面 API，也不伪造用户点击。
+[prepareDocument](../src/main/workspace/document.ts) 生成新 Preview，claim 原持久化序列并核验打开快照；readLatestHistory 在映射前验证 v2 来源证明，再由有限 Parser Worker 建立必要的空 Text。resolveLatest 再次选择完整点，取得候选、历史和 Main 私有核验函数。v1 继续使用普通映射。恢复时重查原始文件身份/hash、逻辑目标和完整候选字节；只接收第 6 节的最新点。隔离 registry 的 [restore 协议](../src/contracts/mapping-restore.ts) 只允许 revision=1、无选择或编辑锁的新映射，一批最多 1000 个唯一 Text、每项新文本 64 Ki UTF-16 单元，整批有源大小限制；不含路径或 offset。所有 DOM 目标与旧值在第一次赋值前核验，保持 MutationObserver 开启并逐项核对实际 Text 写入，完成后映射修订变为 2。它不是页面 API，也不伪造用户点击。
 
 Main 只在收到准确确认后发布内存候选；恢复批次若失败或未知，关闭尚未发布的视图并保留原私有记录，不写 HTML。未知异常可能已经改变候选视图的一部分，不能把内部 DOM 操作宣称为原子事务。安装前后再次核验源版本、最新记录 ID/修订/记录 hash 和完整候选 hash；较新检查点或外部文件变化使安装失败。旧草稿的结束标记已确认而新恢复证明失效时，回滚到保留的旧视图，准确保留 retired 状态和故障原因，冻结旧输入并要求恢复，不把新视图报成已安装。
 
@@ -112,8 +113,8 @@ Main 只在收到准确确认后发布内存候选；恢复批次若失败或未
 
 ## 9. 后续接线与验收
 
-HAE-011 第七阶段提供独立的 [逻辑历史记录](HISTORY.md)，但尚未扩展本文件的私有磁盘格式。现有 v1 检查点导入/导出拒绝带 lineage 的来源，以 DRAFT_HISTORY_UNSUPPORTED 阻止遗漏最初来源证明和 Undo/Redo 分支；Main 存储在获取锁或创建文件前报告失败。正常 Workspace 仍使用原草稿机制。不能把历史记录的内存/JSON 往返称为完整历史的磁盘持久化或重启产品验收。
+v2 的 [完整历史记录](HISTORY.md) 由新 Main 文档默认产生，包含有界操作链、Redo、独立保存点和最初来源。同一待写项同步冻结候选、修订和历史，合并队列不能把另一修订的历史附在旧候选上。v1 导入/导出仍拒绝 lineage；恢复 v1 的 history=null，保留净意图并且不能撤销恢复前的操作。明确 Save 后可开始新历史，但不会补造旧顺序。
 
-仍待实现产品恢复控件、结束操作失败后的处理、历史/跨保存撤销重做、产品 Diff 面板及正常产品入口。源码 Diff 的只读数据与保存确认已接入，见 [源码 Diff](SOURCE_DIFF.md)。结束失败/未知时保留的冻结会话目前不能由用户在产品中继续处理；没有强制离开、自动解锁或绕过标记的重试。未应用输入仍是既有 Main 内存状态；没有持久化它，也没有持久化未获 Preview 确认的 uncertainCandidate。检查点候选重建仍由 Main 调用纯核心，Worker 接线与性能预算尚需验证。
+仍待实现产品恢复控件、结束操作失败后的处理、产品历史/Diff 面板及正常产品入口。源码 Diff 的只读数据与保存确认已接入，见 [源码 Diff](SOURCE_DIFF.md)。结束失败/未知时保留的冻结会话目前不能由用户在产品中继续处理；没有强制离开、自动解锁或绕过标记的重试。未应用输入仍是既有 Main 内存状态；没有持久化它，也没有持久化未获 Preview 确认的 uncertainCandidate。活动历史计算已使用有限 Worker；私有存储验证仍由 Main 调用纯核心，满配额/大历史的交互性能尚需验证。原生提交后、新干净历史点写入前的崩溃仍需后续恢复协调；旧点的 saved 分类禁止重复回放，暂不自动重建其已保存历史。
 
 证据使用自制文件，覆盖完整候选字节、外部冲突、记录损坏、写入异常、实际进程强杀与原生保存去重。未执行正常产品 UI、真实 IME、Windows 10/macOS、真实磁盘满或断电验收；HAE-011 和 M2 保持未完成。

@@ -17,7 +17,7 @@ export function captureTextIntents(source: SourceIndex, candidate: PatchCandidat
 }
 
 export function rebuildCheckpoint(source: SourceIndex, checkpoint: DraftCheckpoint, hash: HashBytes): PatchCandidate {
-  if (source.lineage !== undefined) throw new Error('DRAFT_HISTORY_UNSUPPORTED');
+  if (source.lineage !== undefined || checkpoint.version !== 1) throw new Error('DRAFT_HISTORY_UNSUPPORTED');
   if (!isDraftCheckpoint(checkpoint) || checkpoint.baseHash !== source.baseHash || checkpoint.baseSize !== source.bytes.length) throw new Error('DRAFT_CHECKPOINT_MISMATCH');
   const candidate = buildTextIntentCandidate(source, checkpoint.intents, hash);
   if (candidate.resultHash !== checkpoint.resultHash) throw new Error('DRAFT_CHECKPOINT_MISMATCH');

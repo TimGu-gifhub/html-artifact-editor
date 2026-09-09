@@ -9,10 +9,10 @@ test('concurrent recovery listings share one scan and return only bounded displa
     catalog: () => { scans++; return new Promise(done => { complete = done; }); }, isSessionActive: value => value === id,
   });
   const one = workspace.listRecovery(); const two = workspace.listRecovery(); assert.equal(scans, 1);
-  complete({ groups: [{ sessionId: id, name: 'report.html', draftRevision: 7, status: 'dirty', targetKey: 'private', checkpointId: randomUUID(), resultHash: 'a'.repeat(64) }],
+  complete({ groups: [{ sessionId: id, name: 'report.html', draftRevision: 7, status: 'dirty', historyAvailable: true, targetKey: 'private', checkpointId: randomUUID(), resultHash: 'a'.repeat(64) }],
     locked: false, reviewRequired: true, unclassified: ['private-id'] });
   const value = await one; assert.deepEqual(await two, value);
-  assert.deepEqual(value, { entries: [{ sessionId: id, name: 'report.html', draftRevision: 7, status: 'dirty', active: true }], locked: false, reviewRequired: true });
+  assert.deepEqual(value, { entries: [{ sessionId: id, name: 'report.html', draftRevision: 7, status: 'dirty', active: true, historyAvailable: true }], locked: false, reviewRequired: true });
   let chooses = 0; await assert.rejects(workspace.restore(1, id, async () => { chooses++; }), /DRAFT_SESSION_ACTIVE/); assert.equal(chooses, 0);
   await workspace.dispose(); await assert.rejects(workspace.listRecovery(), /WORKSPACE_BUSY/);
 });

@@ -5,6 +5,7 @@ export type WorkspaceRecoveryCatalog = Readonly<{
     sessionId: string; name: string; draftRevision: number;
     status: 'dirty' | 'clean' | 'saved' | 'retired' | 'incomplete' | 'invalid' | 'ambiguous';
     active: boolean;
+    historyAvailable: boolean;
   }>[];
   locked: boolean; reviewRequired: boolean;
 }>;

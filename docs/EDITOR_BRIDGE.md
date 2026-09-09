@@ -21,6 +21,7 @@
 | `change({editToken, inputRevision, newText, composing})` | 输入 revision 必须为上次加一；只保存未应用文本，不创建 Patch |
 | `apply({editToken, inputRevision})` | 使用已确认的当前输入版本；同步隔离对象验证成功后才发布草稿 |
 | `resolve({editToken, inputRevision, decision, intentSequence})` | decision 为 stay/discard/apply；匹配最新意图，继续编辑、放弃输入或应用原目标后切换 |
+| `history({stateRevision, draftRevision, direction})` | HAE-011 扩展；direction 仅 undo/redo，当前输入/草稿必须精确匹配；未接完整历史的旧单文档实验返回 HISTORY_UNAVAILABLE，产品使用 Workspace.edit |
 | `saveCopy(stateRevision)` | 检查当前状态、组合态和未应用输入，然后调用 Main 选择器；不接受文件路径 |
 | `onState(listener)` | 回调只收到 InputSnapshot，返回取消订阅函数；先订阅再 read，最多 32 个订阅 |
 

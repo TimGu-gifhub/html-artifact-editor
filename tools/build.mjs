@@ -18,6 +18,7 @@ const entries = {
   patch: ['tests/patch/main.ts', 'out/patch'],
   'draft-worker': ['src/main/draft/worker.ts', 'out/draft-worker'],
   'diff-worker': ['src/main/draft/diff-worker.ts', 'out/diff-worker'],
+  'history-worker': ['src/main/draft/history-worker.ts', 'out/history-worker'],
   draft: ['tests/draft/main.ts', 'out/draft'],
   editor: ['tests/editor/main.ts', 'out/editor'],
   'editor-probe': ['tests/editor/probe.ts', 'out/editor/probe'],
@@ -30,8 +31,9 @@ const entries = {
   'recovery-child': ['tests/draft-restore/child.ts', 'out/recovery-child'],
   'source-diff': ['tests/source-diff/main.ts', 'out/source-diff'],
   history: ['tests/history/main.ts', 'out/history'],
+  'history-child': ['tests/history/child.ts', 'out/history-child'],
 };
-const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'diff-worker', 'native'];
+const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'diff-worker', 'history-worker', 'native'];
 const requested = process.argv.slice(2);
 for (const target of requested.length ? requested : defaultTargets) {
   if (target === 'native') {

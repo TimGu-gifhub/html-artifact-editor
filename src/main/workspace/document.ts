@@ -13,16 +13,22 @@ import { requireEditorProfile } from '../../platform/editor-profile.ts';
 import type { DraftPersistence } from '../draft/persistence.ts';
 import { isTransactionId } from '../../contracts/save-record.ts';
 import { createSourceDiffReader } from '../draft/source-diff.ts';
+import { assertHistoryWorkerAvailable, createHistoryController } from '../draft/history.ts';
+import type { HistoryController } from '../draft/history.ts';
+import type { HistoryCheckpoint } from '../../core/history/timeline.ts';
 
 export type DraftStore = Awaited<ReturnType<typeof createDraftCheckpointStore>>;
 
 // The Main-native chooser supplies the path. Nothing is exposed to the UI until
 // preview, mapping, draft and the authorized new-file writer have all succeeded.
 export async function prepareDocument(outputRoot: string, source: ProjectSource, generation: number, signal: AbortSignal,
-  checkpoints?: DraftStore, recoverySessionId?: string) {
+  checkpoints?: DraftStore, recoverySessionId?: string, savedHistory?: HistoryCheckpoint) {
+  if (recoverySessionId !== undefined && savedHistory !== undefined) throw new Error('DRAFT_HISTORY_MISMATCH');
   if (recoverySessionId !== undefined && !isTransactionId(recoverySessionId)) throw new Error('DRAFT_CHECKPOINT_INVALID');
   if (checkpoints) requireEditorProfile();
   if (recoverySessionId !== undefined && !checkpoints) throw new Error('DRAFT_PERSISTENCE_UNAVAILABLE');
+  // Refuse before allocating another Preview after an unconfirmed termination.
+  assertHistoryWorkerAvailable(outputRoot);
   const preview = await createProjectPreview(outputRoot, typeof source === 'string' ? resolve(source) : source, 'proofread', generation, signal);
   // Cancellation belongs to preparation until ownership transfers to Workspace.
   // A later chooser/UI revocation cannot destroy an installed mapping while Main
@@ -37,24 +43,34 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
   let releaseOwnership: (() => void) | undefined;
   let persistence: DraftPersistence | null = null;
   let sourceDiff: ReturnType<typeof createSourceDiffReader> | undefined;
+  let history: HistoryController | undefined;
   try {
     const checkpointSessionId = recoverySessionId ?? preview.identity.sessionId;
     releaseOwnership = checkpoints?.claimSession(checkpointSessionId);
-    mapping = await createPreviewMapping(outputRoot, preview, lifetime.signal);
-    const saveSource = await openSaveSource(entry, mapping.source.bytes);
+    const saveSource = await openSaveSource(entry, preview.sourceBytes());
+    const retainedHistory = recoverySessionId ? await checkpoints!.readLatestHistory(recoverySessionId, saveSource) : savedHistory;
+    const lineage = retainedHistory ? { originBytes: retainedHistory.originBytes, values: retainedHistory.record.savedValues } : undefined;
+    mapping = await createPreviewMapping(outputRoot, preview, lifetime.signal, lineage);
     const writer = await createNewFileWriter(dirname(entry));
     await saveSource.verify();
     signal.throwIfAborted();
     const index = mapping.source;
     const recovery = recoverySessionId ? await checkpoints!.resolveLatest(recoverySessionId, saveSource, index) : null;
+    // Legacy v1 only has net intents. Preserve its recovery without inventing a
+    // prior operation order; a subsequent verified Save can start fresh history.
+    if (!recovery || recovery.history) history = await createHistoryController(outputRoot, index, recovery?.history ?? savedHistory, lifetime.signal);
     const draft = createDraftSession(outputRoot, mapping, undefined, checkpoints ? {
-      enqueue: (candidate, revision) => persistence!.enqueue(candidate, revision),
-    } : undefined);
-    if (recovery) { await draft.restore(recovery.candidate, recovery.draftRevision); await recovery.verify(); signal.throwIfAborted(); }
-    persistence = checkpoints ? createDraftPersistence((candidate, revision) =>
-      checkpoints.write(saveSource, index, candidate, checkpointSessionId, revision), recovery ? {
+      enqueue: (candidate, revision, checkpoint) => persistence!.enqueue(candidate, revision, checkpoint),
+    } : undefined, history);
+    if (history) await draft.restore(history.candidate, history.revision);
+    else if (recovery) await draft.restore(recovery.candidate, recovery.draftRevision);
+    if (recovery) { await recovery.verify(); signal.throwIfAborted(); }
+    persistence = checkpoints ? createDraftPersistence((candidate, revision, checkpoint) =>
+      checkpoints.write(saveSource, index, candidate, checkpointSessionId, revision, checkpoint), recovery ? {
       candidate: draft.candidate, revision: recovery.draftRevision, checkpointId: recovery.checkpointId,
+      ...(history ? { history: history.capture() } : {}),
     } : undefined) : null;
+    if (savedHistory) persistence?.enqueue(draft.candidate, draft.revision, history!.capture());
     input = createInputController(mapping, draft);
     sourceDiff = createSourceDiffReader(outputRoot, index, () => ({ candidate: draft.candidate, revision: draft.revision, phase: draft.phase }));
     let closing: Promise<void> | undefined;
@@ -64,7 +80,7 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
         input!.close();
         const endingDiff = sourceDiff!.close();
         closing = (async () => {
-          const settled = await Promise.allSettled([persistence?.close(), endingDiff]);
+          const settled = await Promise.allSettled([persistence?.close(), endingDiff, history?.close()]);
           const failed = settled.find(result => result.status === 'rejected');
           if (failed?.status === 'rejected') throw failed.reason;
           await preview.close(); releaseOwnership?.();
@@ -90,11 +106,15 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
     };
     signal.throwIfAborted(); signal.removeEventListener('abort', abortPreparation);
     return Object.freeze({ id: preview.identity.sessionId, name: basename(entry), entry, project, onState,
-      preview, mapping, draft, input, writer, saveSource, persistence, sourceDiff, checkpointSessionId, verifyRecovery, close });
+      preview, mapping, draft, input, writer, saveSource, persistence, sourceDiff, history, checkpointSessionId, verifyRecovery, close });
   } catch (error) {
     signal.removeEventListener('abort', abortPreparation); lifetime.abort();
     input?.close(); mapping?.close();
-    await sourceDiff?.close(); await persistence?.close(); await preview.close(); releaseOwnership?.();
+    const ended = await Promise.allSettled([sourceDiff?.close(), persistence?.close(), history?.close()]);
+    const failure = ended.find(result => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    if (error instanceof Error && error.message === 'HISTORY_WORKER_STOP_FAILED') throw error;
+    await preview.close(); releaseOwnership?.();
     throw error;
   }
 }

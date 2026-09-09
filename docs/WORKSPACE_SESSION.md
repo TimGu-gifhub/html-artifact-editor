@@ -19,7 +19,7 @@
 | `readDiff(documentId, draftRevision, candidateHash)` | 读取指定已应用候选的完整源码 Diff；不改变输入、不写检查点或 HTML，过期结果拒绝 |
 | `save(documentId, stateRevision, review?)` | Main 显式保存已应用候选并重建基线；review 绑定所显示 Diff 的 draftRevision/candidateHash，过期确认拒绝；未应用输入/组合态拒绝，不隐式 Apply |
 | `retryPersistence(documentId, draftRevision)` | 只重试当前文档最新已应用草稿的私有检查点；不接受路径/候选、不写 HTML，完成状态经 read/onState 读取 |
-| `edit(documentId, value)` | documentId 必须是该操作所属快照的 current.id；value 只允许 begin/change/apply/resolve/save-copy 的既有精确 schema |
+| `edit(documentId, value)` | documentId 必须是该操作所属快照的 current.id；value 只允许 begin/change/apply/resolve/history/save-copy 的精确 schema |
 | `onState(listener)` | 返回取消订阅函数；先订阅再 read；最多 32 个订阅，通知只含纯状态 |
 
 documentId 必须随用户操作一起捕获，不能在迟到回调中自动换成新文件 ID。即便新旧文档恰有相同输入 revision，旧 ID 也会以 STALE_DOCUMENT 拒绝，不调用新文件的输入或选择器。编辑值仍须通过 [输入合同](../src/contracts/input.ts)；文件身份不能替代 Text 身份、editToken 和版本核验。
@@ -60,13 +60,13 @@ WorkspaceSnapshot 新增 canSave 和 lastSave。canSave 仅在有效映射、存
 | unknown | 无法确定提交结果，保留证据并阻止再次覆盖，不自动重试 |
 | cancelled / unchanged | 未开始替换，或没有净变更；不更新基线 |
 
-InputController 与 DraftSession 在整个文件操作期间互斥；已提交或未知的旧草稿进入保护状态，只有成功安装新文档才结束旧会话。重建沿用原 Main 项目授权，保留上级共享资源范围；重新解析与 Chromium 静态树映射后，再检查新源版本和 committed 记录，原生挂载前后均确认新映射仍为 ready。正常重建期间保持 saving，不先发布临时的恢复错误。清空文字后若 Text 消失，选择清空，不复用旧节点 ID；跨保存的逻辑操作历史/撤销仍属后续 HAE-011，当前新基线不提供该能力。
+InputController 与 DraftSession 在整个文件操作期间互斥；已提交或未知的旧草稿进入保护状态，只有成功安装新文档才结束旧会话。重建沿用原 Main 项目授权，保留上级共享资源范围；重新解析与 Chromium 静态树映射后，再检查新源版本和 committed 记录，原生挂载前后均确认新映射仍为 ready。正常重建期间保持 saving，不先发布临时的恢复错误。HAE-011 的历史重建先核验实际已提交文件，再由 Worker 准备保存点；新映射通过完整来源证明安装已清空的 Text，不能复用旧 offset。新文档保留 Undo/Redo，草稿修订随保存点继续递增；可选持久化端口异步写入新的完整干净点。
 
 已核验 saved 但锁/sidecar 清理失败时，命令仍为 ok=true、outcome=saved；lastSave 显示 cleanupPending 和警告，下一次覆盖等待恢复。UI 撤销若发生在准备阶段，Main 取消尚未开始的替换；若已经开始 commit，则继续核对磁盘和重建，即便原 renderer Promise 无法返回。重载后的 UI 读取 Main 当前状态，不触发第二次写盘。Main/系统强杀后的恢复仍需持久化流程，不能用 renderer 崩溃重连代替。
 
 ## 执行证据
 
-HAE-011 的可选 Main checkpoints 端口为每份文档建立一个独立持久化队列；确认改变文字的 Apply 自动排队，失败保留输入并停止自动重试。current.persistence 传递准确的最新/写入中/待写/已持久化修订和错误，后台变化不推进输入版本。Save 在输入互斥期间等待私有写入结束，关闭文档等待队列排空；UI 崩溃不终止 Main 写入。没有配置端口时状态为 null，正常应用尚未安装端口。完整语义与记录退役、恢复列表等限制见 [草稿检查点](DRAFT_CHECKPOINTS.md)。
+HAE-011 的可选 Main checkpoints 端口为每份文档建立一个独立持久化队列；确认改变文字的 Apply、Undo、Redo 连同完整历史自动排队，失败保留输入并停止自动重试。current.persistence 传递准确的最新/写入中/待写/已持久化修订和错误，后台变化不推进输入版本。Save 在输入互斥期间等待私有写入结束，关闭文档等待队列排空；UI 崩溃不终止 Main 写入。没有配置端口时状态为 null，正常应用尚未安装端口。完整语义与记录退役、恢复列表等限制见 [草稿检查点](DRAFT_CHECKPOINTS.md)。
 
 第四阶段增加 lastDeparture，其 documentId/status/code/cleanupPending/requiresReview 只报告离开时的私有记录结果。状态为 clean/retired/empty/failed/unknown；标记失败或未知保持窗口和全部证据，requiresReview 阻止继续修改或盲目重试。无净修改时若最后的归零检查点未确认，DRAFT_PERSISTENCE_REQUIRED 允许用户显式重试该检查点后重新关闭。有效标记但清理失败仍可完成已授权的切换/关闭，并保留独立警告；后续恢复界面仍待实现。
 
@@ -87,3 +87,11 @@ HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoint
 第五阶段将恢复摘要与新 Preview 安装接入相同生产 transport，方法数为十个。恢复延续原 checkpointSessionId 和修订，生成新的 UI 文档身份，不重复写检查点；挂载前后验证源文件及同一最新记录。新文档的映射在准备完成后由自身生命周期管理，旧 chooser 的撤销不会在已经开始的离开提交期间销毁它。`npm run test:recovery` 执行独立 Electron 进程占用/强杀、真实恢复与后续编辑、原记录结束、授权取消/错误来源、原生挂载回滚、动态支持范围拒绝、源变化及新记录竞态、Windows 恢复后保存去重。完整合同与失败边界见 [草稿检查点](DRAFT_CHECKPOINTS.md)；空白 transport 页面、测试选择器回调仍不代替产品 UI 和人工验收。
 
 第六阶段增加 readDiff，生产 API 共十一个方法，Save 可携带 Diff review。`npm run test:source-diff` 执行八组真实 Electron 实验：干净只读、恢复后的完整词法差异、未应用/组合态保护、新修订拒绝旧确认、净变更归零、renderer 重连/旧文档拒绝，以及 Windows 保存字节一致性和外部冲突。文档清理同时等待 Diff Worker 终止和持久化排空；终止失败保留占用，不报告释放成功。产品面板、历史与真实 IME 仍待接入。
+
+## 历史命令与保存后的恢复
+
+`edit` 的 history 值严格为 `{stateRevision, draftRevision, direction}`；direction 为 undo/redo。它绑定调用时的文档、输入及已确认草稿版本，不接受目标 Text 或源码位置。InputSnapshot.history 为 null 表示旧 v1 恢复会话没有完整历史；否则仅提供 undoCount/redoCount/canUndo/canRedo。
+
+InputController 在组合态、未应用输入或原生切换意图待处理时拒绝历史命令。准备候选后才可释放干净编辑锁，冻结期间若出现原生映射变化则拒绝；获得 isolated Preview 的 applied 后才推进历史并持久化。未知结果保留旧记录及待确认候选，禁止盲重试。历史 Worker、Diff 和私有队列都须完成关闭，文档才释放占用。
+
+重新授权后可恢复 dirty v2 或含完整历史的 clean v2 点；后者不会重新应用旧脏候选。v1 净意图恢复保持兼容但不会猜测旧操作顺序。原生提交已完成但新干净点尚未落盘的崩溃窗口仍待协调，精确 committed 证据只阻止重复回放。完整合同和未验收项见 [逻辑历史](HISTORY.md) 与 [检查点](DRAFT_CHECKPOINTS.md)。产品快捷键、焦点路由、真实 IME 和历史控件仍待选稿后的前端实现。

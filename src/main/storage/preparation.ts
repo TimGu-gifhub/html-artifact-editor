@@ -49,7 +49,7 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       if (item.kind !== 'directory' || !isTransactionId(item.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
       const folder = await root.directory(item.name);
       const files = await folder.entries(7); const draft = files.some(file => file.name === 'record.json');
-      const allowed = draft ? ['record.json', 'baseline.bin', 'complete.json', 'retired.json']
+      const allowed = draft ? ['record.json', 'baseline.bin', 'origin.bin', 'complete.json', 'retired.json']
         : ['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json'];
       for (const file of files) {
         if (file.kind !== 'file' || !allowed.includes(file.name)) throw new Error('STORAGE_REVIEW_REQUIRED');
@@ -57,7 +57,8 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       }
       const record = decode((await folder.read(draft ? 'record.json' : 'intent.json', draft ? MAX_DRAFT_RECORD_BYTES : JSON_LIMIT)).bytes);
       if (draft) {
-        if (!isDraftCheckpoint(record) || record.checkpointId !== item.name) throw new Error('STORAGE_REVIEW_REQUIRED');
+        if (!isDraftCheckpoint(record) || record.checkpointId !== item.name
+          || (record.version === 1 && files.some(file => file.name === 'origin.bin'))) throw new Error('STORAGE_REVIEW_REQUIRED');
         if (record.targetKey === source.targetKey) count++;
       } else {
         if (!isSaveIntent(record) || record.transactionId !== item.name) throw new Error('STORAGE_REVIEW_REQUIRED');

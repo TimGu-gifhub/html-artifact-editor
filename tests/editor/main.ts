@@ -79,7 +79,7 @@ async function run(): Promise<void> {
     await ui.loadURL(EDITOR_URL);
     const initial = await read(); assert.equal(initial.selection, null); assert.equal(bridge.active, true);
     assert.deepEqual(await ui.webContents.executeJavaScript('Object.keys(haeEditor).sort()'),
-      ['apply', 'begin', 'change', 'onState', 'read', 'resolve', 'saveCopy']);
+      ['apply', 'begin', 'change', 'history', 'onState', 'read', 'resolve', 'saveCopy']);
     assert.deepEqual(await ui.webContents.executeJavaScript('[typeof require,typeof process,typeof ipcRenderer,typeof Buffer]'), Array(4).fill('undefined'));
     assert.deepEqual(await preview.contents.executeJavaScript('[typeof haeEditor,typeof editorProbe,typeof require,typeof ipcRenderer]'), Array(4).fill('undefined'));
     pass('real isolated preload exposes seven fixed methods only at the exact trusted URL; user Preview has no editor or IPC capability');

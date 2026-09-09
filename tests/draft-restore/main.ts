@@ -54,7 +54,7 @@ async function run(): Promise<void> {
 
   await use(async f => {
     const names = await readdir(f.privateRoot); const listing = await f.call('haeWorkspace.listRecovery()'); assert.equal(listing.ok, true);
-    assert.deepEqual(listing.recovery, { entries: [{ sessionId: f.record.sessionId, name: '报告 😀.html', draftRevision: 7, status: 'dirty', active: false }], locked: false, reviewRequired: false });
+    assert.deepEqual(listing.recovery, { entries: [{ sessionId: f.record.sessionId, name: '报告 😀.html', draftRevision: 7, status: 'dirty', active: false, historyAvailable: false }], locked: false, reviewRequired: false });
     const result = await f.restore(); assert.equal(result.ok, true, result.code ?? 'restore failed'); assert.equal(result.outcome, 'restored');
     const value = f.current(); assert.notEqual(value.id, f.record.sessionId); assert.equal(value.checkpointSessionId, f.record.sessionId);
     assert.equal(value.draft.revision, 7); assert.equal(value.mapping.selection, null); assert.equal(value.mapping.status, 'ready');

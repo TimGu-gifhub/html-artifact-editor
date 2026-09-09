@@ -9,6 +9,7 @@ import { isTransactionId } from '../../contracts/save-record.ts';
 import type { WorkspaceRecoveryCatalog } from '../../contracts/recovery.ts';
 import { isDiffReview } from '../../contracts/source-diff.ts';
 import type { DiffReview, WorkspaceDiff } from '../../contracts/source-diff.ts';
+import { openSaveSource } from '../../platform/save-source.ts';
 
 export type WorkspaceDecisions = Readonly<{
   review: (value: LeaveReview) => Promise<unknown>;
@@ -50,6 +51,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     review, cleanupPending: activationUncertain || failedCleanup.size > 0 || !!lastDeparture?.cleanupPending, lastSave, lastDeparture,
     canSave: !!saveOriginal && phase === 'idle' && !disposed && !activationUncertain && !failedCleanup.size
       && !lastSave?.requiresReview && !lastDeparture?.requiresReview && !!current && current.input.snapshot().canSaveCopy
+      && (!current.history || current.history.available)
       && current.mapping.status === 'ready' && current.draft.candidate.patches.length > 0 });
   const inputReady = (state: InputSnapshot | undefined): void => {
     if (!state) return;
@@ -311,7 +313,12 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
           try {
             if (disposed || pending !== operation || current !== leaving) throw new Error('SAVE_REBASE_REQUIRED');
             rebuilding = new AbortController();
-            next = await prepare(outputRoot, leaving.preview.grant, ++generation, rebuilding.signal, checkpoints);
+            // Verify the committed file version before computing a new logical
+            // savepoint. Candidate bytes alone never prove that Save completed.
+            const savedSource = await openSaveSource(leaving.entry, leaving.draft.candidate.bytes);
+            if (!result.verifySaved || !await result.verifySaved(savedSource)) throw new Error('SAVE_REBASE_REQUIRED');
+            const history = await leaving.history?.savedCheckpoint(savedSource.bytes);
+            next = await prepare(outputRoot, leaving.preview.grant, ++generation, rebuilding.signal, checkpoints, undefined, history);
             if (!result.verifySaved || !await result.verifySaved(next.saveSource)) throw new Error('SAVE_REBASE_REQUIRED');
             const previous = install(next, () => {
               if (disposed || activationUncertain || pending !== operation || current !== leaving || rebuilding?.signal.aborted
@@ -342,8 +349,8 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (disposed) throw new Error('WORKSPACE_BUSY');
       if (!checkpoints) throw new Error('DRAFT_PERSISTENCE_UNAVAILABLE');
       listing ??= checkpoints.catalog().then(catalog => Object.freeze({
-        entries: Object.freeze(catalog.groups.map(({ sessionId, name, draftRevision, status }) =>
-          Object.freeze({ sessionId, name, draftRevision, status, active: checkpoints.isSessionActive(sessionId) }))),
+        entries: Object.freeze(catalog.groups.map(({ sessionId, name, draftRevision, status, historyAvailable }) =>
+          Object.freeze({ sessionId, name, draftRevision, status, historyAvailable, active: checkpoints.isSessionActive(sessionId) }))),
         locked: catalog.locked, reviewRequired: catalog.reviewRequired,
       })).finally(() => { listing = null; });
       return listing;

@@ -8,15 +8,12 @@ import type { PatchCandidate, TextChange } from '../patch/engine.ts';
 import { normalizeText } from '../patch/encoding.ts';
 import { createHistorySource } from './source.ts';
 
-export const MAX_HISTORY_STEPS = 1000;
-export const MAX_HISTORY_TEXT_BYTES = 8 * 1024 * 1024;
-export type HistoryOperation = Readonly<{ target: string; before: string; after: string }>;
+import { MAX_HISTORY_STEPS, MAX_HISTORY_TEXT_BYTES, freezeHistoryRecord } from '../../contracts/history.ts';
+import type { HistoryOperation, HistoryRecord } from '../../contracts/history.ts';
+export { MAX_HISTORY_STEPS, MAX_HISTORY_TEXT_BYTES } from '../../contracts/history.ts';
+export type { HistoryOperation, HistoryRecord } from '../../contracts/history.ts';
 // Private logical record. originBytes is stored separately; no executable
 // offsets, selectors, file paths, DOM serialization or candidate bytes occur here.
-export type HistoryRecord = Readonly<{
-  version: 1; originHash: string; originSize: number; baseHash: string; baseSize: number; candidateHash: string;
-  revision: number; cursor: number; operations: readonly HistoryOperation[]; savedValues: SourceLineage['values'];
-}>;
 export type HistoryCheckpoint = Readonly<{ originBytes: Uint8Array; record: HistoryRecord }>;
 export type HistoryTransition = Readonly<{
   changed: boolean; candidate: PatchCandidate; revision: number;
@@ -27,11 +24,7 @@ const keys = (value: unknown, names: readonly string[]): value is Record<string,
 const hex = (value: unknown): boolean => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value);
 const count = (value: unknown, max: number): boolean => Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= max;
 const fail = (): never => { throw new Error('HISTORY_RECORD_INVALID'); };
-function freezeRecord(record: HistoryRecord): HistoryRecord {
-  return Object.freeze({ ...record, operations: Object.freeze(record.operations.map(operation => Object.freeze({ ...operation }))),
-    savedValues: Object.freeze(record.savedValues.map(value => Object.freeze({ ...value }))),
-  });
-}
+const freezeRecord = freezeHistoryRecord;
 
 export function createTextHistory(bytes: Uint8Array, identity: SourceIdentity, hash: HashBytes, checkpoint?: HistoryCheckpoint) {
   if (checkpoint !== undefined && (!keys(checkpoint, ['originBytes', 'record']) || !(checkpoint.originBytes instanceof Uint8Array))) return fail();
