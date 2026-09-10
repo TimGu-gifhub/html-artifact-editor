@@ -2,7 +2,7 @@ import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { app } from 'electron';
 import type { BrowserWindow, WebContents } from 'electron';
@@ -11,15 +11,22 @@ import { createProductApplication } from '../../src/main/product/application.ts'
 import { captureReady } from '../helpers/capture.ts';
 import { edits, source, css } from './acceptance-fixture.ts';
 
-const [mode, profile, projectArg, requestedSession] = process.argv.slice(2);
-if (!profile || !projectArg || !['seed', 'restore-save', 'saved-backup', 'conflict'].includes(mode ?? '')) throw Error('Invalid acceptance arguments');
+const [mode, profile, projectArg, requestedSession, projectLayout] = process.argv.slice(2);
+if (!profile || !projectArg || !['seed', 'restore-save', 'saved-backup', 'conflict', 'file-limited'].includes(mode ?? '')
+  || (projectLayout !== undefined && !['file', 'directory'].includes(projectLayout))) throw Error('Invalid acceptance arguments');
 const project = projectArg;
+const directoryProject = projectLayout === 'directory';
+const documentSource = directoryProject ? source.replace('href="keep.css"', 'href="../assets/keep.css"') : source;
 registerSchemes(); app.enableSandbox(); app.setPath('userData', profile);
 const outputRoot = resolve(__dirname, '..');
-const entry = join(project, '报告.html');
+const entry = join(project, directoryProject ? 'pages/报告.html' : '报告.html');
+const cssPath = join(project, directoryProject ? 'assets/keep.css' : 'keep.css');
 const receipt = (value: unknown) => process.stdout.write('HAE_ACCEPTANCE:' + JSON.stringify(value) + '\n');
 let chooseMode: 'file' | 'cancel' | 'wrong' = 'file';
 let choices = 0;
+let directoryChoice: 'normal' | 'root-cancel' | 'entry-cancel' | 'wrong-root' | 'outside' | 'wrong-file' = 'normal';
+let rootCalls = 0, entryCalls = 0;
+let rootGate: Promise<string | undefined> | null = null;
 let leave: 'cancel' | 'discard' = 'cancel';
 let backupDecision: 'cancel' | 'restore' = 'cancel';
 let backupCalls = 0;
@@ -52,7 +59,19 @@ async function select(contents: WebContents, selector: string): Promise<void> {
 async function run(): Promise<void> {
   await app.whenReady();
   const product = runtime = await createProductApplication(outputRoot, { visible: false, choices: {
-    open: async () => { choices++; return chooseMode === 'cancel' ? undefined : join(project, chooseMode === 'wrong' ? 'wrong.html' : '报告.html'); },
+    open: async () => { choices++; return chooseMode === 'cancel' ? undefined : chooseMode === 'wrong' ? join(dirname(entry), 'wrong.html') : entry; },
+    project: {
+      chooseDirectory: async () => {
+        rootCalls++;
+        return rootGate ?? (directoryChoice === 'root-cancel' ? undefined : directoryChoice === 'wrong-root' ? join(project, 'assets') : project);
+      },
+      chooseEntry: async directory => {
+        entryCalls++;
+        assert.equal(directory, directoryChoice === 'wrong-root' ? join(project, 'assets') : project);
+        return directoryChoice === 'entry-cancel' ? undefined : directoryChoice === 'outside' ? join(project, '../outside.html')
+          : directoryChoice === 'wrong-file' ? join(dirname(entry), 'wrong.html') : entry;
+      },
+    },
     copy: async () => join(project, '冲突草稿.html'),
     review: async value => ({ reviewId: value.reviewId, decision: leave }),
     backup: async value => { backupCalls++; return { reviewId: value.reviewId, decision: backupDecision }; },
@@ -102,6 +121,65 @@ async function run(): Promise<void> {
     const selector = '[role=dialog] .record-list > .record-item:nth-child(' + (index + 1) + ') button';
     return selector;
   };
+  const recoveryMode = () => ui('[...document.querySelectorAll("[role=dialog] input[name=recovery-source]")].find(x=>x.checked)?.closest("label")?.textContent.trim()');
+  const chooseDirectoryMode = async (): Promise<void> => {
+    await ui('document.querySelector("[role=dialog] input[name=recovery-source]").focus()');
+    window.focus(); window.webContents.focus();
+    window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' });
+    window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' });
+    await until(async () => await recoveryMode() === '项目目录', 'keyboard directory source choice');
+  };
+  const directoryRecoveryChoices = async (id: string, initialButton: string): Promise<string> => {
+    assert.equal(await recoveryMode(), 'HTML 文件', 'a new recovery dialog defaults to the file grant');
+    await chooseDirectoryMode();
+    await click(window, '[role=dialog] .dlg-close');
+    await until(() => ui('!document.querySelector("[role=dialog]")'), 'recovery dialog closed');
+    const button = await openRecovery(id);
+    assert.equal(await recoveryMode(), 'HTML 文件', 'reopening resets an unaccepted source choice');
+    assert.equal(button, initialButton);
+    window.setSize(960, 640);
+    await chooseDirectoryMode();
+    assert.equal(await ui('(()=>{const d=document.querySelector("[role=dialog]").getBoundingClientRect();return d.left>=0&&d.top>=0&&d.right<=innerWidth&&d.bottom<=innerHeight;})()'), true);
+    await writeFile(join(project, '../directory-recovery-chooser.png'), await captureReady(window.webContents));
+    for (const selection of ['root-cancel', 'entry-cancel', 'wrong-root', 'outside', 'wrong-file'] as const) {
+      directoryChoice = selection; const oldRoots = rootCalls, oldEntries = entryCalls;
+      await click(window, button, '恢复');
+      await until(async () => rootCalls === oldRoots + 1 && state().phase === 'idle'
+        && await ui('document.querySelector(' + JSON.stringify(button) + ')?.disabled === false'), 'directory reauthorization ' + selection);
+      assert.equal(entryCalls, oldEntries + (selection === 'root-cancel' ? 0 : 1));
+      assert.equal(choices, 0, 'directory cancellation/failure never falls back to a file chooser');
+      assert.equal(state().current, null);
+      assert.equal(await recoveryMode(), '项目目录', 'selection survives cancellation/failure');
+      assert.deepEqual(await readFile(entry), Buffer.from(documentSource));
+      assert.deepEqual(await readFile(cssPath), Buffer.from(css));
+      assert.deepEqual(await readFile(join(project, 'pages/wrong.html')), Buffer.from(documentSource));
+      assert.deepEqual(await readFile(join(project, '../outside.html')), Buffer.from(documentSource));
+      assert.equal(await ui('!!document.querySelector("[role=dialog] [role=alert]")'), !selection.endsWith('cancel'));
+      assert.equal((await session.workspace.listRecovery()).entries.find(row => row.sessionId === id)?.active, false);
+    }
+    let releaseRoot!: (value: string | undefined) => void;
+    rootGate = new Promise(done => { releaseRoot = done; });
+    const oldRoots = rootCalls, oldEntries = entryCalls, oldFiles = choices;
+    // One JS turn deliberately competes before React can paint disabled controls.
+    await ui('(()=>{const b=document.querySelector(' + JSON.stringify(button) + ');b.click();b.click();'
+      + 'document.querySelector("[role=dialog] .dlg-close").click();'
+      + 'document.querySelector("[role=dialog]")?.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));'
+      + 'window.dispatchEvent(new KeyboardEvent("keydown",{key:"o",ctrlKey:true,bubbles:true}));})()');
+    await until(async () => rootCalls === oldRoots + 1 && await ui('!!document.querySelector("[role=dialog] .dlg-close:disabled")'), 'single accepted chooser and locked recovery dialog');
+    assert.equal(await ui('[...document.querySelectorAll("[role=dialog] input,[role=dialog] button")].every(e=>e.disabled)'), true);
+    await ui('document.querySelector(".scrim").dispatchEvent(new MouseEvent("mousedown",{bubbles:true}))');
+    await delay(100);
+    assert.equal(rootCalls, oldRoots + 1); assert.equal(entryCalls, oldEntries); assert.equal(choices, oldFiles);
+    assert.equal(await recoveryMode(), '项目目录'); assert.equal(state().current, null);
+    rootGate = null; releaseRoot(undefined);
+    await until(async () => state().phase === 'idle' && await ui('document.querySelector(' + JSON.stringify(button) + ')?.disabled === false'), 'cancelled chooser releases UI latch');
+    assert.equal(await ui('!!document.querySelector("[role=dialog] [role=alert]")'), false);
+    assert.equal(await recoveryMode(), '项目目录');
+    assert.deepEqual(await readFile(entry), Buffer.from(documentSource));
+    directoryChoice = 'normal';
+    window.setSize(1440, 900);
+    return button;
+  };
   const review = async (): Promise<void> => {
     const count = state().current!.input.changes.length;
     if (desktop.extension(window.webContents).snapshot().reviewed.length !== count) {
@@ -120,11 +198,16 @@ async function run(): Promise<void> {
     assert.equal(state().current!.input.changes.length, 0);
   };
   if (mode === 'seed' || mode === 'conflict') {
-    await click(window, 'button', '打开 HTML');
+    await click(window, 'button', directoryProject ? '打开目录' : '打开 HTML');
     await until(() => state().current?.input.mappingStatus === 'ready' && session.host.current!.getBounds().width > 0, 'original product document');
+    if (directoryProject) {
+      assert.equal(proofreadDocument(session.workspace.current!).preview.grant.root, project);
+      assert.equal(state().current!.project.entry, 'pages/报告.html');
+      assert.equal(await proofreadDocument(session.workspace.current!).preview.contents.executeJavaScript('getComputedStyle(document.querySelector("h1")).color'), 'rgb(12, 34, 56)');
+    }
     for (const [selector, value] of mode === 'seed' ? edits : edits.slice(0, 1)) await edit(selector, value);
-    assert.deepEqual(await readFile(entry), Buffer.from(source));
-    assert.deepEqual(await readFile(join(project, 'keep.css')), Buffer.from(css));
+    assert.deepEqual(await readFile(entry), Buffer.from(documentSource));
+    assert.deepEqual(await readFile(cssPath), Buffer.from(css));
     assert.equal(await proofreadDocument(session.workspace.current!).preview.contents.executeJavaScript('document.documentElement.dataset.scriptRan'), undefined);
     assert.deepEqual(await proofreadDocument(session.workspace.current!).preview.contents.executeJavaScript('({require:typeof require,workspace:typeof haeWorkspace})'), {require:'undefined',workspace:'undefined'});
     if (mode === 'seed') {
@@ -135,9 +218,9 @@ async function run(): Promise<void> {
       await new Promise<void>(() => {}); throw Error('Seed must be terminated by the parent after durability proof');
     }
     receipt({ event: 'await-conflict', pid: process.pid });
-    await until(async () => !Buffer.from(source).equals(await readFile(entry)), 'external parent process mutation');
+    await until(async () => !Buffer.from(documentSource).equals(await readFile(entry)), 'external parent process mutation');
     const externalBytes = await readFile(entry);
-    assert.notDeepEqual(externalBytes, Buffer.from(source));
+    assert.notDeepEqual(externalBytes, Buffer.from(documentSource));
     await review(); await click(window, '[role=dialog] button.primary', '确认保存');
     await until(() => state().lastSave?.status === 'failed' && state().phase === 'idle', 'conflict refuses native commit');
     await until(() => ui('!!document.querySelector("[role=dialog] [role=alert]")'), 'visible Save failure');
@@ -152,15 +235,17 @@ async function run(): Promise<void> {
     leave = 'discard';
   } else {
     assert.ok(requestedSession);
-    const restoreButton = await openRecovery(requestedSession);
-    if (mode === 'restore-save') {
+    let restoreButton = await openRecovery(requestedSession);
+    if (mode === 'restore-save' && directoryProject) {
+      restoreButton = await directoryRecoveryChoices(requestedSession, restoreButton);
+    } else if (mode === 'restore-save') {
       for (const selection of ['cancel', 'wrong'] as const) {
         chooseMode = selection; const oldChoices = choices;
         await click(window, restoreButton, '恢复');
         await until(async () => choices === oldChoices + 1 && state().phase === 'idle'
           && await ui('document.querySelector(' + JSON.stringify(restoreButton) + ')?.disabled === false'), 'reauthorization ' + selection);
         assert.equal(state().current, null);
-        assert.deepEqual(await readFile(entry), Buffer.from(source));
+        assert.deepEqual(await readFile(entry), Buffer.from(documentSource));
         if (selection === 'wrong') assert.equal(await ui('!!document.querySelector("[role=dialog] [role=alert]")'), true);
       }
     }
@@ -168,19 +253,45 @@ async function run(): Promise<void> {
     await until(() => state().current?.input.mappingStatus === 'ready', 'fresh recovered product document');
     await until(() => ui('!document.querySelector("[role=dialog]")'), 'recovery UI acknowledgement');
     await settled();
+    if (mode === 'file-limited') {
+      assert.equal(directoryProject, true);
+      const current = proofreadDocument(session.workspace.current!);
+      assert.equal(current.preview.grant.root, dirname(entry));
+      assert.equal(current.checkpointSessionId, requestedSession);
+      assert.equal(state().current!.project.entry, '报告.html');
+      assert.equal(state().current!.input.changes.length, 5);
+      const parentResourceLoaded = await current.preview.contents.executeJavaScript('getComputedStyle(document.querySelector("h1")).color === "rgb(12, 34, 56)"');
+      assert.equal(parentResourceLoaded, false);
+      await until(() => state().current!.project.resources.items.some(row => row.target.endsWith('assets/keep.css')), 'resource outside the file grant remains unavailable');
+      assert.deepEqual(await readFile(entry), Buffer.from(documentSource));
+      assert.deepEqual(await readFile(cssPath), Buffer.from(css));
+      assert.deepEqual(errors, []);
+      receipt({ event: 'file-limited', parentResourceLoaded, sessionId: current.checkpointSessionId,
+        changes: state().current!.input.changes.length, diagnostics: state().current!.project.resources.items });
+      await new Promise<void>(() => {}); throw Error('Limited grant process must be terminated by the parent');
+    }
     if (mode === 'restore-save') {
       assert.equal(proofreadDocument(session.workspace.current!).checkpointSessionId, requestedSession);
       assert.equal(state().current!.input.changes.length, 5);
       assert.notEqual(state().current!.id, requestedSession);
       for (const [selector, value] of edits) assert.equal(await proofreadDocument(session.workspace.current!).preview.contents.executeJavaScript('document.querySelector(' + JSON.stringify(selector) + ').textContent'), value);
-      assert.deepEqual(await readFile(entry), Buffer.from(source));
+      assert.deepEqual(await readFile(entry), Buffer.from(documentSource));
+      if (directoryProject) {
+        assert.equal(proofreadDocument(session.workspace.current!).preview.grant.root, project);
+        assert.equal(state().current!.project.entry, 'pages/报告.html');
+        const parentResourceLoaded = await proofreadDocument(session.workspace.current!).preview.contents.executeJavaScript('getComputedStyle(document.querySelector("h1")).color === "rgb(12, 34, 56)"');
+        assert.equal(parentResourceLoaded, true);
+        assert.equal(state().current!.input.history!.undoCount, 5);
+        receipt({ event: 'directory-reauthorized', rootChoices: rootCalls, entryChoices: entryCalls, fileChoices: choices,
+          projectEntry: state().current!.project.entry, parentResourceLoaded });
+      }
       await until(() => ui('document.querySelector(".doc-name")?.textContent === "报告.html" && document.querySelectorAll(".changes-list .change-item").length === 5'), 'five restored changes rendered in the product UI');
       await delay(200); // Allow Chromium to composite the acknowledged React state.
       await writeFile(join(project, '../acceptance-recovered-ui.png'), await captureReady(window.webContents));
       await writeFile(join(project, '../acceptance-recovered-preview.png'), await captureReady(proofreadDocument(session.workspace.current!).preview.contents));
       await review(); await click(window, '[role=dialog] .dlg-actions button', '取消');
       await until(() => ui('!document.querySelector("[role=dialog]")'), 'cancel Diff preserves restored draft');
-      assert.equal(state().current!.input.changes.length, 5); assert.deepEqual(await readFile(entry), Buffer.from(source));
+      assert.equal(state().current!.input.changes.length, 5); assert.deepEqual(await readFile(entry), Buffer.from(documentSource));
       await save();
       receipt({ event: 'saved', sessionId: proofreadDocument(session.workspace.current!).checkpointSessionId,
         revision: state().current!.input.draftRevision, history: state().current!.input.history });
@@ -204,7 +315,7 @@ async function run(): Promise<void> {
       await openMenu('备份与恢复');
       await until(() => ui('document.querySelectorAll("[role=dialog] .record-item").length === 2'), 'both native saves have visible backups');
       const backups = await session.workspace.listBackups(state().current!.id);
-      const originalHash = createHash('sha256').update(Buffer.from(source)).digest('hex');
+      const originalHash = createHash('sha256').update(Buffer.from(documentSource)).digest('hex');
       const originalIndex = backups.entries.findIndex(value => value.hash === originalHash);
       assert.ok(originalIndex >= 0);
       const backupButton = '[role=dialog] .record-list > .record-item:nth-child(' + (originalIndex + 1) + ') button';
@@ -217,13 +328,13 @@ async function run(): Promise<void> {
       await until(() => { const last = state().lastSave; return last?.status === 'backup-restored' && last.operation === 'backup-restore' && state().phase === 'idle'; }, 'confirmed whole-backup restoration', 30000);
       await until(() => ui('!document.querySelector("[role=dialog]")'), 'backup restoration UI acknowledgement');
       assert.equal(backupCalls, 2);
-      assert.deepEqual(await readFile(entry), Buffer.from(source));
+      assert.deepEqual(await readFile(entry), Buffer.from(documentSource));
       assert.equal(state().current!.input.history!.canUndo, false);
       assert.equal(state().current!.input.changes.length, 0);
       receipt({ event: 'backup-restored', changes: 0 });
     }
   }
-  assert.deepEqual(await readFile(join(project, 'keep.css')), Buffer.from(css));
+  assert.deepEqual(await readFile(cssPath), Buffer.from(css));
   assert.deepEqual(errors, []);
   receipt({ event: 'closing', versions: process.versions });
   window.close();

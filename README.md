@@ -15,6 +15,7 @@ AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日�
 - 隐藏校稿栏扩展预览；拆卸为原生独立窗口，收回时保留同一文档与输入。
 - 从当前草稿生成 A4/Letter PDF，选择横向和背景；查看器与导出使用同一份字节，导出不保存 HTML。首版仅创建新 PDF，不覆盖已有文件。
 - 明确授权项目目录和入口；从“更多操作”切换同一目录内的 HTML，保留草稿离开确认；提供资源诊断、另存 HTML、私有草稿持久化/恢复和经单独确认的整份备份恢复。
+- 恢复草稿时可重新选择“HTML 文件”或“项目目录”。子目录中的报告可通过明确重选项目根目录恢复共享资源；默认文件方式使用 HTML 所在文件夹，不自动扩大授权。
 - 在工作台内切换静态校稿与脚本只读预览，保留目录授权；返回时重建源码映射，动态页面文字不进入草稿。干净历史可继续撤销/重做，脏草稿先处理取消、放弃或另存。
 - Windows 保存先备份，再执行原生替换并回读核验；失败或未知结果保留草稿和证据，阻止盲目重试。
 
@@ -104,8 +105,8 @@ git diff --check
 
 本项目在需求梳理、架构设计、代码实现、测试和文档编写过程中，使用了 **ChatGPT / Codex** 与 **Kimi / Kimi Code** 辅助开发。感谢以下公司及其研究、产品与工程团队提供的模型和工具：
 
-- **[OpenAI](https://openai.com/)**：感谢 **ChatGPT、Codex 和 GPT 系列模型（含本阶段实际使用的 GPT-6）**，为项目规划、核心实现、代码审查与文档完善提供帮助；本阶段 Codex（GPT-6）参与 Main 历史、持久化、启动与退出协调、提交后的恢复协调、检查点清理及其中断恢复、保存锁审查与原生占用保护，以及产品 Main 装配、浮窗/PDF 隔离、文件导出、独立集成测试与合同更新。
-- **[月之暗面（Moonshot AI）](https://www.moonshot.ai/)**：感谢 **Kimi、Kimi Code 和 [Kimi K3 模型](https://www.kimi.com/news/kimi-k3)**，支持了[前端视觉候选的设计、实现与修正](docs/implementation/HAE-007.md)，并通过 Kimi Code CLI **0.42.0** 实际完成[方案 B 产品 UI、实时输入和交互修正](docs/implementation/HAE-009.md)及[目录内入口切换、模式切换、只读交互状态与菜单修正](docs/implementation/HAE-008.md)；完整别名为 `kimi-code/k3`，实际配置模型为 `k3`。
+- **[OpenAI](https://openai.com/)**：感谢 **ChatGPT、Codex 和 GPT 系列模型（含本阶段实际使用的 GPT-6）**，为项目规划、核心实现、代码审查与文档完善提供帮助；本阶段 Codex（GPT-6）参与 Main 历史、持久化、启动与退出协调、提交后的恢复协调、检查点清理及其中断恢复、保存锁审查与原生占用保护，以及产品 Main 装配、浮窗/PDF 隔离、文件导出、独立集成测试，以及目录恢复的代码复核/进程中断/原生保存/Edge 回归与合同更新。
+- **[月之暗面（Moonshot AI）](https://www.moonshot.ai/)**：感谢 **Kimi、Kimi Code 和 [Kimi K3 模型](https://www.kimi.com/news/kimi-k3)**，支持了[前端视觉候选的设计、实现与修正](docs/implementation/HAE-007.md)，并通过 Kimi Code CLI **0.42.0** 实际完成[方案 B 产品 UI、实时输入和交互修正](docs/implementation/HAE-009.md)、[目录内入口切换、模式切换、只读交互状态与菜单修正](docs/implementation/HAE-008.md)，以及[目录恢复选项与异步交互保护](docs/implementation/HAE-011.md)；完整别名为 `kimi-code/k3`，实际配置模型为 `k3`。
 
 AI 用于开发辅助，应用本身保持本地离线，不依赖云端模型或 AI API。开发分工、实际调用记录与人工复核要求见 [AI 开发流程](docs/AI_WORKFLOW.md)。
 

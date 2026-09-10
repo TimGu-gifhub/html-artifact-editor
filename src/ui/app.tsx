@@ -11,6 +11,8 @@ import { ensureInputFlushed } from './flush.ts';
 import type { FlushDeps } from './flush.ts';
 import { BusyGuard, entrySwitchBlocker, entrySwitchBlockerText, runEntrySwitch } from './entry-switch.ts';
 import { modeSwitchBlockerText, modeSwitchTarget, runModeSwitch } from './mode-switch.ts';
+import { loadRecoveryCatalog, RecoveryDialogLifecycle, runRecoveryRestore } from './recovery-flow.ts';
+import type { RecoverySourceMode } from './recovery-flow.ts';
 import { classifySaveResult } from './save-result.ts';
 import { EditorPanel } from './editor-panel.tsx';
 import { ReviewPanel } from './review-panel.tsx';
@@ -163,7 +165,14 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   }, [reviewStatus.errorSeq, reviewStatus.error, showToast]);
   const effectiveReviewed = reviewChannel.currentReviewed(state.desktop?.reviewed ?? []);
 
-  const [dialog, setDialog] = useState<DialogKind | null>(null);
+  const [dialog, setDialogState] = useState<DialogKind | null>(null);
+  // Synchronous mirror of the dialog state: late async results check it
+  // without waiting for a render, so they never touch a replacement dialog.
+  const dialogRef = useRef<DialogKind | null>(null);
+  const setDialog = useCallback((next: DialogKind | null) => {
+    dialogRef.current = next;
+    setDialogState(next);
+  }, []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
@@ -192,6 +201,13 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const [pdfOptions, setPdfOptions] = useState<PdfOptions>({ paper: 'A4', landscape: false, background: false });
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<{ loading: boolean; catalog: WorkspaceRecoveryCatalog | null; error: string | null; busySession: string | null }>({ loading: false, catalog: null, error: null, busySession: null });
+  // Binds catalog/restore results to one RecoveryDialog opening: closing or
+  // reopening bumps the generation, so late results can never touch the new
+  // dialog, clear its busy state or resurrect a closed one. The synchronous
+  // action latch covers the window before the locked dialog re-renders, and
+  // unmounting invalidates every outstanding generation.
+  const recoveryLife = useMemo(() => new RecoveryDialogLifecycle(), []);
+  useEffect(() => () => recoveryLife.dispose(), [recoveryLife]);
   const [backups, setBackups] = useState<{ loading: boolean; catalog: WorkspaceBackupCatalog | null; error: string | null; busy: boolean }>({ loading: false, catalog: null, error: null, busy: false });
 
   const modalOpen = dialog !== null || (drawerOpen && narrow);
@@ -445,28 +461,66 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   }, [state, showToast]);
 
   const openRecovery = useCallback(() => {
+    const gen = recoveryLife.open();
+    if (gen === null) return; // an accepted restore is in flight; never reset it
+    const isCurrent = () => recoveryLife.isCurrent(gen);
+    const apply = (view: { loading: boolean; catalog: WorkspaceRecoveryCatalog | null; error: string | null }) =>
+      setRecovery(value => ({ ...value, ...view }));
     setDialog('recovery');
     setRecovery({ loading: true, catalog: null, error: null, busySession: null });
-    void workspaceApi()?.listRecovery().then(result => {
-      setRecovery({ loading: false, catalog: result.recovery ?? null, error: result.ok ? null : describeCode(result.code), busySession: null });
-    });
-  }, []);
-
-  const onRestore = useCallback((sessionId: string) => {
-    const latest = workspaceStore.getState();
     const api = workspaceApi();
-    if (!latest || !api) return;
-    void (async () => {
-      if (!(await guardFlush('恢复草稿记录'))) return;
-      const fresh = workspaceStore.getState();
-      if (!fresh) return;
+    if (!api) {
+      apply({ loading: false, catalog: null, error: describeCode('MISSING_WORKSPACE_API') });
+      return;
+    }
+    void loadRecoveryCatalog(() => api.listRecovery(), isCurrent, apply);
+  }, [recoveryLife]);
+
+  const closeRecovery = useCallback(() => {
+    if (!recoveryLife.close()) return; // an accepted restore is in flight; stays visible
+    setDialog(null);
+  }, [recoveryLife]);
+
+  // The BusyGuard is claimed synchronously before the first await, so a
+  // same-frame duplicate click or a competing Ctrl+O never opens a second
+  // native chooser. The recovery action latch is claimed synchronously inside
+  // the acquired guard, before the first await: a same-event-loop Escape/close
+  // or reopen can never hide or reset the accepted flow even before the locked
+  // dialog re-renders. busySession locks the dialog until the flow settles.
+  const onRestore = useCallback((sessionId: string, sourceMode: RecoverySourceMode) => {
+    const gen = recoveryLife.current();
+    void runBusy(async () => {
+      if (!recoveryLife.acquire()) return;
       setRecovery(value => ({ ...value, busySession: sessionId, error: null }));
-      const result = await api.restore(sessionId, fresh.stateRevision);
-      setRecovery(value => ({ ...value, busySession: null }));
-      if (result.ok && result.outcome === 'restored') setDialog(null);
-      else if (result.outcome !== 'cancelled') setRecovery(value => ({ ...value, error: describeCode(result.code) }));
-    })();
-  }, [guardFlush]);
+      // Results apply only while the originating opening is current and the
+      // recovery dialog is still the one on screen: a late restore result
+      // must never close a dialog the user opened in the meantime.
+      const belongs = () => recoveryLife.isCurrent(gen) && dialogRef.current === 'recovery';
+      try {
+        await runRecoveryRestore({
+          getState: () => workspaceStore.getState(),
+          isComposing: () => controller.isComposing(),
+          flush: () => guardFlush('恢复草稿记录'),
+          restore: (id, stateRevision, mode) => {
+            const api = workspaceApi();
+            if (!api) return Promise.resolve({ ok: false, code: 'MISSING_WORKSPACE_API', state: null, documentId: null, copy: null, outcome: null });
+            return api.restore(id, stateRevision, mode);
+          },
+          onError: text => { if (belongs()) setRecovery(value => ({ ...value, error: text })); },
+          onRestored: () => {
+            if (!belongs()) return;
+            recoveryLife.invalidate();
+            setDialog(null);
+          },
+        }, { sessionId, sourceMode });
+      } finally {
+        recoveryLife.release();
+        if (recoveryLife.isCurrent(gen)) {
+          setRecovery(value => value.busySession === sessionId ? { ...value, busySession: null } : value);
+        }
+      }
+    });
+  }, [runBusy, guardFlush, controller, recoveryLife]);
 
   const openBackups = useCallback(() => {
     const cur = workspaceStore.getState()?.current;
@@ -782,7 +836,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       {dialog === 'recovery' && (
         <RecoveryDialog catalog={recovery.catalog} loading={recovery.loading}
           busySession={recovery.busySession} error={recovery.error}
-          onRestore={onRestore} onClose={() => setDialog(null)} />
+          onRestore={onRestore} onClose={closeRecovery} />
       )}
       {dialog === 'backups' && (
         <BackupsDialog catalog={backups.catalog} loading={backups.loading}

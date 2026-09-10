@@ -39,6 +39,8 @@ Kimi 用于开发过程，应用仍采用既定 React/TypeScript 技术栈并保
 
 2026-09-10，HAE-008 产品模式切换任务再次核对上述官方目录、K3 公告和本机 doctor/config，以 Kimi Code CLI 0.42.0、`kimi-code/k3` / `k3`、thinking enabled / high 实际执行一次限定前端任务。Kimi 负责模式控件、只读状态、可空输入与复核绑定以及 20 项新增 UI 检查；Codex / GPT-6 负责 Main 文档类型、源码/历史/文件保护、集成和独立验证。同一时刻只有一个写入者。具体调用与运行边界见 [HAE-008 第三阶段](implementation/HAE-008.md)。
 
+2026-09-10，HAE-011 项目目录恢复任务重新核对 [官方模型目录](https://www.kimi.com/code/docs/kimi-code/models.html)、[K3 发布公告](https://www.kimi.com/news/kimi-k3) 和本机 doctor/可用配置。Kimi Code CLI 0.42.0、`kimi-code/k3` / `k3`、thinking enabled / high 实际执行两次限定调用，分别实现前端和处理独立复核意见，均退出 0。允许路径限于恢复 UI、流程助手和 UI 测试；Codex（GPT-6）负责合同、独立代码审查、真实 Electron 进程及保存/Edge 验证。串行交接保持单一写入者，没有新增应用运行时 AI 服务。证据见 [HAE-011 第十三阶段](implementation/HAE-011.md)。
+
 ### AI 使用说明与致谢维护
 
 每次向 GitHub 推送代码或文档、提交 PR 或发布版本前，核对本次实际使用的 AI。若新增 AI 工具、模型（含新版本）或提供方，必须在同次提交中更新 [README 的 AI 辅助开发与致谢](../README.md#ai-辅助开发与致谢)，注明工具、能够核实的模型名称/版本、对应公司及实际参与范围，并致谢相应公司与模型。

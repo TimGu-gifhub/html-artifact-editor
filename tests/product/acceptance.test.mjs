@@ -21,25 +21,31 @@ const replacements = [
   ['年度 &#65; 报告 😀', '年度 B 报告 🧪'], ['2025-01-01', '2026-09-10'],
   ['一 &amp; 二', '核对 &lt;&amp;&gt;'], ['1000.00', '1234.56'], ['原摘要', '服务费用已复核'],
 ];
-function expected(count = 5) {
-  let value = source;
+function expected(count = 5, original = source) {
+  let value = original;
   for (const [before, after] of replacements.slice(0, count)) {
     assert.equal(value.split(before).length, 2);
     value = value.replace(before, after);
   }
   return Buffer.from(value);
 }
-async function fixture() {
+async function fixture(directory = false) {
   const base = await mkdtemp(join(results, 'acceptance-'));
   const project = join(base, 'project'); await mkdir(project);
-  await writeFile(join(project, '报告.html'), source);
-  await writeFile(join(project, 'wrong.html'), source);
-  await writeFile(join(project, 'keep.css'), css);
-  return { base, project, profile: join(base, 'profile'), entry: join(project, '报告.html') };
+  const entryRoot = directory ? join(project, 'pages') : project;
+  const cssRoot = directory ? join(project, 'assets') : project;
+  if (directory) { await mkdir(entryRoot); await mkdir(cssRoot); }
+  const documentSource = directory ? source.replace('href="keep.css"', 'href="../assets/keep.css"') : source;
+  const entry = join(entryRoot, '报告.html'), cssPath = join(cssRoot, 'keep.css');
+  await writeFile(entry, documentSource);
+  await writeFile(join(entryRoot, 'wrong.html'), documentSource);
+  await writeFile(cssPath, css);
+  if (directory) await writeFile(join(base, 'outside.html'), documentSource);
+  return { base, project, profile: join(base, 'profile'), entry, cssPath, directory, source: documentSource };
 }
 function launch(t, mode, value, sessionId = '') {
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(electron, [childEntry, mode, value.profile, value.project, sessionId], {
+  const child = spawn(electron, [childEntry, mode, value.profile, value.project, sessionId, value.directory ? 'directory' : 'file'], {
     cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
   });
   const receipts = []; const listeners = new Set();
@@ -165,6 +171,36 @@ test('M2 product recovery, reviewed Save, independent browser and conflict-copy 
     assert.deepEqual(await readFile(join(conflictValue.project, '冲突草稿.html')), expected(1));
     assert.deepEqual(await readFile(join(conflictValue.project, 'keep.css')), Buffer.from(css));
     passed.push('a separate process changes the open file; product Save rejects the conflict and product copy preserves the draft without overwriting external bytes');
+    const directoryValue = await fixture(true);
+    const directorySeed = launch(t, 'seed', directoryValue);
+    const directorySeeded = await directorySeed.receipt('seeded');
+    assert.equal(directorySeeded.history.undoCount, 5);
+    assert.deepEqual(await readFile(directoryValue.entry), Buffer.from(directoryValue.source));
+    directorySeed.child.kill('SIGKILL'); assert.notEqual((await directorySeed.exited()).code, 0);
+    const limited = launch(t, 'file-limited', directoryValue, directorySeeded.sessionId);
+    const limitedProof = await limited.receipt('file-limited');
+    assert.equal(limitedProof.parentResourceLoaded, false);
+    assert.equal(limitedProof.changes, 5);
+    assert.equal(limitedProof.sessionId, directorySeeded.sessionId);
+    assert.deepEqual(await readFile(directoryValue.entry), Buffer.from(directoryValue.source));
+    limited.child.kill('SIGKILL'); assert.notEqual((await limited.exited()).code, 0);
+    passed.push('a nested project survives Main termination; default file recovery stays within the entry folder and does not silently restore parent resource authorization');
+    const directoryRestore = launch(t, 'restore-save', directoryValue, directorySeeded.sessionId);
+    const directoryRestored = await directoryRestore.receipt('directory-reauthorized');
+    assert.equal(directoryRestored.fileChoices, 0);
+    assert.equal(directoryRestored.rootChoices, 7);
+    assert.equal(directoryRestored.entryChoices, 5);
+    assert.equal(directoryRestored.projectEntry, 'pages/报告.html');
+    assert.equal(directoryRestored.parentResourceLoaded, true);
+    passed.push('real recovery controls support directory selection by keyboard, 960x640 layout, chooser cancellations and wrong targets, retain selection, and exclude duplicate/close/Escape/Ctrl+O competition');
+    await directoryRestore.receipt('saved'); await directoryRestore.receipt('closing');
+    assert.deepEqual(await directoryRestore.exited(), {code: 0, signal: null});
+    const directoryExpected = expected(5, directoryValue.source);
+    assert.deepEqual(await readFile(directoryValue.entry), directoryExpected);
+    assert.deepEqual(await readFile(directoryValue.cssPath), Buffer.from(css));
+    evidence.directory = { fileMode: limitedProof, directoryMode: directoryRestored, savedHash: hash(directoryExpected),
+      browser: await browserReopen(directoryValue, edits), case: directoryValue.base };
+    passed.push('fresh directory authorization restores five drafts and shared CSS; reviewed native Save changes only the expected HTML bytes and an independent Edge process reopens the nested report');
     report.status = 'passed';
     report.commit = (await execute('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim();
     report.dirty = !!(await execute('git',['status','--porcelain'],{cwd:root})).stdout.trim();

@@ -3,8 +3,11 @@ import type { PdfOptions, PdfPreview } from '../contracts/desktop.ts';
 import type { WorkspaceRecoveryCatalog } from '../contracts/recovery.ts';
 import type { BackupSummary, WorkspaceBackupCatalog } from '../contracts/backup.ts';
 import type { ResourceDiagnostics } from '../contracts/resources.ts';
+import { useState } from 'react';
 import { Dialog } from './dialog.tsx';
 import { describeCode, formatBytes, formatTime, recoveryRestorable, recoveryStatusText, resourceReasonText } from './util.ts';
+import { DEFAULT_RECOVERY_SOURCE_MODE } from './recovery-flow.ts';
+import type { RecoverySourceMode } from './recovery-flow.ts';
 
 export type SaveError = Readonly<{ message: string; code: string | null; conflict: boolean }>;
 
@@ -130,21 +133,35 @@ export function PdfDialog(props: PdfDialogProps) {
 type RecoveryDialogProps = Readonly<{
   catalog: WorkspaceRecoveryCatalog | null;
   loading: boolean;
+  /** Session id of the accepted in-flight restore; also locks the dialog. */
   busySession: string | null;
   error: string | null;
-  onRestore: (sessionId: string) => void;
+  onRestore: (sessionId: string, sourceMode: RecoverySourceMode) => void;
   onClose: () => void;
 }>;
 
 export function RecoveryDialog(props: RecoveryDialogProps) {
   const { catalog } = props;
+  // Fresh choice per dialog mount; cancellation/errors keep it (no unmount).
+  const [sourceMode, setSourceMode] = useState<RecoverySourceMode>(DEFAULT_RECOVERY_SOURCE_MODE);
+  const busy = props.busySession !== null;
   return (
-    <Dialog title="恢复草稿记录" wide onClose={props.onClose}
-      footer={<button type="button" className="btn" data-autofocus onClick={props.onClose}>关闭</button>}>
-      <p className="hint">选择一条记录后，需要在系统对话框中重新选择对应的文件或目录以确认权限。</p>
-      {props.loading && <p>正在读取记录…</p>}
+    <Dialog title="恢复草稿记录" wide locked={busy} onClose={props.onClose}
+      footer={<button type="button" className="btn" data-autofocus disabled={busy} onClick={props.onClose}>关闭</button>}>
+      <p className="hint">选择恢复来源和一条记录后，需要在系统对话框中重新选择以确认权限。</p>
+      <fieldset className="pdf-options" aria-label="恢复来源">
+        <legend>恢复来源</legend>
+        <label><input type="radio" name="recovery-source" checked={sourceMode === 'file'} disabled={busy}
+          onChange={() => setSourceMode('file')} /> HTML 文件</label>
+        <label><input type="radio" name="recovery-source" checked={sourceMode === 'directory'} disabled={busy}
+          onChange={() => setSourceMode('directory')} /> 项目目录</label>
+      </fieldset>
+      <p className="hint">{sourceMode === 'directory'
+        ? '项目目录：先选择项目根目录，再选择其中的 HTML 入口文件；适合页面引用上级目录共享资源（如 ../assets）的情况。'
+        : 'HTML 文件：以所选 HTML 所在文件夹为资源根目录；如需加载上级目录中的共享资源，请选择项目目录。'}</p>
+      {props.loading && <p role="status">正在读取记录…</p>}
       {props.error && <div className="panel-error" role="alert"><p>{props.error}</p></div>}
-      {catalog && catalog.entries.length === 0 && <p>没有可恢复的草稿记录。</p>}
+      {catalog && catalog.entries.length === 0 && !props.loading && <p>没有可恢复的草稿记录。</p>}
       {catalog && catalog.entries.length > 0 && <div className="record-list">
         {catalog.entries.map(entry => (
           <div className="record-item" key={entry.sessionId}>
@@ -153,8 +170,8 @@ export function RecoveryDialog(props: RecoveryDialogProps) {
               <span className="hint">{recoveryStatusText(entry.status)}{entry.active ? ' · 当前打开' : ''}{entry.historyAvailable ? ' · 含历史' : ''}</span>
             </div>
             <button type="button" className="btn sm"
-              disabled={props.busySession !== null || entry.active || !recoveryRestorable(entry.status)}
-              onClick={() => props.onRestore(entry.sessionId)}>
+              disabled={busy || entry.active || !recoveryRestorable(entry.status)}
+              onClick={() => props.onRestore(entry.sessionId, sourceMode)}>
               {props.busySession === entry.sessionId ? '正在恢复…' : '恢复…'}
             </button>
           </div>
