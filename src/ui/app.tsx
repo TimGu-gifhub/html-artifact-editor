@@ -9,6 +9,7 @@ import { useWorkspaceState, workspaceStore } from './store.ts';
 import { LiveInputController, useLiveInput } from './live-input.ts';
 import { ensureInputFlushed } from './flush.ts';
 import type { FlushDeps } from './flush.ts';
+import { BusyGuard, entrySwitchBlocker, entrySwitchBlockerText, runEntrySwitch } from './entry-switch.ts';
 import { classifySaveResult } from './save-result.ts';
 import { EditorPanel } from './editor-panel.tsx';
 import { ReviewPanel } from './review-panel.tsx';
@@ -163,6 +164,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (event: MouseEvent) => {
@@ -190,7 +192,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const [backups, setBackups] = useState<{ loading: boolean; catalog: WorkspaceBackupCatalog | null; error: string | null; busy: boolean }>({ loading: false, catalog: null, error: null, busy: false });
 
   const modalOpen = dialog !== null || (drawerOpen && narrow);
-  const previewVisible = !!current && !modalOpen;
+  const previewVisible = !!current && !modalOpen && !menuOpen;
   const previewRef = usePreviewLayout('main', previewVisible);
 
   useEffect(() => {
@@ -218,11 +220,30 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     return false;
   }, [flushDeps, showToast]);
 
+  const busyGuard = useMemo(() => new BusyGuard(), []);
   const runBusy = useCallback(async (task: () => Promise<void>) => {
-    if (busy) return;
+    if (!busyGuard.tryAcquire()) return;
     setBusy(true);
-    try { await task(); } finally { setBusy(false); }
-  }, [busy]);
+    try { await task(); } finally { busyGuard.release(); setBusy(false); }
+  }, [busyGuard]);
+
+  const [switching, setSwitching] = useState(false);
+  const onSwitchEntry = useCallback(() => void runBusy(async () => {
+    setSwitching(true);
+    try {
+      await runEntrySwitch({
+        getState: () => workspaceStore.getState(),
+        isComposing: () => controller.isComposing(),
+        flush: () => guardFlush('切换入口'),
+        switchEntry: (documentId, stateRevision) => {
+          const api = workspaceApi();
+          if (!api) return Promise.resolve({ ok: false, code: 'MISSING_WORKSPACE_API', state: null, documentId, copy: null, outcome: null });
+          return api.switchEntry(documentId, stateRevision);
+        },
+        showToast,
+      });
+    } finally { setSwitching(false); }
+  }), [runBusy, guardFlush, controller, showToast]);
 
   const onOpen = useCallback((directory: boolean) => void runBusy(async () => {
     if (!(await guardFlush('打开'))) return;
@@ -468,6 +489,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const history = input?.history ?? null;
   const phaseBusy = state.phase === 'choosing' || state.phase === 'opening' || state.phase === 'saving' || state.phase === 'committing';
   const lastSave = state.lastSave;
+  const switchBlocker = entrySwitchBlocker(state, { busy, composing: inputView.composing });
 
   const docked = panel === 'docked' && !!current;
   return (
@@ -528,12 +550,18 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           )}
           <div className="menu-wrap" ref={menuWrapRef}>
             <button type="button" className="btn icon" aria-label="更多操作" aria-haspopup="menu"
-              aria-expanded={menuOpen} onClick={() => setMenuOpen(value => !value)}>
+              aria-expanded={menuOpen} ref={menuButtonRef} onClick={() => setMenuOpen(value => !value)}>
               <IconMenu />
             </button>
             {menuOpen && <div className="menu" role="menu">
               <button type="button" role="menuitem" className="narrow-only" onClick={() => { setMenuOpen(false); onOpen(false); }}>打开 HTML…</button>
               <button type="button" role="menuitem" className="narrow-only" onClick={() => { setMenuOpen(false); onOpen(true); }}>打开目录…</button>
+              <button type="button" role="menuitem" disabled={switchBlocker !== null}
+                title={switchBlocker ? entrySwitchBlockerText(switchBlocker) : undefined}
+                onClick={() => { setMenuOpen(false); menuButtonRef.current?.focus(); onSwitchEntry(); }}>
+                {switching ? '正在切换目录内 HTML…' : '切换目录内 HTML…'}
+                {current && <span className="menu-sub">{`${current.project.name} / ${current.project.entry}`}</span>}
+              </button>
               <button type="button" role="menuitem" className="narrow-only" disabled={!current}
                 onClick={() => { setMenuOpen(false); setPdfError(null); setDialog('pdf'); }}>PDF 打印预览…</button>
               <button type="button" role="menuitem" disabled={!current || !input?.canSaveCopy}

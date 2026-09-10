@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const kind = process.argv.includes('--product') ? 'product' : process.argv.includes('--smoke') ? 'smoke'
+const kind = process.argv.includes('--product-entry') ? 'product-entry' : process.argv.includes('--product') ? 'product' : process.argv.includes('--smoke') ? 'smoke'
   : process.argv.includes('--security') ? 'security'
     : process.argv.includes('--mapping') ? 'mapping'
       : process.argv.includes('--patch') ? 'patch'
@@ -22,7 +22,7 @@ const kind = process.argv.includes('--product') ? 'product' : process.argv.inclu
                           : process.argv.includes('--source-diff') ? 'source-diff'
                             : process.argv.includes('--history') ? 'history'
     : process.argv.includes('--preview') ? 'preview-tool' : 'main';
-const smoke = ['product', 'smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project', 'save-session', 'startup', 'quit', 'recovery', 'source-diff', 'history'].includes(kind);
+const smoke = ['product-entry', 'product', 'smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project', 'save-session', 'startup', 'quit', 'recovery', 'source-diff', 'history'].includes(kind);
 const entry = resolve(root, `out/${kind}/index.cjs`);
 if (!existsSync(entry)) throw new Error('Build output missing. Run npm run build first.');
 const reportPath = resolve(root, `test-results/${kind}.json`);
@@ -39,7 +39,7 @@ if (kind === 'preview-tool' && process.argv.includes('--directory')) args.push('
 const child = spawn(electron, args, { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
 // History also includes 24 separately durable edits plus compaction/restart.
 // This is a suite budget; individual workers and IPC keep their existing limits.
-const timeoutMs = kind === 'product' ? 180_000 : ['save-session', 'quit', 'recovery', 'history'].includes(kind) ? 90_000 : 45_000;
+const timeoutMs = ['product', 'product-entry'].includes(kind) ? 180_000 : ['save-session', 'quit', 'recovery', 'history'].includes(kind) ? 90_000 : 45_000;
 const timeout = smoke ? setTimeout(() => {
   console.error(`Electron ${kind} exceeded ${timeoutMs / 1000} seconds.`);
   child.kill();

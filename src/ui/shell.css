@@ -175,6 +175,11 @@ body { overflow: hidden; }
 }
 .menu button:hover { background: var(--surface-2); }
 .menu button:disabled { color: var(--text-3); cursor: default; background: none; }
+.menu-sub {
+  display: block; margin-top: 2px;
+  font-size: 11px; color: var(--text-3);
+  white-space: normal; word-break: break-all;
+}
 
 /* ================= 横幅 ================= */
 .banners { display: flex; flex-direction: column; }

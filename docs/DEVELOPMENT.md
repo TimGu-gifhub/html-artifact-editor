@@ -52,6 +52,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm test` | 契约、分层、资源路径/句柄/快照/撤销、UTF-8、源码索引、纯字节 Patch 与拒绝反例；最多四个测试文件并行 |
 | `npm run test:ui` | 真实 UI 控制器的输入/复核竞争、异步绑定、失败保留与保存结果分类；不代表真实 IME |
 | `npm run test:product` | 真实产品 React/UI preload/Main/Preview 的输入、复核、Windows Save、浮窗、窄窗、PDF 同字节导出与关闭；原生选择/确认由 Main 回调驱动 |
+| `npm run test:product-entry` | Windows 产品目录打开/入口切换、取消/越界/另存保护、浮窗输入排空、窄窗键盘及菜单/原生视图不重叠与滚动保留；原生选择/确认由 Main 回调驱动 |
 | `npm run test:product-acceptance` | 五处校稿、实际 Main 强杀/产品恢复、复核保存、独立 Edge 重开、撤销后再次保存、整份备份恢复和外部冲突另存；Windows 须有已安装 Edge，其他 OS 明确标记 unavailable |
 | `npm run test:smoke` | 已构建应用的 Electron 冒烟，独立 out/smoke 入口 |
 | `npm run test:security` | 已构建 preload 的真实项目协议、两种模式、恶意请求和 IPC 测试；独立 out/security 入口 |

@@ -19,6 +19,7 @@ export type ProductChoices = Readonly<{
   pdf?: (name: string) => Promise<string | undefined>;
   review?: (value: LeaveReview) => Promise<unknown>;
   backup?: (value: BackupReview) => Promise<unknown>;
+  project?: PersistentSessionPorts['projectChoices'];
 }>;
 export async function createProductApplication(outputRoot: string,
   options: Readonly<{ visible?: boolean; bindQuit?: boolean; choices?: ProductChoices;
@@ -54,6 +55,7 @@ export async function createProductApplication(outputRoot: string,
         return selected.canceled ? undefined : selected.filePaths[0];
       }),
       chooseCopy: choices.copy ?? (name => saveDialog(basename(name).replace(/\.html?$/iu, '') + '-草稿.html', 'html')),
+      ...(choices.project ? { projectChoices: choices.project } : {}),
       review: choices.review ?? (async value => {
         const selected = await dialog.showMessageBox(window, { type: 'question', title: '保留当前修改',
           message: `${value.currentName} 还有未保存的修改`,

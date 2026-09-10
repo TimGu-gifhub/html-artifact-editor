@@ -9,6 +9,7 @@
 - 映射失效或关闭时，仍将已绑定或待处理输入展示为可选择、可复制的只读文本；保留文本不解除编辑保护，也不表示恢复或保存成功。
 - 失焦、隐藏、拆卸、PDF、保存和文件切换须先排空输入；组词或失败时保留编辑区域和文本。Escape 只取消尚未预览的输入；已预览内容通过“还原本段”或撤销恢复，还原本段形成可撤销草稿，不冒充零历史取消。上述动作均不自动写 HTML。
 - 原生关闭先向当前输入窗口请求排空；组词、断连或失败拒绝本次关闭，不重放旧保存。浮窗关闭按钮收回校稿栏；不关闭文档。主窗口仍拥有文档、文件权限及退出决定。
+- “更多操作 → 切换目录内 HTML…”复用 Main 当前目录授权。动作开始固定当前文档，排空实际输入窗口后使用最新修订；文档变化、组合态、失败或忙碌时不打开选择器。取消选择、越界或拒绝离开保留草稿；另存/放弃仍须原有 Main 决定，新文档不继承旧输入或复核。
 - 勾选表示已复核当前条目的原文/新文。再次修改该条，取消其复核标记；其他未改变条目保留。全选只作用于当前全部净变更。保存要求全部当前变更已复核，并绑定最新 Diff 版本；不提供部分勾选保存。
 - 方案 B 保留宽校稿栏与下方复核清单。隐藏后预览占满可用空间；独立浮窗可拖动、调整尺寸、重新停靠。页面始终在无 Node、文件和广域 IPC 的隔离原生视图中。
 - PDF 从当前已确认草稿生成，生成时冻结该文档的输入，提供 A4/Letter、横向、背景选项。打印预览显示这次生成的 PDF；导出复用同一份字节。明确标注包含未保存草稿。导出不保存 HTML；目标通过原生对话框选择，首版独占创建新 PDF，已有文件要求换名。
@@ -19,7 +20,7 @@
 
 允许 Kimi 修改 `src/ui/**` 和新增 `tests/product/ui-*.mjs`；不得修改 contracts、preload、Main、platform、core、依赖或构建。视觉依据为 `docs/design/hae-007/` 的方案 B。主代理提供 [Workspace API](../src/contracts/workspace-editor.ts)、[输入状态](../src/contracts/input.ts)、[桌面 API](../src/contracts/desktop.ts) 并负责集成和独立验证。
 
-`window.haeWorkspace` 维持已有 API，`window.haeDesktop.request` 仅在正式产品窗口暴露。桌面状态随 `WorkspaceSnapshot.desktop` 发布，独立 revision 不替代文档 stateRevision。role 区分主窗口/编辑浮窗；panel 决定当前输入控件归属。原生 Preview 的 bounds 必须由主窗口中实际占位元素计算，抽屉/模态打开时明确隐藏原生 Preview，关闭时恢复；不能用 CSS 假设可以遮盖原生视图。
+`window.haeWorkspace` 维持已有 API，`window.haeDesktop.request` 仅在正式产品窗口暴露。桌面状态随 `WorkspaceSnapshot.desktop` 发布，独立 revision 不替代文档 stateRevision。role 区分主窗口/编辑浮窗；panel 决定当前输入控件归属。原生 Preview 的 bounds 必须由主窗口中实际占位元素计算，菜单/抽屉/模态打开时明确隐藏原生 Preview，关闭时恢复同一视图及滚动位置；不能用 CSS 假设可以遮盖原生视图。
 
 `flush` 是 Main 绑定当前输入窗口的单次关闭/停靠请求。UI 排空输入后仅对该 id 返回 flushed；组词或失败返回 ready=false。复核在 Main 保存，跨停靠/浮窗保持。PDF 在单独受限的本地 PDF 窗口显示，桌面状态仅包含名称、版本和大小，不暴露私有路径或原始字节。
 
