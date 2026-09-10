@@ -37,6 +37,7 @@ const entries = {
   history: ['tests/history/main.ts', 'out/history'],
   'history-child': ['tests/history/child.ts', 'out/history-child'],
   product: ['tests/product/main.ts', 'out/product'],
+  'product-acceptance-child': ['tests/product/acceptance-child.ts', 'out/product-acceptance-child'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'diff-worker', 'history-worker', 'native'];
 const requested = process.argv.slice(2);
