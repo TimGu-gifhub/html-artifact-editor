@@ -31,6 +31,7 @@ export function createPreviewHost(window: BaseWindow, bounds: () => Rectangle,
   return Object.freeze({
     get current() { return current; },
     get available() { return !disposed && !unavailable && !window.isDestroyed(); },
+    refresh: resize,
     swap(next: WebContentsView | null): () => void {
       live();
       const previous = current;

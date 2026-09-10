@@ -23,6 +23,26 @@ test('native and Main close requests join one decision; cancellation preserves t
   response.resolve({ status: 'cancelled' }); assert.equal(await first, 'cancelled'); assert.equal(f.guard.closing, false);
   assert.equal(f.calls.disposal, 0); assert.equal(f.calls.destroyed, 0); f.guard.detach();
 });
+test('native close requires a successful UI flush and does not begin a leave review after IME/disconnection rejection', async () => {
+  for (const ready of [false, true]) {
+    const flush = deferred(); let calls = 0;
+    const f = fixture({ beforeRequestClose: () => { calls++; return flush.promise; } });
+    f.window.close(); const closing = f.guard.requestClose(); await Promise.resolve();
+    assert.equal(calls, 1); assert.equal(f.calls.review, 0); assert.equal(f.calls.destroyed, 0);
+    flush.resolve(ready); assert.equal(await closing, ready ? 'closed' : 'cancelled');
+    assert.equal(f.calls.review, ready ? 1 : 0); assert.equal(f.calls.destroyed, ready ? 1 : 0); f.guard.detach();
+  }
+});
+test('an already accepted Save settles before the UI close flush, and an uncertain Save cannot be bypassed by a clean UI', async () => {
+  for (const status of ['saved', 'unknown']) {
+    const save = deferred(); let flushes = 0;
+    const f = fixture({ waitForSave: true, beforeRequestClose: async () => { flushes++; return true; } }, save.promise);
+    const closing = f.guard.requestClose(); await Promise.resolve(); assert.equal(flushes, 0);
+    save.resolve({ status, requiresReview: status === 'unknown', cleanupPending: false });
+    assert.equal(await closing, status === 'saved' ? 'closed' : 'blocked');
+    assert.equal(flushes, status === 'saved' ? 1 : 0); f.guard.detach();
+  }
+});
 test('approved close keeps the native window until teardown completes; a failed barrier cannot destroy it', async () => {
   for (const failed of [false, true]) {
     const hold = deferred(); const started = deferred();

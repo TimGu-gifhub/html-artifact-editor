@@ -1,6 +1,6 @@
 # 冻结候选的源码 Diff
 
-日期：2026-09-09，HAE-011 第六阶段。已提供纯核心 Diff、有限 Worker、Main 文档读取器与可信 Workspace IPC；正常产品入口和 Diff 面板仍未接入。这里的 Diff 是已应用草稿相对于打开/最近保存基线的实际源码替换，不代表磁盘文件目前仍未被其他程序修改。
+日期：2026-09-09，HAE-011 第六阶段。已提供纯核心 Diff、有限 Worker、Main 文档读取器与可信 Workspace IPC；HAE-009 已接入产品入口和保存前 Diff 面板。这里的 Diff 是已应用草稿相对于打开/最近保存基线的实际源码替换，不代表磁盘文件目前仍未被其他程序修改。
 
 ## 字节与范围
 
@@ -64,4 +64,4 @@ save 的第三个参数 review 可选，用于把“确认这份 Diff”的操�
 
 [纯核心与协议测试](../tests/unit/source-diff.test.mjs) 用独立期望值核验实体、Unicode/BOM、混合行尾、pre 首行 LF、长度变化/清空、1000 项完整输出，以及用 Diff 重建全部候选字节。[读取器测试](../tests/unit/source-diff-reader.test.mjs) 验证合并、缓存、取消、修订竞争与终止失败；[Worker 测试](../tests/unit/source-diff-worker.test.mjs) 验证同长度伪造、遗漏、缺失/崩溃和实际 5 秒超时终止。
 
-`npm run test:source-diff` 用真实 Electron 的生产 preload/IPC 与自制空白可信页面验证读取、恢复草稿、未应用/组合标志、旧确认拒绝、归零、renderer 重连/旧文档拒绝，以及 Windows 显式保存的完整字节和外部冲突。它不是产品面板、真实 IME、原生对话框或人工接受结果；Windows 10/macOS、满尺寸性能、真实磁盘满和断电仍未验收。窗口历史/撤销和 v2 完整检查点已由 HAE-011 接通；产品控件与提交后未重建的恢复协调仍待实现，HAE-011 与 M2 保持未完成。
+`npm run test:source-diff` 用真实 Electron 的生产 preload/IPC 与自制空白可信页面验证读取、恢复草稿、未应用/组合标志、旧确认拒绝、归零、renderer 重连/旧文档拒绝，以及 Windows 显式保存的完整字节和外部冲突。它不是产品面板、真实 IME、原生对话框或人工接受结果；Windows 10/macOS、满尺寸性能、真实磁盘满和断电仍未验收。窗口历史/撤销和 v2 完整检查点已由 HAE-011 接通；HAE-011 已接入精确提交后的恢复协调，HAE-009 已接入产品控件；人工验收和故障处置仍待完成，M2 保持未完成。

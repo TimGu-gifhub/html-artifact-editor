@@ -7,6 +7,7 @@ import type { InputSnapshot } from '../contracts/input.ts';
 import { WORKSPACE_COMMAND, WORKSPACE_CONNECT, WORKSPACE_STATE, isWorkspaceCommand } from '../contracts/workspace-editor.ts';
 import type { WorkspaceAPI, WorkspaceCommand, WorkspaceConnection, WorkspaceReply, WorkspaceResult } from '../contracts/workspace-editor.ts';
 import type { WorkspaceSnapshot } from '../contracts/workspace.ts';
+import type { DesktopAPI } from '../contracts/desktop.ts';
 
 const bootstrap: EditorBootstrap = Object.freeze({
   contractVersion: CONTRACT_VERSION,
@@ -84,7 +85,8 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
   let latest: WorkspaceSnapshot | null = null;
   const listeners = new Set<(state: WorkspaceSnapshot) => void>();
   const accept = (state: WorkspaceSnapshot): void => {
-    if (latest && state.stateRevision <= latest.stateRevision) return;
+    if (latest && state.stateRevision < latest.stateRevision) return;
+    if (latest && state.stateRevision === latest.stateRevision && (state.desktop?.revision ?? 0) <= (latest.desktop?.revision ?? 0)) return;
     latest = state;
     for (const listener of listeners) { try { listener(state); } catch { /* Main still owns the state. */ } }
   };
@@ -137,4 +139,8 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
     },
   });
   contextBridge.exposeInMainWorld('haeWorkspace', api);
+  if (process.argv.includes('--hae-product')) {
+    const desktop: DesktopAPI = Object.freeze({ request: value => request({ kind: 'desktop', value }) });
+    contextBridge.exposeInMainWorld('haeDesktop', desktop);
+  }
 }

@@ -9,7 +9,7 @@ import { registerBundledContent } from './bundled-content.ts';
 import { lockContents, securePreferences } from './preview/security.ts';
 
 export function registerSchemes(): void {
-  protocol.registerSchemesAsPrivileged(['editor', 'artifact'].map((scheme) => ({
+  protocol.registerSchemesAsPrivileged(['editor', 'artifact', 'hae-pdf'].map((scheme) => ({
     scheme,
     privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
   })));

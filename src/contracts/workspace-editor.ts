@@ -7,12 +7,15 @@ import type { DiffReview, WorkspaceDiff } from './source-diff.ts';
 import { isRestoreReference } from './save-record.ts';
 import type { WorkspaceBackupCatalog } from './backup.ts';
 import type { RestoreReference } from './save-record.ts';
+import { isDesktopCommand } from './desktop.ts';
+import type { DesktopCommand } from './desktop.ts';
 
 export const WORKSPACE_CONNECT = 'hae:workspace-connect';
 export const WORKSPACE_COMMAND = 'hae:workspace-command';
 export const WORKSPACE_STATE = 'hae:workspace-state';
 export type DocumentCommand = Exclude<EditorCommand, Readonly<{ kind: 'read' }>>;
 export type WorkspaceCommand = Readonly<{ kind: 'read' | 'recovery-list' }>
+  | Readonly<{ kind: 'desktop'; value: DesktopCommand }>
   | Readonly<{ kind: 'open' | 'open-directory'; stateRevision: number }>
   | Readonly<{ kind: 'restore'; stateRevision: number; recoverySessionId: string; sourceMode: 'file' | 'directory' }>
   | Readonly<{ kind: 'switch-entry'; stateRevision: number; documentId: string }>
@@ -53,6 +56,7 @@ export function isWorkspaceCommand(value: unknown): value is WorkspaceCommand {
   if (!object(value)) return false;
   const count = Object.keys(value).length;
   switch (value.kind) {
+    case 'desktop': return count === 2 && isDesktopCommand(value.value);
     case 'read':
     case 'recovery-list': return count === 1;
     case 'restore': return count === 4 && identity(value.recoverySessionId)

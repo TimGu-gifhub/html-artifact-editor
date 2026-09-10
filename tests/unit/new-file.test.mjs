@@ -10,6 +10,26 @@ const fixtures = resolve('test-results');
 await mkdir(fixtures, { recursive: true });
 const bytes = Buffer.from('\ufeff<!doctype html>\r\n<h1>中文 &amp; 😀</h1>');
 const directory = async () => mkdtemp(join(fixtures, 'new-file-case-'));
+test('dedicated PDF export uses the same exclusive/readback checks and cannot create HTML or replace an existing PDF', async () => {
+  const root = await directory(); const pdf = Buffer.from('%PDF-1.7\nself-made export fixture\n%%EOF');
+  const htmlWriter = await createNewFileWriter(root); const writer = await createNewFileWriter(root, undefined, 'pdf');
+  assert.equal((await htmlWriter.write(join(root, 'not-html.pdf'), pdf)).status, 'failed');
+  assert.equal((await writer.write(join(root, 'not-pdf.html'), pdf)).status, 'failed');
+  assert.equal((await writer.write(join(root, 'invalid.pdf'), bytes)).code, 'NEW_FILE_INVALID_PDF');
+  const target = join(root, '打印预览.pdf');
+  assert.equal((await writer.write(target, pdf)).status, 'created');
+  assert.deepEqual(await readFile(target), pdf);
+  assert.equal((await writer.write(target, Buffer.from('%PDF-changed'))).code, 'NEW_FILE_EXISTS');
+  assert.deepEqual(await readFile(target), pdf);
+  assert.deepEqual(await readdir(root), ['打印预览.pdf']);
+});
+test('PDF export interruption preserves a partial file and reports unknown without touching source HTML', async () => {
+  const root = await directory(); const original = join(root, 'source.html'); await writeFile(original, bytes);
+  const target = join(root, 'interrupted.pdf');
+  const writer = await createNewFileWriter(root, async stage => { if (stage === 'created') throw new Error('injected'); }, 'pdf');
+  assert.equal((await writer.write(target, Buffer.from('%PDF-1.7\n%%EOF'))).status, 'unknown');
+  assert.equal((await readFile(target)).length, 0); assert.deepEqual(await readFile(original), bytes);
+});
 test('exclusive new sibling creation flushes and verifies exact bytes, while caller byte mutation cannot affect it', async () => {
   const root = await directory(); const writer = await createNewFileWriter(root);
   const target = join(root, '另存报告.html');

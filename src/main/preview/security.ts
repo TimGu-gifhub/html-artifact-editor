@@ -7,10 +7,14 @@ export const securePreferences: Readonly<WebPreferences> = Object.freeze({
   safeDialogs: true, disableDialogs: true, spellcheck: false, plugins: false, enableWebSQL: false,
 });
 
-export function lockContents(contents: WebContents): void {
+export function lockContents(contents: WebContents, allowSubframeNavigation: (url: string) => boolean = () => false): void {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event) => event.preventDefault());
-  contents.on('will-frame-navigate', (event) => event.preventDefault());
+  contents.on('will-frame-navigate', (event) => {
+    // Ordinary Preview/editor callers deny every navigation. The dedicated
+    // PDF viewer can opt into its bundled component's exact stream frames.
+    if (event.isMainFrame || !allowSubframeNavigation(event.url)) event.preventDefault();
+  });
   contents.on('will-redirect', (event) => event.preventDefault());
   contents.on('will-attach-webview', (event) => event.preventDefault());
   contents.on('select-bluetooth-device', (event, _devices, callback) => {

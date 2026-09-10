@@ -38,7 +38,7 @@ export async function executeEditorCommand(input: InputController, command: Edit
   return { ok: code === null, code, state: input.snapshot(), copy };
 }
 
-function chooseWhileActive(choose: () => Promise<string | undefined>, active: () => boolean,
+export function chooseWhileActive(choose: () => Promise<string | undefined>, active: () => boolean,
   signal: AbortSignal): Promise<string | undefined> {
   if (signal.aborted || !active()) return Promise.resolve(undefined);
   return new Promise((resolveChoice, reject) => {

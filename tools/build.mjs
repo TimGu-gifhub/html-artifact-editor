@@ -36,6 +36,7 @@ const entries = {
   'source-diff': ['tests/source-diff/main.ts', 'out/source-diff'],
   history: ['tests/history/main.ts', 'out/history'],
   'history-child': ['tests/history/child.ts', 'out/history-child'],
+  product: ['tests/product/main.ts', 'out/product'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'diff-worker', 'history-worker', 'native'];
 const requested = process.argv.slice(2);

@@ -1,9 +1,10 @@
-import type { BrowserWindow, Rectangle } from 'electron';
+import type { BrowserWindow, Rectangle, WebContents } from 'electron';
 import { EDITOR_URL } from '../../contracts/editor.ts';
 import { createPreviewHost } from '../../platform/preview-host.ts';
 import { projectDialogs } from '../../platform/project-dialog.ts';
 import type { PreviewHostStep } from '../../platform/preview-host.ts';
 import { createWorkspaceBridge } from './bridge.ts';
+import type { WorkspaceBridgeExtension } from './bridge.ts';
 import { createWorkspace } from './controller.ts';
 import type { Workspace, WorkspaceDecisions } from './controller.ts';
 import { prepareDocument } from './document.ts';
@@ -23,6 +24,8 @@ export type SessionPorts = WorkspaceDecisions & WindowCloseOptions & Readonly<{
   saveOriginal?: OriginalSaver;
   checkpoints?: DraftStore;
   backups?: BackupRestorer;
+  bridgeExtension?: (contents: WebContents) => WorkspaceBridgeExtension;
+  disposeAuxiliary?: () => Promise<void>;
 }>;
 
 // Install before loading the trusted UI. A single workspace owns the current
@@ -40,8 +43,8 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
   }, ports.saveOriginal, ports.checkpoints, ports.backups);
   let bridge: ReturnType<typeof createWorkspaceBridge>;
   const bridges = new Set<ReturnType<typeof createWorkspaceBridge>>();
-  const connect = () => {
-    const value = createWorkspaceBridge(window.webContents, workspace, ports.chooseOpen, ports.chooseCopy, projectChoices);
+  const connect = (contents = window.webContents) => {
+    const value = createWorkspaceBridge(contents, workspace, ports.chooseOpen, ports.chooseCopy, projectChoices, ports.bridgeExtension?.(contents));
     bridges.add(value); return value;
   };
   let guard: ReturnType<typeof bindWorkspaceWindow>;
@@ -58,12 +61,14 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
   }); };
   const dispose = (): Promise<void> => {
     if (disposal) return disposal;
-    disposed = true; bridge.close(); guard.detach(); window.removeListener('closed', onClosed);
+    disposed = true; for (const accepted of bridges) accepted.close();
+    guard.detach(); window.removeListener('closed', onClosed);
     disposal = (async () => {
       try { host.dispose(); } finally {
         const ended = await Promise.allSettled([workspace.dispose(), ...Array.from(bridges, value => value.drain())]);
         const failed = ended.find(result => result.status === 'rejected');
         if (failed?.status === 'rejected') throw failed.reason;
+        await ports.disposeAuxiliary?.();
         bridges.clear();
       }
     })();
@@ -75,6 +80,12 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
     get connected() { return bridge.active; },
     get closing() { return guard.closing; },
     requestClose: guard.requestClose,
+    // Main-only registration of an application-owned auxiliary editor. It joins
+    // the same accepted-command barrier; it cannot create a second document.
+    attachEditor(contents: WebContents) {
+      if (disposed || window.isDestroyed() || contents === window.webContents) throw new Error('EDITOR_BRIDGE_UNAVAILABLE');
+      return connect(contents);
+    },
     // Main-only recovery of a revoked UI renderer. It cannot change the current
     // document, reconnect an old page token, Apply, Save or discard pending text.
     async reloadUI(): Promise<void> {

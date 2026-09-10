@@ -2,7 +2,7 @@
 
 本文件由 [backlog.json](backlog.json) 生成。范围变更先修改 JSON，再运行 `python tools/render_backlog.py`；GitHub Issues 记录实时执行状态。
 
-当前所有应用任务均为待实现；本表链接不代表任务已经完成。M1–M4 构成文本产品路线，M5 是独立后续提案。
+本表是规划与验收基线，执行进度见各 Issue 和实施记录；未勾选的模板条目不代表所有代码均待实现。M1–M4 构成文本产品路线，M5 是独立后续提案。
 
 ## 任务总览
 
@@ -16,7 +16,7 @@
 | HAE-006 | 执行 Apple Silicon Mac 早期可行性冒烟 | M1 | P1 | HAE-001、HAE-004 | [#6](https://github.com/TimGu-gifhub/html-artifact-editor/issues/6) |
 | HAE-007 | 确定产品视觉方案与完整交互状态 | M2 | P1 | HAE-001 | [#7](https://github.com/TimGu-gifhub/html-artifact-editor/issues/7) |
 | HAE-008 | 实现目录入口、相对资源与离线诊断 | M2 | P1 | HAE-002、HAE-005 | [#8](https://github.com/TimGu-gifhub/html-artifact-editor/issues/8) |
-| HAE-009 | 实现文本草稿、中文输入与选择交互 | M2 | P0 | HAE-003、HAE-007 | [#9](https://github.com/TimGu-gifhub/html-artifact-editor/issues/9) |
+| HAE-009 | 实现方案 B 实时校稿、复核与 PDF 工作台 | M2 | P0 | HAE-003、HAE-007 | [#9](https://github.com/TimGu-gifhub/html-artifact-editor/issues/9) |
 | HAE-010 | 实现安全保存、冲突、备份与崩溃恢复 | M2 | P0 | HAE-004、HAE-008 | [#10](https://github.com/TimGu-gifhub/html-artifact-editor/issues/10) |
 | HAE-011 | 实现历史、保存点、源码 Diff 与草稿持久化 | M2 | P0 | HAE-004、HAE-009、HAE-010 | [#11](https://github.com/TimGu-gifhub/html-artifact-editor/issues/11) |
 | HAE-012 | 完成 Windows 可用 MVP 验收 | M2 | P0 | HAE-005、HAE-008、HAE-009、HAE-010、HAE-011 | [#12](https://github.com/TimGu-gifhub/html-artifact-editor/issues/12) |
@@ -238,7 +238,7 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 验证用例：T-09、T-16、T-18、T-19
 
-参考文档：[docs/PRODUCT_DESIGN.md](PRODUCT_DESIGN.md)。
+参考文档：[docs/PRODUCT_DESIGN.md](PRODUCT_DESIGN.md)、[docs/LIVE_WORKBENCH.md](LIVE_WORKBENCH.md)。
 
 ### HAE-008 · 实现目录入口、相对资源与离线诊断
 
@@ -269,9 +269,9 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 参考文档：[PRD.md](../PRD.md)、[ARCHITECTURE.md](../ARCHITECTURE.md)。
 
-### HAE-009 · 实现文本草稿、中文输入与选择交互
+### HAE-009 · 实现方案 B 实时校稿、复核与 PDF 工作台
 
-用户在页面选中准确文字，在可信控件修改，应用/取消与中文输入不会串目标或丢内容。
+用户在方案 B 工作台准确修改静态文字，输入后自动预览，再逐条或全选复核并明确保存；校稿栏可隐藏或拆卸，PDF 便于查看与打印预览。
 
 优先级：P0；领域：ui；依赖：HAE-003、HAE-007。
 
@@ -279,24 +279,30 @@ Windows 完整校稿、目录资源、中文输入、Diff、备份、冲突、�
 
 **范围**
 
-- src/ui 校稿输入、选择高亮与焦点
-- 输入法、纯文本粘贴、异步选择世代
+- src/ui 方案 B、可信实时输入、IME、纯文本与异步文档/token 绑定
+- Main 产品装配、单一输入窗口归属、隐藏/独立浮窗及关闭排空
+- 逐条/全选复核、最新源码 Diff、备份保存与撤销/重做控件
+- 草稿 PDF 打印预览、纸张/方向/背景选项和同字节新文件导出
 
 **产物**
 
-- 主路径与错误状态 UI
-- Windows IME 与交互记录
+- 可运行 Windows 产品工作台及正常开发入口
+- Kimi 实际模型/调用记录、独立产品验证、源码/文件安全证据
+- 明确保留 Windows IME、原生对话框、DPI/读屏/多显示器和维护者验收未测项
 
 **验收条件**
 
-- [ ] 应用形成一个操作组，取消零 HTML 写入，失焦保留尚未应用输入。
-- [ ] IME 期间 Enter/Escape/保存/关闭不触发应用级动作，输入框撤销优先。
-- [ ] 跨节点选择只读；纯文本粘贴、换行、空文本和上限有明确规则。
-- [ ] 过期选择不串项目，滚动/缩放/DPI 高亮正确，不改变原 DOM 结构。
+- [ ] 输入停顿约 250 毫秒自动预览；组词只同步保护状态，失焦/跨窗口动作排空输入；取消待预览输入零 HTML 写入，已预览内容通过还原或撤销恢复。
+- [ ] IME 期间 Enter/Escape/保存/关闭不触发应用级动作，输入框撤销优先；真实 Windows IME 单独验收。
+- [ ] 跨节点选择只读；纯文本粘贴、换行、空文本、Unicode 和 64 KiB UTF-8 上限有明确规则。
+- [ ] 迟到输入/复核/保存结果不能串文档或覆盖新输入；全部当前净变更已复核且 Diff 修订/hash 未过期才允许覆盖保存。
+- [ ] 校稿栏隐藏后扩展预览，独立浮窗只共享同一个 Main 文档；停靠、原生关闭和保存中等待保留输入与证据。
+- [ ] PDF 从当前已确认草稿生成，查看/导出同一份字节；标识旧快照，取消及失败不改 HTML；PDF 查看器没有项目、文件、网络或特权 IPC 权限。
+- [ ] 滚动/缩放/DPI 高亮正确，窄窗口控件与焦点可达；未修改源字节与资源不变，真实平台及维护者验收分别记录。
 
-验证用例：T-07、T-09、T-10、T-13、T-18
+验证用例：T-07、T-09、T-10、T-12、T-13、T-16、T-18、T-21、T-22
 
-参考文档：[docs/PRODUCT_DESIGN.md](PRODUCT_DESIGN.md)、[docs/PATCH_SPEC.md](PATCH_SPEC.md)。
+参考文档：[docs/PRODUCT_DESIGN.md](PRODUCT_DESIGN.md)、[docs/LIVE_WORKBENCH.md](LIVE_WORKBENCH.md)、[docs/PATCH_SPEC.md](PATCH_SPEC.md)、[docs/implementation/HAE-009.md](implementation/HAE-009.md)。
 
 ### HAE-010 · 实现安全保存、冲突、备份与崩溃恢复
 

@@ -1,6 +1,6 @@
 # 开发与工具链
 
-日期：2026-09-10。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存、文档/窗口保护、固定存储启动与应用退出协调，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建、HAE-011 的草稿检查点/恢复/有界清理、源码 Diff、Main 历史与保存点实验。
+日期：2026-09-10。范围：HAE-001 至 HAE-004 基础实验，HAE-005 的草稿、可信 IPC、另存、文档/窗口保护、固定存储启动与应用退出协调，HAE-008 的目录资源，以及 HAE-010 的 Windows 保存事务和窗口基线重建、HAE-011 的草稿检查点/恢复/有界清理、源码 Diff、Main 历史与保存点实验，及 HAE-009 方案 B 产品工作台。
 
 ## 固定版本
 
@@ -34,7 +34,7 @@ npm run dev
 
 单个 package.json 和 package-lock.json；直接依赖全部精确版本。`npm ci` 会执行 Electron 自带的 `install-electron`，下载锁定版本的当前平台二进制并使用上游校验值。首次安装需访问 npm/GitHub；安装成功后的验证壳运行不依赖联网。[Electron 安装机制](https://www.electronjs.org/docs/latest/tutorial/installation#binary-download-step)。
 
-`dev` = 构建后启动；修改源码后关闭窗口并重新执行。暂不提供 watch/HMR。`npm start` 只运行已有构建。不要使用 `--ignore-scripts` 跳过安装步骤后直接推断运行时已可用。
+`dev` = 构建后启动 Windows 产品工作台；通过“打开 HTML”或“打开目录”选择自制报告。产品合同和边界见 [产品工作台](LIVE_WORKBENCH.md)。修改源码后关闭窗口并重新执行。暂不提供 watch/HMR。`npm start` 只运行已有构建。不要使用 `--ignore-scripts` 跳过安装步骤后直接推断运行时已可用。
 
 Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺少时明确失败，不下载或提交替代二进制。`build` 从源码生成 out/native/ReplaceHelper.exe，单元/存储测试另生成只用于自制文件的 out/storage-test/StorageFixture.exe。其他 OS 跳过原生构建并报告覆盖不支持；这不代表 macOS 保存已实现。安装打包如何携带助手、目标机 .NET Framework 和 Windows 10 验收仍待完成。
 
@@ -50,6 +50,8 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run typecheck` | 核心、主进程、preload、UI 四套 strict 编译边界；仅 preload/渲染器含 DOM 类型 |
 | `npm run check:boundaries` | AST 检查跨层 import/export/动态加载与核心平台全局变量 |
 | `npm test` | 契约、分层、资源路径/句柄/快照/撤销、UTF-8、源码索引、纯字节 Patch 与拒绝反例；最多四个测试文件并行 |
+| `npm run test:ui` | 真实 UI 控制器的输入/复核竞争、异步绑定、失败保留与保存结果分类；不代表真实 IME |
+| `npm run test:product` | 真实产品 React/UI preload/Main/Preview 的输入、复核、Windows Save、浮窗、窄窗、PDF 同字节导出与关闭；原生选择/确认由 Main 回调驱动 |
 | `npm run test:smoke` | 已构建应用的 Electron 冒烟，独立 out/smoke 入口 |
 | `npm run test:security` | 已构建 preload 的真实项目协议、两种模式、恶意请求和 IPC 测试；独立 out/security 入口 |
 | `npm run test:mapping` | 构建 worker/preload/mapping，真实 Chromium 树、原生点击、世代/对象失效与解析故障实验 |
@@ -73,7 +75,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run diagnostics` | 本机实际 OS/架构与 Node/npm；历史 runner 字段在本地通常为 null |
 | `npm run licenses` | 更新依赖清单，复制原始声明至 out/licenses |
 | `npm run licenses:check` | 清单与锁文件比对，核验/复制声明 |
-| `npm run check` | 类型 → 边界 → 单元测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 固定存储启动 → 应用退出 → 草稿恢复 → 源码 Diff → 逻辑历史/保存重开 → 许可证 |
+| `npm run check` | 类型 → 边界 → 单元测试 → UI 竞争测试 → 构建 → 内置冒烟 → 项目安全 → 源码映射 → Patch 重开 → 草稿另存 → 编辑器 IPC → 文档生命周期 → 统一窗口会话 → 目录资源 → 内嵌 Node 存储 → Windows 保存会话 → 固定存储启动 → 应用退出 → 草稿恢复 → 源码 Diff → 逻辑历史/保存重开 → 产品工作台 → 许可证 |
 
 开发 Node 与 Electron 内嵌 Node 的存储套件使用 `--test-concurrency=4`，避免随主机 CPU 数量增加而同时启动过多原生文件/子进程实验。此限制只控制测试文件调度，不改变用例内部的并发竞态和故障断言。检查点清理的 48 次逐项同步写盘压力用例上限为 120 秒，内嵌存储全套上限为 180 秒；超时或取消仍使门槛失败，须保留日志并定位后重跑。生产 Worker/IPC/原生助手的期限不受测试预算调整影响。
 
@@ -103,19 +105,19 @@ HAE-004 增加纯核心内存 Patch 候选：64 KiB UTF-8 新文字、1,000 个�
 
 ## 项目资源范围
 
-HAE-005 的 `test:draft` 执行 20 组草稿/输入/另存断言，`test:editor` 执行 9 组真实 IPC 与 renderer 失效检查，`test:workspace` 执行 7 组文档替换、window.close 和保存结果检查，`test:session` 执行 10 组统一窗口/文档身份/视图回滚/崩溃重连与原生 resize 故障检查。报告在 `test-results/draft.json`、`editor.json`、`workspace.json` 和 `session.json`，均记录实际版本与文件 hash；135 项单元检查包含真实文件故障、协议和异步离开/激活反例。composing 标志不代表真实 IME；未知新文件或视图结果保留现场，尚无恢复界面。正常 `dev` / `preview` 入口仍只读；见 [阶段记录](implementation/HAE-005.md)、[编辑器接口](EDITOR_BRIDGE.md)、[文档生命周期](WORKSPACE_LIFECYCLE.md) 与 [统一窗口会话](WORKSPACE_SESSION.md)。
+HAE-005 的 `test:draft` 执行 20 组草稿/输入/另存断言，`test:editor` 执行 9 组真实 IPC 与 renderer 失效检查，`test:workspace` 执行 7 组文档替换、window.close 和保存结果检查，`test:session` 执行 10 组统一窗口/文档身份/视图回滚/崩溃重连与原生 resize 故障检查。报告在 `test-results/draft.json`、`editor.json`、`workspace.json` 和 `session.json`，均记录实际版本与文件 hash；135 项单元检查包含真实文件故障、协议和异步离开/激活反例。composing 标志不代表真实 IME；未知新文件或视图结果保留现场，尚无恢复界面。本段记录 HAE-005 当时的只读入口；HAE-009 已让 `dev` 启动产品工作台，`preview` 仍为独立只读验证入口；见 [阶段记录](implementation/HAE-005.md)、[编辑器接口](EDITOR_BRIDGE.md)、[文档生命周期](WORKSPACE_LIFECYCLE.md) 与 [统一窗口会话](WORKSPACE_SESSION.md)。
 
 HAE-008 的 `test:project` 增加 8 组真实目录资源/诊断/入口切换实验与 6 项单元检查，该阶段发布时共 141 单元、55 源文件边界。`test-results/project.json` 记录实际版本、八组结果、0 次回环 TCP 连接与七份完整文件 hash。文件/对话框选择由 Main 测试回调控制，诊断面板和人工对话框操作未验收；详见 [阶段记录](implementation/HAE-008.md)。
 
 HAE-010 第一阶段增加 10 项真实存储/进程测试，当时共 151 单元、59 源文件边界。`test:storage` 在 Electron 内嵌 Node 下重跑同一存储文件，必须有明确的测试计数且无失败/跳过；报告 `test-results/storage-runtime.json` 与日志记录真实版本。仅测试子进程使用 ELECTRON_RUN_AS_NODE，正常应用仍使用既有启动器。基线/备份/准备记录、六个真实强杀点、重启只读检查和保留限制见 [保存事务合同](SAVE_PREPARATION.md) 与 [HAE-010](implementation/HAE-010.md)；第一阶段没有覆盖能力。
 
-第二阶段将明确的 Main commit 连到 Windows ReplaceFileW 和 committed 日志，新增 11 项事务测试；当前完整门槛的版本/数量见 [HAE-010 阶段记录](implementation/HAE-010.md)。内嵌测试在 Windows 运行两份存储测试文件，并记录 nativeReplacement=included；其他 OS 仅运行准备测试且标为 unsupported。实际只读/ACL/占用、旧式及保护 DACL、命名数据流、四处 Main 强杀、结果未知与清理失败均单独断言；正常应用接线和恢复界面仍待完成。
+第二阶段将明确的 Main commit 连到 Windows ReplaceFileW 和 committed 日志，新增 11 项事务测试；当前完整门槛的版本/数量见 [HAE-010 阶段记录](implementation/HAE-010.md)。内嵌测试在 Windows 运行两份存储测试文件，并记录 nativeReplacement=included；其他 OS 仅运行准备测试且标为 unsupported。实际只读/ACL/占用、旧式及保护 DACL、命名数据流、四处 Main 强杀、结果未知与清理失败均单独断言；本段为该存储阶段的证据；HAE-009 已接入正常应用，故障处置仍待完成。
 
 第三阶段的 `test:save-session` 用实际 Main 会话与生产 UI preload 接通保存，十组实验通过，包括连续保存后旧 ID 拒绝、清空节点、同文外部改写、保存中关闭保护、实际 renderer 崩溃和重建/清理故障。`test-results/save-session.json` 记录系统/运行时、源提交与工作区差异、结果和完整文件 hash。无控件测试页面不代表产品 UI，接口 composing 标志不代表实际 IME；此命令当前要求 Windows，其他平台明确拒绝。全量及最后定向回归的分开计数见 [HAE-010](implementation/HAE-010.md)。
 
 第四阶段新增 `tests/unit/save-recovery.test.mjs`，验证 Main 备份恢复的 v1/v2 记录、当前文件再次备份、实际恢复/反向恢复、来源损坏/换名/同文改写、外部冲突、互斥、故障和三个真实 Main 强杀点。该阶段 Windows 的 `test:storage` 在 Electron 内嵌 Node 执行准备、提交、恢复三份测试文件；其他平台只重跑准备文件并标记原生替换 unsupported，不据此宣称恢复已在其他平台验证。
 
-HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备、检查点存储和生命周期文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。第二阶段增加七项队列/Apply 单元行为及实际会话实验，验证有界排队、准确版本、错误/重试、Save/关闭协调和 renderer 崩溃。第三阶段增加九项生命周期行为，覆盖最新修订、结束标记、损坏证据、共用锁、配额与实际进程强杀。第四阶段增加七项离开协调单元和十组真实窗口行为；`test:save-session` 共 26 组，整套期限为 90 秒，各交互等待仍单独有界。开发 Node、内嵌 Node 与会话结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。第五阶段新增真实恢复安装与进程占用检查。第六阶段增加冻结字节的源码 Diff Worker、可信读取和 Save review，默认构建目标增加到九个；结果写入 test-results/source-diff.json，完整门槛记录见 [HAE-011](implementation/HAE-011.md)。第九阶段加入 History Worker 和完整 v2 检查点，默认构建目标为十个；test:storage 另运行 history-persistence.test.mjs，覆盖源证明、干净点/Redo、篡改、写入异常和不可降格。第十阶段增加精确提交后、干净点未形成时的恢复协调；第十一阶段增加 checkpoint-compaction.test.mjs，验证当前活动 v2 序列的旧点清理与中断保留。正常产品入口、恢复/历史/Diff 控件、结束失败后的处理、跨会话/备份清理和遗留锁处理仍待接入。
+HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备、检查点存储和生命周期文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。第二阶段增加七项队列/Apply 单元行为及实际会话实验，验证有界排队、准确版本、错误/重试、Save/关闭协调和 renderer 崩溃。第三阶段增加九项生命周期行为，覆盖最新修订、结束标记、损坏证据、共用锁、配额与实际进程强杀。第四阶段增加七项离开协调单元和十组真实窗口行为；`test:save-session` 共 26 组，整套期限为 90 秒，各交互等待仍单独有界。开发 Node、内嵌 Node 与会话结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。第五阶段新增真实恢复安装与进程占用检查。第六阶段增加冻结字节的源码 Diff Worker、可信读取和 Save review，默认构建目标增加到九个；结果写入 test-results/source-diff.json，完整门槛记录见 [HAE-011](implementation/HAE-011.md)。第九阶段加入 History Worker 和完整 v2 检查点，默认构建目标为十个；test:storage 另运行 history-persistence.test.mjs，覆盖源证明、干净点/Redo、篡改、写入异常和不可降格。第十阶段增加精确提交后、干净点未形成时的恢复协调；第十一阶段增加 checkpoint-compaction.test.mjs，验证当前活动 v2 序列的旧点清理与中断保留。HAE-009 已接入正常产品入口、普通恢复、历史与 Diff 控件；结束失败后的处理、跨会话/备份清理和通用遗留锁处理仍待接入。
 
 单文件原生选择器以 HTML 父目录为根；目录入口先明确授权根，再选择根内 HTML，切换入口保留原根身份。两种方式都不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 
@@ -127,7 +129,7 @@ HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重
 | 网络与嵌入 | HTTP(S)/WebSocket、localhost/LAN、远程资源、frame、worker、data/blob、媒体和对象均拒绝；当前不会还原依赖这些能力的页面 |
 | 私有文件 / 路径 | 隐藏路径、backups/recovery/drafts/credentials/secrets、node_modules、非白名单扩展名拒绝；符号链接、junction、硬链接、ADS、UNC/设备路径、DOS 别名、尾部点/空格、二次编码拒绝 |
 | 大小与预算 | 入口 5 MiB、单资源 16 MiB、同时读取最多 8 项、每代累计响应字节 128 MiB；15 秒启动保护。属于初始保护值，尚非性能验收结论 |
-| 诊断 | Main 内最多 100 项按类型/脱敏目标去重，超过标记 truncated；缺失/CSP 阻断等原因可经可信 IPC 读取。保留远程协议/主机/路径或允许的项目相对路径，移除查询/凭据/fragment，不含本机绝对路径；产品面板仍待完成 |
+| 诊断 | Main 内最多 100 项按类型/脱敏目标去重，超过标记 truncated；缺失/CSP 阻断等原因可经可信 IPC 读取。保留远程协议/主机/路径或允许的项目相对路径，移除查询/凭据/fragment，不含本机绝对路径；HAE-009 已接入产品面板 |
 
 两种模式的开发入口均为只读验证，退出不保存。若依赖项被拒绝，保持源文件不变；不自动下载、改写或扩大根目录。取消/失败的打开保留控制器原会话，成功切换创建新 session 并撤销旧权限。编辑集成实验的目录切换另受 Workspace 输入/确认规则约束。诊断的 CSP 事件源和隐私边界见 [目录资源合同](PROJECT_RESOURCES.md)。原生选择器人工操作、Windows 10/macOS、网络盘和云同步目录尚未验收。
 

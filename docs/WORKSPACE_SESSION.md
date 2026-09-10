@@ -1,12 +1,12 @@
 # 统一窗口会话
 
-日期：2026-09-10；HAE-005 第五/六阶段，包含 HAE-008 的目录/诊断与 HAE-010 的显式保存、备份恢复扩展。Main 已把文档管理、可信 IPC、原生预览挂载、Windows 保存与基线重建、关闭保护组装成一个服务，由真实 Electron 自动实验驱动。正常应用入口仍只读，尚无产品校稿控件、诊断面板或保存/恢复界面；原生目录/入口选择器适配器已提供，人工操作仍待验收。此阶段不是 M2 验收。
+日期：2026-09-10；HAE-005 第五/六阶段，包含 HAE-008 的目录/诊断与 HAE-010 的显式保存、备份恢复扩展。Main 已把文档管理、可信 IPC、原生预览挂载、Windows 保存与基线重建、关闭保护组装成一个服务，由真实 Electron 自动实验驱动。HAE-009 已在 Windows 正常入口装配产品校稿、诊断、保存、普通恢复和备份控件；原生目录/入口选择器人工操作仍待验收。此阶段不是 M2 验收。
 
 ## 单一文档身份
 
 [createWorkspaceSession](../src/main/workspace/session.ts) 在加载可信 UI 前安装。调用者负责安全的 BrowserWindow、应用资源协议和 Main 回调；会话内部只有一个 Workspace，其 current 同时决定输入/草稿、预览视图和命令目标。会话不从 renderer 接收文件路径或视图边界。
 
-Windows 的 [持久化启动工厂](PERSISTENT_STARTUP.md) 在这一会话外统一组装保存、检查点和备份端口；只使用固定的 userData/workspace-records，不逐窗口创建随机存储。取得 profile 锁并同步占用唯一运行实例后才异步初始化，正常应用尚未调用该工厂。
+Windows 的 [持久化启动工厂](PERSISTENT_STARTUP.md) 在这一会话外统一组装保存、检查点和备份端口；只使用固定的 userData/workspace-records，不逐窗口创建随机存储。取得 profile 锁并同步占用唯一运行实例后才异步初始化，HAE-009 正常产品入口已调用该工厂。
 
 后续 Kimi 前端应调用 `haeWorkspace`，类型在 [workspace-editor.ts](../src/contracts/workspace-editor.ts)。旧 `haeEditor` 保留给单文档自动实验；同一 WebContents 只能安装一个 Main transport，未安装的接口不能调用文件或文档服务。
 
@@ -76,7 +76,7 @@ InputController 与 DraftSession 在整个文件操作期间互斥；已提交�
 
 ## 执行证据
 
-HAE-011 的可选 Main checkpoints 端口为每份文档建立一个独立持久化队列；确认改变文字的 Apply、Undo、Redo 连同完整历史自动排队，失败保留输入并停止自动重试。current.persistence 传递准确的最新/写入中/待写/已持久化修订和错误，后台变化不推进输入版本。Save 在输入互斥期间等待私有写入结束，关闭文档等待队列排空；UI 崩溃不终止 Main 写入。没有配置端口时状态为 null，正常应用尚未安装端口。完整语义与记录退役、恢复列表等限制见 [草稿检查点](DRAFT_CHECKPOINTS.md)。
+HAE-011 的可选 Main checkpoints 端口为每份文档建立一个独立持久化队列；确认改变文字的 Apply、Undo、Redo 连同完整历史自动排队，失败保留输入并停止自动重试。current.persistence 传递准确的最新/写入中/待写/已持久化修订和错误，后台变化不推进输入版本。Save 在输入互斥期间等待私有写入结束，关闭文档等待队列排空；UI 崩溃不终止 Main 写入。没有配置端口时状态为 null，正常产品通过持久化工厂安装该端口。完整语义与记录退役、恢复列表等限制见 [草稿检查点](DRAFT_CHECKPOINTS.md)。
 
 第四阶段增加 lastDeparture，其 documentId/status/code/cleanupPending/requiresReview 只报告离开时的私有记录结果。状态为 clean/retired/empty/failed/unknown；标记失败或未知保持窗口和全部证据，requiresReview 阻止继续修改或盲目重试。无净修改时若最后的归零检查点未确认，DRAFT_PERSISTENCE_REQUIRED 允许用户显式重试该检查点后重新关闭。有效标记但清理失败仍可完成已授权的切换/关闭，并保留独立警告；后续恢复界面仍待实现。
 
@@ -96,7 +96,7 @@ HAE-011 第二阶段将该命令扩充至 16 组，新增六组启用 checkpoint
 
 第五阶段将恢复摘要与新 Preview 安装接入相同生产 transport，方法数为十个。恢复延续原 checkpointSessionId 和修订，生成新的 UI 文档身份，不重复写检查点；挂载前后验证源文件及同一最新记录。新文档的映射在准备完成后由自身生命周期管理，旧 chooser 的撤销不会在已经开始的离开提交期间销毁它。`npm run test:recovery` 执行独立 Electron 进程占用/强杀、真实恢复与后续编辑、原记录结束、授权取消/错误来源、原生挂载回滚、动态支持范围拒绝、源变化及新记录竞态、Windows 恢复后保存去重。完整合同与失败边界见 [草稿检查点](DRAFT_CHECKPOINTS.md)；空白 transport 页面、测试选择器回调仍不代替产品 UI 和人工验收。
 
-第六阶段增加 readDiff，生产 API 共十一个方法，Save 可携带 Diff review。`npm run test:source-diff` 执行八组真实 Electron 实验：干净只读、恢复后的完整词法差异、未应用/组合态保护、新修订拒绝旧确认、净变更归零、renderer 重连/旧文档拒绝，以及 Windows 保存字节一致性和外部冲突。文档清理同时等待 Diff Worker 终止和持久化排空；终止失败保留占用，不报告释放成功。产品面板、历史与真实 IME 仍待接入。
+第六阶段增加 readDiff，生产 API 共十一个方法，Save 可携带 Diff review。`npm run test:source-diff` 执行八组真实 Electron 实验：干净只读、恢复后的完整词法差异、未应用/组合态保护、新修订拒绝旧确认、净变更归零、renderer 重连/旧文档拒绝，以及 Windows 保存字节一致性和外部冲突。文档清理同时等待 Diff Worker 终止和持久化排空；终止失败保留占用，不报告释放成功。HAE-009 已接通产品面板和历史；真实 IME 仍待验收。
 
 第十一阶段在同一持久化队列的写入锁内加入 [旧检查点清理](CHECKPOINT_COMPACTION.md)。活动 v2 序列保留最近两个完整点及全部 Undo/Redo；新点已核验但清理失败时保留准确的 persisted 修订与 cleanupPending，后来的 Apply 只更新最新内存待写项，不冒充已写盘。后台通知不推进输入版本；实际遗留锁继续阻止 Save 和恢复，产品故障处理仍待实现。
 

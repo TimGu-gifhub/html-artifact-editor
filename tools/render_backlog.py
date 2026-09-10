@@ -13,7 +13,7 @@ def render(data: dict) -> str:
         "",
         "本文件由 [backlog.json](backlog.json) 生成。范围变更先修改 JSON，再运行 `python tools/render_backlog.py`；GitHub Issues 记录实时执行状态。",
         "",
-        "当前所有应用任务均为待实现；本表链接不代表任务已经完成。M1–M4 构成文本产品路线，M5 是独立后续提案。",
+        "本表是规划与验收基线，执行进度见各 Issue 和实施记录；未勾选的模板条目不代表所有代码均待实现。M1–M4 构成文本产品路线，M5 是独立后续提案。",
         "",
         "## 任务总览",
         "",

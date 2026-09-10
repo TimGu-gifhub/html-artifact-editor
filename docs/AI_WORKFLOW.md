@@ -35,7 +35,7 @@ Kimi 用于开发过程，应用仍采用既定 React/TypeScript 技术栈并保
 
 当前基线的单次调用形式为 `kimi -m kimi-code/k3 -p "任务说明"`。使用前先检查本机 `kimi --help` / `kimi doctor` 及模型配置；不依靠混用提示模式与自动/计划模式来绕过交互约束。命令示例不代表本次已运行了生成任务。
 
-2026-09-08 建立分工时，只核对了 Kimi Code CLI 0.41.0 与 `kimi-code/k3` 配置。随后 HAE-007 已实际调用该模型生成、修正视觉候选；调用范围、结果与主代理独立检查见 [HAE-007 交付记录](implementation/HAE-007.md)。配置检查本身不能证明推理调用或前端验收完成。机器路径、凭据及配置全文不写入仓库。
+2026-09-08 建立分工时，只核对了 Kimi Code CLI 0.41.0 与 `kimi-code/k3` 配置。随后 HAE-007 已实际调用该模型生成、修正视觉候选；调用范围、结果与主代理独立检查见 [HAE-007 交付记录](implementation/HAE-007.md)。2026-09-10，HAE-009 重新核对官方模型目录及 K3 公告，实际使用 Kimi Code CLI 0.42.0、`kimi-code/k3` / `k3`、thinking enabled / high 完成方案 B 产品 UI 及后续限定修正，详见 [HAE-009](implementation/HAE-009.md)。配置检查本身不能证明推理调用或前端验收完成。机器路径、凭据及配置全文不写入仓库。
 
 ### AI 使用说明与致谢维护
 

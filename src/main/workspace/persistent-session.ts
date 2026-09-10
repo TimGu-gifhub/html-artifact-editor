@@ -85,7 +85,7 @@ export async function createPersistentWorkspaceSession(window: BrowserWindow, ou
     window.once('closed', onClosed);
     return Object.freeze({ workspace: active.workspace, host: active.host,
       get connected() { return active.connected; }, get closing() { return active.closing; },
-      reloadUI: active.reloadUI, requestClose: active.requestClose, dispose,
+      reloadUI: active.reloadUI, requestClose: active.requestClose, attachEditor: active.attachEditor, dispose,
       // Main-only recovery/maintenance access, never serialized through IPC.
       storage: Object.freeze({ directory: records.path, saves, checkpoints, backups }),
     });

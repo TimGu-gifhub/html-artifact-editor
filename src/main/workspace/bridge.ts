@@ -1,7 +1,8 @@
 import type { WebContents } from 'electron';
 import { app } from 'electron';
 import { WORKSPACE_COMMAND, WORKSPACE_CONNECT, WORKSPACE_STATE, isWorkspaceRequest } from '../../contracts/workspace-editor.ts';
-import type { WorkspaceResult } from '../../contracts/workspace-editor.ts';
+import type { WorkspaceCommand, WorkspaceResult } from '../../contracts/workspace-editor.ts';
+import type { DesktopCommand, DesktopState } from '../../contracts/desktop.ts';
 import { executeEditorCommand } from '../editor/commands.ts';
 import { createEditorTransport } from '../editor/transport.ts';
 import type { Workspace } from './controller.ts';
@@ -9,6 +10,8 @@ import { chooseProjectDirectory, chooseProjectEntry } from './project-choice.ts'
 import type { ProjectChoices } from './project-choice.ts';
 
 const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUSY', 'INPUT_COMPOSING',
+  'DESKTOP_UNAVAILABLE', 'EDITOR_NOT_OWNER', 'INPUT_FLUSH_REQUIRED', 'REVIEW_REQUIRED', 'PDF_BUSY',
+  'PDF_UNAVAILABLE', 'PDF_TOO_LARGE', 'PDF_RENDER_FAILED', 'PDF_RENDER_TIMEOUT', 'PDF_EXPORT_FAILED', 'STALE_PDF',
   'DOCUMENT_RECOVERY_REQUIRED', 'DOCUMENT_CLEANUP_REQUIRED', 'STALE_DOCUMENT_REVIEW', 'WORKSPACE_CANCELLED',
   'DOCUMENT_ACTIVATION_FAILED', 'DOCUMENT_ACTIVATION_UNKNOWN', 'STALE_DOCUMENT',
   'SAVE_PLATFORM_UNSUPPORTED', 'UNAPPLIED_INPUT', 'UNSAVED_CHANGES', 'BACKUP_RESTORE_UNAVAILABLE',
@@ -23,12 +26,23 @@ const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUS
   'RESOURCE_BLOCKED',
   'COPY_FAILED', 'COPY_OUTCOME_UNKNOWN', 'INPUT_MAPPING_LOST', 'INVALID_TEXT_NUL', 'INVALID_UNICODE', 'TEXT_SIZE_LIMIT']);
 
+export type WorkspaceBridgeExtension = Readonly<{
+  snapshot: () => DesktopState;
+  onState: (listener: () => void) => () => void;
+  authorize: (command: WorkspaceCommand) => void;
+  execute: (command: DesktopCommand, active: () => boolean, signal: AbortSignal) => Promise<void>;
+}>;
+
 export function createWorkspaceBridge(contents: WebContents, workspace: Workspace,
   chooseOpen: () => Promise<string | undefined>, chooseCopy: (name: string) => Promise<string | undefined>,
-  projectChoices: ProjectChoices) {
+  projectChoices: ProjectChoices, extension?: WorkspaceBridgeExtension) {
+  const snapshot = () => ({ ...workspace.snapshot(), ...(extension ? { desktop: extension.snapshot() } : {}) });
   return createEditorTransport(contents,
     { connect: WORKSPACE_CONNECT, command: WORKSPACE_COMMAND, state: WORKSPACE_STATE }, {
-      snapshot: workspace.snapshot, onState: workspace.onState, isRequest: isWorkspaceRequest,
+      snapshot, onState: listener => {
+        const offWorkspace = workspace.onState(listener); const offDesktop = extension?.onState(listener);
+        return () => { offWorkspace(); offDesktop?.(); };
+      }, isRequest: isWorkspaceRequest,
       onRevoke: workspace.cancelPending,
       execute: async (command, active, signal): Promise<WorkspaceResult> => {
         let code: string | null = null;
@@ -39,7 +53,11 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         let backups: WorkspaceResult['backups'] = null;
         const documentId = 'documentId' in command ? command.documentId : null;
         try {
-          if (command.kind === 'backup-list') {
+          extension?.authorize(command);
+          if (command.kind === 'desktop') {
+            if (!extension) throw new Error('DESKTOP_UNAVAILABLE');
+            await extension.execute(command.value, active, signal);
+          } else if (command.kind === 'backup-list') {
             backups = await workspace.listBackups(command.documentId);
           } else if (command.kind === 'backup-restore') {
             const result = await workspace.restoreBackup(command.stateRevision, command.documentId, command.reference);
@@ -94,7 +112,7 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
         } catch (error) {
           code = error instanceof Error && publicErrors.has(error.message) ? error.message : 'WORKSPACE_COMMAND_FAILED';
         }
-        return { ok: code === null, code, state: workspace.snapshot(), documentId, copy, outcome, recovery, diff, backups };
+        return { ok: code === null, code, state: snapshot(), documentId, copy, outcome, recovery, diff, backups };
       },
     });
 }

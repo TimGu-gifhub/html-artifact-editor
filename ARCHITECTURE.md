@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；HAE-008 增加目录授权、入口切换和资源诊断；HAE-010 增加显式覆盖保存与新基线接线。正常应用入口、产品面板、撤销历史和恢复流程仍待实现。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md)、[HAE-005](docs/implementation/HAE-005.md)、[HAE-008](docs/implementation/HAE-008.md) 与 [HAE-010](docs/implementation/HAE-010.md)。
+状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；HAE-008 增加目录授权、入口切换和资源诊断；HAE-010 增加显式覆盖保存与新基线接线。HAE-011 已接通 Main 历史和持久化恢复，HAE-009 已接通 Windows 产品入口、工作台控件和独立浮窗/PDF；故障处置和目标平台人工验收仍待完成。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md)、[HAE-005](docs/implementation/HAE-005.md)、[HAE-008](docs/implementation/HAE-008.md) 与 [HAE-010](docs/implementation/HAE-010.md)。
 
 ## 1. 技术选型
 
@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 桌面宿主 | Electron，实施时选仍受支持的稳定版本 | 自带 Chromium，Windows/macOS 共用渲染核心；承担体积和更新成本 |
 | 编辑器 UI | React + TypeScript strict | UI 状态明确，减少草稿、保存和异步响应错配 |
-| UI 基础组件 | 优先 Radix 无样式可访问组件，视觉方案后再定样式 | 不把主题库、重型编辑器或整站模板作为前置依赖 |
+| UI 基础组件 | 方案 B 的原生控件与小型 React 对话框 | 当前未引入 Radix 或主题库；焦点、组合输入和响应布局分别验证 |
 | 构建 | Vite 8.2.2 独立入口；Forge 打包延后 | 主进程、两个 preload、UI/Preview 分别构建；安装器仍在 HAE-015 |
 | HTML 解析 | parse5，开启 sourceCodeLocationInfo | 获得源码位置，不使用 serializer 保存整份文档 |
 | 修改引擎 | 自研纯 TypeScript 的字节范围替换 | 核心不依赖 DOM、Electron 或操作系统判断 |
@@ -167,7 +167,7 @@ Main 将 bridge 安装到指定 WebContents 的局部 IPC，首次握手固定�
 
 Main prepareDocument 先独立准备新预览、源映射、草稿、输入及 writer，并固定保存源的文件身份/版本，原文档一直保持可用。Workspace 在准备完成后处理离开确认，确认身份、输入/草稿版本和候选 hash 仍匹配才同步替换 current；取消或失败只销毁新候选。界面确认期间的后到输入使旧确认失效。
 
-原生 window close 先 preventDefault，重复请求共用一个待处理确认。取消、组合态、失败或未知另存保持窗口；明确放弃或经核验的新文件副本才可完成关闭。未知状态要求恢复，不能借打开另一份文档丢掉现场；teardown 失败保留引用并阻止继续堆积文档。该模块已执行真实预览、文件和 window.close 事件实验；统一 bridge/视图接线见下一段，正常应用与用户对话框仍待接入，详见 [文档生命周期](docs/WORKSPACE_LIFECYCLE.md)。
+原生 window close 先 preventDefault，重复请求共用一个待处理确认。取消、组合态、失败或未知另存保持窗口；明确放弃或经核验的新文件副本才可完成关闭。未知状态要求恢复，不能借打开另一份文档丢掉现场；teardown 失败保留引用并阻止继续堆积文档。该模块已执行真实预览、文件和 window.close 事件实验；统一 bridge/视图接线见下一段，HAE-009 已接入正常应用和原生确认，用户人工操作仍待验收，详见 [文档生命周期](docs/WORKSPACE_LIFECYCLE.md)。
 
 ### HAE-005 第五段：统一窗口会话
 
@@ -177,11 +177,11 @@ WorkspaceSession 让同一 current 服务于可信 IPC、输入/草稿、Preview
 
 ### HAE-005 第六段：持久化启动装配
 
-Main 的 PersistentWorkspaceSession 固定使用 userData/workspace-records，统一装配保存、检查点、备份与既有 WorkspaceSession。异步启动前占用唯一进程内实例，Electron profile 锁排除重复进程；不以新路径或清空目录绕过遗留证据。取得锁的 profile 不能通过改名复用。重复 dispose 共用结果，等待打开准备、已开始的事务、各代可信连接中的命令、历史/Diff/检查点与 Preview 清理；存储身份/空闲验证通过后才释放实例，未知结果继续占用。11 组真实 Windows 实验验证跨窗口/进程恢复、五处校稿与保存后历史/备份还原；正常启动、退出协调及产品控件仍待接入，见 [持久化启动合同](docs/PERSISTENT_STARTUP.md)。
+Main 的 PersistentWorkspaceSession 固定使用 userData/workspace-records，统一装配保存、检查点、备份与既有 WorkspaceSession。异步启动前占用唯一进程内实例，Electron profile 锁排除重复进程；不以新路径或清空目录绕过遗留证据。取得锁的 profile 不能通过改名复用。重复 dispose 共用结果，等待打开准备、已开始的事务、各代可信连接中的命令、历史/Diff/检查点与 Preview 清理；存储身份/空闲验证通过后才释放实例，未知结果继续占用。11 组真实 Windows 实验验证跨窗口/进程恢复、五处校稿与保存后历史/备份还原；HAE-009 已接入正常启动、退出协调及产品控件，见 [持久化启动合同](docs/PERSISTENT_STARTUP.md)。
 
 ### HAE-005 第七段：应用退出协调
 
-Main 的 bindWorkspaceQuit 同步拦截 before-quit/will-quit，并接管最后窗口关闭的默认退出。它与原生 close 共用 requestClose，在成功关闭且持久化 runtime.dispose 核验通过后再请求 Electron 退出。持久化关闭仅加入已接受的 Save/备份恢复；成功且无清理警告后重查关闭条件，失败/未知保留窗口，不隐式写盘或重放决定。批准关闭后的清理屏障发生在原生窗口销毁前；记录退役、Worker/IPC 或存储占用无法确认时不强退。13 组独立进程实验记录真实退出与受阻结果；正常产品入口、菜单/确认 UI、真实 IME 和 OS 关机验收仍待完成，见 [应用退出合同](docs/APPLICATION_QUIT.md)。
+Main 的 bindWorkspaceQuit 同步拦截 before-quit/will-quit，并接管最后窗口关闭的默认退出。它与原生 close 共用 requestClose，在成功关闭且持久化 runtime.dispose 核验通过后再请求 Electron 退出。持久化关闭仅加入已接受的 Save/备份恢复；成功且无清理警告后重查关闭条件，失败/未知保留窗口，不隐式写盘或重放决定。批准关闭后的清理屏障发生在原生窗口销毁前；记录退役、Worker/IPC 或存储占用无法确认时不强退。13 组独立进程实验记录真实退出与受阻结果；HAE-009 已接入产品入口与确认；真实 IME、原生对话框人工操作和 OS 关机验收仍待完成，见 [应用退出合同](docs/APPLICATION_QUIT.md)。
 
 ### HAE-008 第一段：目录授权与诊断
 
@@ -197,11 +197,11 @@ Main 明确 commit 后，Windows 适配器独占创建同目录候选临时文�
 
 Workspace 的可选 Main 保存端口把上述事务接入显式 save 命令，冻结已应用候选并互斥输入/打开/关闭。提交后沿原项目根重新准备文档，复核当前文件仍匹配 committed 版本，才发布新 documentId、基线和映射；清空 Text 不复用旧节点身份。重建失败保留旧草稿与事务，返回 rebase-required；已经提交后 UI 崩溃不撤销磁盘操作，Main 继续核对和重建。具体状态与窄接口见 [统一窗口会话](docs/WORKSPACE_SESSION.md)。
 
-重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选、已提交版本或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限。正常产品窗口、跨保存的逻辑历史、恢复向导、持久化编辑意图与 Windows 10/macOS 验收仍待完成，完整协议与 OS 竞态边界见 [保存事务合同](docs/SAVE_PREPARATION.md)。
+重启只枚举有界私有命名空间；检查 schema/大小/hash/记录关联，再对 Main 重新授权的目标判断基线、候选、已提交版本或冲突。遗留锁不自动解除，证据不自动删除；prepared 没有 HTML 替换权限。正常产品窗口、跨保存历史和持久化编辑意图已接通；故障恢复向导与 Windows 10/macOS 验收仍待完成，完整协议与 OS 竞态边界见 [保存事务合同](docs/SAVE_PREPARATION.md)。
 
 Main 的 prepareRestore 读取完整有效事务中的 backup.bin，绑定记录 hash、目录/文件身份及字节，再针对当前重新授权的 SaveSource 创建新事务。新 backup.bin 是恢复前的当前文件，candidate.bin 是被选备份的完整原始字节；v2 intent 的 restoreOf 引用来源事务及其 intentHash，普通保存仍使用 v1。准备及替换中重新核验备份来源和当前版本；后续 commit/unknown/清理与普通保存相同。当前只恢复 HTML 主数据流字节并保留当前文件元数据，不从旧日志重建路径权限或历史 ACL/数据流。该能力尚未暴露到窗口恢复 UI，也不会解除遗留锁。
 
-Workspace 的可选 [备份端口](docs/BACKUP_RESTORE.md) 已将元数据列表与单独确认请求接入可信 IPC。Main 固定确认前的备份 proof，拒绝未保存输入并排空精确干净点，再调用同一事务；成功后核验文件/提交记录和原生新映射，建立全新历史。整份备份不会经旧 Text 范围或序列化 DOM 保存。异常保留冻结旧会话，renderer 撤销不能重试已开始的替换；产品列表/确认界面仍未接入。
+Workspace 的可选 [备份端口](docs/BACKUP_RESTORE.md) 已将元数据列表与单独确认请求接入可信 IPC。Main 固定确认前的备份 proof，拒绝未保存输入并排空精确干净点，再调用同一事务；成功后核验文件/提交记录和原生新映射，建立全新历史。整份备份不会经旧 Text 范围或序列化 DOM 保存。异常保留冻结旧会话，renderer 撤销不能重试已开始的替换；HAE-009 已接入产品列表与原生确认，实际人工验收待执行。
 
 ### HAE-011：逻辑草稿检查点
 
@@ -213,10 +213,20 @@ Main catalog 以最大修订归类会话，不按时间戳排序或越过较新�
 
 启用 checkpoints 的窗口离开在有效确认后冻结输入、排空写入、试挂载，再核验明确丢弃/已验证副本的结束标记，最后发布新 current 并关闭旧会话。开始标记前的失败恢复旧输入；标记失败/未知则保留冻结草稿和源证据，视图回滚、阻止盲目继续。无净修改仍需确认最新归零记录。lastDeparture 将私有记录结果与视图/清理状态分别报告；UI 崩溃不撤销已开始的磁盘决定。
 
-Workspace 可列出脱敏恢复元数据，并经 Main 重新授权文件或目录后准备新 Preview/SourceIndex。最新记录经重建和完整候选核验，以一次仅允许新映射的隔离 Text 批量操作装入尚未发布的视图；所有目标先验证，应用失败或未知关闭候选视图、保留私有检查点。原生挂载前后再检查源文件和同一最新记录，才发布新 current。恢复沿用 checkpointSessionId 和 draftRevision，UI/映射身份独立更新；队列用已核验版本初始化，不重复写入检查点。进程 profile 所有权与 Main 会话所有权分别排除重复进程和窗口，文件写入仍须共用 active.lock。正常入口、故障恢复与清理、历史和产品 Diff 面板仍待接入。协议及执行范围见 [草稿检查点](docs/DRAFT_CHECKPOINTS.md) 与 [HAE-011](docs/implementation/HAE-011.md)。
+Workspace 可列出脱敏恢复元数据，并经 Main 重新授权文件或目录后准备新 Preview/SourceIndex。最新记录经重建和完整候选核验，以一次仅允许新映射的隔离 Text 批量操作装入尚未发布的视图；所有目标先验证，应用失败或未知关闭候选视图、保留私有检查点。原生挂载前后再检查源文件和同一最新记录，才发布新 current。恢复沿用 checkpointSessionId 和 draftRevision，UI/映射身份独立更新；队列用已核验版本初始化，不重复写入检查点。进程 profile 所有权与 Main 会话所有权分别排除重复进程和窗口，文件写入仍须共用 active.lock。正常入口、历史、Diff 与普通恢复选择已接通；故障处置与清理仍待接入。协议及执行范围见 [草稿检查点](docs/DRAFT_CHECKPOINTS.md) 与 [HAE-011](docs/implementation/HAE-011.md)。
 
-源码 Diff 已单独接入有限 Worker 与 Workspace 读取路径。Core 校验完整候选后从同一冻结字节取得实际 before/after 源码，Main 再核对返回范围和切片；缓存及异步结果绑定文档、修订与候选，避免迟到数据替代新草稿。Save 可携带所显示 Diff 的修订/hash，过期确认在事务开始前拒绝，磁盘冲突和备份流程继续独立验证。只读范围不作为写入权限，正常产品面板和历史仍待接入，详见 [源码 Diff 合同](docs/SOURCE_DIFF.md)。
+源码 Diff 已单独接入有限 Worker 与 Workspace 读取路径。Core 校验完整候选后从同一冻结字节取得实际 before/after 源码，Main 再核对返回范围和切片；缓存及异步结果绑定文档、修订与候选，避免迟到数据替代新草稿。Save 可携带所显示 Diff 的修订/hash，过期确认在事务开始前拒绝，磁盘冲突和备份流程继续独立验证。只读范围不作为写入权限，HAE-009 已接入产品面板和历史控件，详见 [源码 Diff 合同](docs/SOURCE_DIFF.md)。
 
-纯核心逻辑历史已将准备与确认分开，按操作游标计算净候选并独立保留保存点；Main 后续须在 Preview 确认后推进历史，在已验证的磁盘提交后建立新实例。内部 SourceIndex.lineage 只携带最初来源和逻辑值，每次重建核对完整当前树、Text 外的所有字面字节及新 UTF-8 边界，才能为已消失的 Text 生成空范围。原始来源不是页面输入能力，普通零长度 Patch 仍拒绝；候选继续通过完整字节/语义校验。Worker 与实际 Windows 保存重开已有实验，Workspace 历史命令、输入协调和历史磁盘格式尚未接入；现有 v1 检查点会在写入前拒绝此类型。详见 [逻辑历史](docs/HISTORY.md)。
+纯核心逻辑历史已将准备与确认分开，按操作游标计算净候选并独立保留保存点；Main 后续须在 Preview 确认后推进历史，在已验证的磁盘提交后建立新实例。内部 SourceIndex.lineage 只携带最初来源和逻辑值，每次重建核对完整当前树、Text 外的所有字面字节及新 UTF-8 边界，才能为已消失的 Text 生成空范围。原始来源不是页面输入能力，普通零长度 Patch 仍拒绝；候选继续通过完整字节/语义校验。Worker 与实际 Windows 保存重开已有实验；HAE-011 后续阶段已接通 Workspace 历史命令、输入协调和 v2 历史磁盘格式。旧 v1 检查点继续在写入前拒绝此类型。详见 [逻辑历史](docs/HISTORY.md)。
 
 第八阶段的 Parser Worker 可重建内部 lineage，Main 只把已证明的空 Text 树位置交给隔离 preload。registry 先匹配当前真实 DOM，再按已核验父节点和兄弟对象插入空 Text；逐条核对自身 childList 记录，完成整树复核后才发布 ready。新增私有历史文字通道使用当前映射版本、对象及旧值，不依赖页面点击，不接受源码 offset。编辑 token 活跃时拒绝；确认后清空选择，未知结果使映射失效。它未增加可信 UI 或页面 API，未来窗口历史协调仍必须等待确认、保留失败证据并接入完整历史持久化。
+
+## 方案 B 产品装配（HAE-009）
+
+`src/main/product/application.ts` 是正常 Windows 入口的唯一装配点，复用固定持久化 Workspace 和退出屏障。可信 React 控件经已有 Workspace 桥发起文档操作，桌面扩展只增加有界布局、当前输入归属、复核集合及 PDF 命令。主窗口或独立校稿窗口一次只有一个输入拥有者；文档、权限、保存、历史和私有目录始终由同一个 Main 会话拥有。旧连接和辅助窗口的已接受命令都参与清理排空。
+
+UI 输入短暂停顿后串行提交 change/Apply，中文组词只同步保护标志；失焦和跨窗口动作先排空，迟到响应绑定文档、输入 token 与请求世代。Main 保存要求每条净变更的原文/新文都仍与复核集合一致，且源码 Diff 的文档/修订/hash 未过期。复核不是部分保存能力。
+
+PDF 从已确认的隔离 Preview 草稿经 Chromium printToPDF 生成，冻结输入并在生成后再次校验文档与候选。内存 PDF 使用独立 session 和随机 URL，无 preload、文件桥或 Workspace API；仅该查看器启用内置 PDF 插件。请求只放行本次 PDF、固定 Chromium PDF 组件以及其 resources/theme；导航仅额外允许该组件的 UUID 子框架，普通 HTML/编辑器继续默认拒绝所有 frame 导航。PDF 的查看与独占新文件导出共用同一份字节，导出不覆盖 HTML。打印版式编辑和 PDF 注释导出不属于此合同。
+
+原生 Preview 不能被 React 的 CSS 遮盖；主窗口报告实际占位尺寸，模态/抽屉期间 Main 将其隐藏，收起后恢复。完整交互和未测项见 [工作台合同](docs/LIVE_WORKBENCH.md) 与 [HAE-009](docs/implementation/HAE-009.md)。

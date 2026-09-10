@@ -28,24 +28,25 @@ async function inspectDirectories(directory: string): Promise<BigIntStats[]> {
   if (relative(directory, await realpath(directory)) !== '') throw new Error('NEW_FILE_LOCATION_CHANGED');
   return chain;
 }
-function targetInDirectory(directory: string, input: string): string {
+function targetInDirectory(directory: string, input: string, format: 'html' | 'pdf'): string {
   if (!isAbsolute(input) || input.length > 1024 || /^[\\/]{2}/u.test(input) || /[\u0000-\u001f\u007f]/u.test(input)) {
     throw new Error('NEW_FILE_INVALID_PATH');
   }
   const path = resolve(input);
   if (relative(directory, dirname(path)) !== '') throw new Error('NEW_FILE_SAME_DIRECTORY_REQUIRED');
   const name = basename(path);
-  if (!/\.html?$/iu.test(name) || name.length > 255 || /^[.$]/u.test(name) || /[. ]$/u.test(name)
+  if (!(format === 'pdf' ? /\.pdf$/iu : /\.html?$/iu).test(name) || name.length > 255 || /^[.$]/u.test(name) || /[. ]$/u.test(name)
     || /[<>:"|?*\\/%~]/u.test(name) || /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(name)) {
     throw new Error('NEW_FILE_INVALID_NAME');
   }
   return path;
 }
 
-// A trusted Main caller supplies the already-authorized entry directory. Only
-// direct new HTML siblings are supported in this M1 adapter; no resource copying.
+// Main supplies a verified directory: the entry directory for HTML copies, or
+// a native-chooser destination for PDF. Only direct new files are supported;
+// no replacement or resource copying. The default remains HTML-only.
 // The optional step observer is for deterministic local filesystem fault tests.
-export async function createNewFileWriter(directory: string, onStep: (step: Step) => Promise<void> = async () => {}) {
+export async function createNewFileWriter(directory: string, onStep: (step: Step) => Promise<void> = async () => {}, format: 'html' | 'pdf' = 'html') {
   if (!isAbsolute(directory) || /^[\\/]{2}/u.test(directory) || /[\u0000-\u001f\u007f]/u.test(directory)) throw new Error('NEW_FILE_INVALID_PATH');
   const root = resolve(directory);
   const authorization = await inspectDirectories(root);
@@ -63,10 +64,11 @@ export async function createNewFileWriter(directory: string, onStep: (step: Step
       let file: FileHandle | undefined;
       let created = false;
       try {
-        if (!(value instanceof Uint8Array) || value.length > MAX_SOURCE_BYTES) throw new Error('NEW_FILE_SIZE_LIMIT');
+        if (!(value instanceof Uint8Array) || value.length > (format === 'pdf' ? 32 * 1024 * 1024 : MAX_SOURCE_BYTES)) throw new Error('NEW_FILE_SIZE_LIMIT');
+        if (format === 'pdf' && ![37, 80, 68, 70, 45].every((byte, index) => value[index] === byte)) throw new Error('NEW_FILE_INVALID_PDF');
         const bytes = new Uint8Array(value);
         expectedHash = hash(bytes);
-        path = targetInDirectory(root, input);
+        path = targetInDirectory(root, input, format);
         await verifyDirectory();
         // O_EXCL never truncates an existing file, symlink or hardlink, even if a
         // native chooser offered an overwrite confirmation. Keep this handle.

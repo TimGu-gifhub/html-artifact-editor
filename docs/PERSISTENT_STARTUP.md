@@ -1,6 +1,6 @@
 # 持久化窗口启动
 
-日期：2026-09-10；HAE-005 第六阶段。Main 可用一个入口装配固定私有目录、Windows 保存、草稿检查点、备份恢复及统一 Workspace。此入口由真实 Electron 实验调用，**尚未接入正常应用或产品控件**。
+日期：2026-09-10；HAE-005 第六阶段。Main 可用一个入口装配固定私有目录、Windows 保存、草稿检查点、备份恢复及统一 Workspace。HAE-009 已在正常 Windows 产品入口调用此工厂；原先的 test:startup 仍为独立 Main 实验，产品证据另见 [HAE-009](implementation/HAE-009.md)。
 
 ## 调用与目录
 
@@ -27,7 +27,7 @@ dispose 是 Main teardown，不能代替用户的取消、放弃、另存或原�
 
 准备中的 Save 在关闭后完成私有取消和锁释放，原 HTML 不变。已经替换的 Save 继续核验提交记录；窗口已销毁、无法安装新基线时保留 rebase-required、旧源和候选，不报告普通保存完成。无法确定清理或结果时，dispose 拒绝并保留实例占用，后续启动不能绕过；工厂不自动重试或删除证据。
 
-Electron profile 的 OS 锁由 Main 进程持有，工厂不会在窗口之间释放它。Main 可安装应用退出协调器，将 before-quit、will-quit 和最后窗口关闭连到同一关闭/排空结果；正常应用和产品 quit 菜单尚未安装该服务。app.exit、强杀、OS 关机和断电不能靠异步窗口回调保证排空，已持久化记录须按既有恢复合同核验。
+Electron profile 的 OS 锁由 Main 进程持有，工厂不会在窗口之间释放它。Main 可安装应用退出协调器，将 before-quit、will-quit 和最后窗口关闭连到同一关闭/排空结果；HAE-009 正常入口已安装该服务，产品没有绕过窗口决定的强退菜单。app.exit、强杀、OS 关机和断电不能靠异步窗口回调保证排空，已持久化记录须按既有恢复合同核验。
 
 ## 执行范围
 

@@ -12,7 +12,10 @@ const errors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUSY', 'I
 // Dialog rendering belongs to the caller's Decisions implementation; this
 // adapter never chooses a leave decision or reports success before it settles.
 export type WindowCloseResult = 'closed' | 'cancelled' | 'blocked';
-export type WindowCloseOptions = Readonly<{ waitForSave?: boolean; beforeClose?: () => Promise<void> }>;
+export type WindowCloseOptions = Readonly<{
+  waitForSave?: boolean; beforeClose?: () => Promise<void>;
+  beforeRequestClose?: () => Promise<boolean>;
+}>;
 export function bindWorkspaceWindow(window: BaseWindow, workspace: Workspace, reportError: (code: string) => void,
   options: WindowCloseOptions = {}) {
   let closing: Promise<WindowCloseResult> | null = null;
@@ -42,6 +45,9 @@ export function bindWorkspaceWindow(window: BaseWindow, workspace: Workspace, re
         }
       }
       if (detached || window.isDestroyed()) return 'blocked';
+      // Join an accepted Save first, then transfer the latest local input.
+      // IME, disconnected UI or a failed flush never authorizes native close.
+      if (options.beforeRequestClose && !await options.beforeRequestClose()) return 'cancelled';
       const result = await workspace.requestClose(workspace.snapshot().stateRevision);
       if (result.status !== 'closed') return 'cancelled';
       if (detached) return 'blocked';

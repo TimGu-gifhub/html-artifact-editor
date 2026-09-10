@@ -7,18 +7,22 @@ let installed = false;
 
 // Main installs one process-lifetime coordinator before accepting UI actions.
 // It has no renderer command, force-exit path or automatic Save/recovery action.
-export function bindWorkspaceQuit(window: BrowserWindow, runtime: PersistentWorkspaceSession, reportError: (code: string) => void) {
+export function bindWorkspaceQuit(window: BrowserWindow, runtime: PersistentWorkspaceSession, reportError: (code: string) => void,
+  ownedWindows: () => readonly BrowserWindow[] = () => []) {
   if (!app.isReady() || window.isDestroyed()) throw new Error('APP_QUIT_UNAVAILABLE');
   if (installed) throw new Error('APP_QUIT_ALREADY_BOUND');
   installed = true;
   let pending: Promise<QuitResult> | null = null;
   let ready = false;
-  const otherWindows = (): boolean => BrowserWindow.getAllWindows().some(value => value !== window && !value.isDestroyed());
+  const otherWindows = (allowOwned = false): boolean => {
+    const owned = new Set(allowOwned ? ownedWindows().filter(value => value.getParentWindow() === window) : []);
+    return BrowserWindow.getAllWindows().some(value => value !== window && !value.isDestroyed() && !owned.has(value));
+  };
   const safeToQuit = (): boolean => ready && window.isDestroyed() && !otherWindows();
   const requestQuit = (): Promise<QuitResult> => {
     if (pending) return pending;
     pending = Promise.resolve().then(async (): Promise<QuitResult> => {
-      if (otherWindows()) throw new Error('APP_QUIT_OTHER_WINDOWS');
+      if (otherWindows(true)) throw new Error('APP_QUIT_OTHER_WINDOWS');
       if (!window.isDestroyed()) {
         const result = await runtime.requestClose();
         if (result !== 'closed') return result;
