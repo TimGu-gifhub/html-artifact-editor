@@ -43,6 +43,8 @@ Kimi 用于开发过程，应用仍采用既定 React/TypeScript 技术栈并保
 
 ### AI 使用说明与致谢维护
 
+2026-09-10，HAE-011 全部本地记录清理再次核对上述官方目录、K3 公告与本机 doctor/模型配置，固定 Kimi Code CLI 0.42.0、`kimi-code/k3` / `k3`、thinking enabled / high、always_thinking 能力。实际执行两次串行限定调用并均退出 0：菜单/对话框/流程及 31 项初版 UI 检查，随后对原始清单计数、潜在未保存、取消/未知/警告语义复核修正至 36 项。允许的 Main 文件仅 `cleanup-copy.ts` 纯文案；Codex（GPT-6）负责合同、私有清单与精确删除、Main 生命周期及独立验证。完整运行和未测边界见 [HAE-011 第十六阶段](implementation/HAE-011.md)，README 同步感谢月之暗面和 OpenAI 的实际工具与模型。
+
 2026-09-10，HAE-010/011 产品中断检查重新核对上述官方目录、K3 公告和本机 doctor/可用配置，固定 Kimi Code CLI 0.42.0、`kimi-code/k3` / `k3`、high / always_thinking。实际执行两次串行调用：第一次实现限定 UI、纯原生提示文案及 31 项 UI 流程检查，第二次修正真实 Electron 复现的菜单焦点归还问题；均退出 0。第一次 CLI 结束文件历史记录时另报 `runtime.not_found`，文件实际留存，主代理已独立检查 diff、类型、UI 构建和真实产品行为，不把 CLI 完成回执单独当作交付证明。Codex（GPT-6）负责 Main、合同、关闭/所有权保护与进程/字节验证。允许的 Main 例外仅为 `interruption-copy.ts` 的纯字符串函数，不能包含授权或平台操作；应用仍离线。详见 [HAE-010 第七阶段](implementation/HAE-010.md)。
 
 每次向 GitHub 推送代码或文档、提交 PR 或发布版本前，核对本次实际使用的 AI。若新增 AI 工具、模型（含新版本）或提供方，必须在同次提交中更新 [README 的 AI 辅助开发与致谢](../README.md#ai-辅助开发与致谢)，注明工具、能够核实的模型名称/版本、对应公司及实际参与范围，并致谢相应公司与模型。

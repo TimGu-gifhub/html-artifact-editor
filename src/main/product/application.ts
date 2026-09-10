@@ -13,6 +13,9 @@ import { bindWorkspaceQuit } from '../workspace/quit.ts';
 import { createDesktopController } from './desktop.ts';
 import type { InterruptionPorts } from './interruption.ts';
 import { interruptionPickerTitle, interruptionPrompt } from './interruption-copy.ts';
+import type { CleanupSummary } from '../../contracts/record-cleanup.ts';
+import type { RecordCleanupPorts } from './record-cleanup.ts';
+import { cleanupPrompt } from './cleanup-copy.ts';
 
 // Test overrides are Main-only native decisions. Production controls use the
 // same factory, assets, preload, Workspace, parser and Windows transaction.
@@ -25,10 +28,11 @@ export type ProductChoices = Readonly<{
   project?: PersistentSessionPorts['projectChoices'];
   interruptionSource?: () => Promise<string | undefined>;
   interruptionReview?: (value: InterruptionSummary) => Promise<unknown>;
+  cleanupReview?: (value: CleanupSummary) => Promise<unknown>;
 }>;
 export async function createProductApplication(outputRoot: string,
   options: Readonly<{ visible?: boolean; bindQuit?: boolean; choices?: ProductChoices;
-    onStorageStep?: PersistentSessionPorts['onStorageStep']; onInterruptionStep?: InterruptionPorts['onStep'] }> = {}) {
+    onStorageStep?: PersistentSessionPorts['onStorageStep']; onInterruptionStep?: InterruptionPorts['onStep']; onRecordCleanupStep?: RecordCleanupPorts['onStep'] }> = {}) {
   const uiSession = session.fromPartition(`hae-product-${randomUUID()}`, { cache: false });
   await registerBundledContent(uiSession, 'editor', 'app', resolve(outputRoot, 'ui'));
   const window = new BrowserWindow({ title: 'HTML Artifact Editor', width: 1440, height: 900,
@@ -61,6 +65,14 @@ export async function createProductApplication(outputRoot: string,
         ? value.kind === 'save' ? 'keep-current' : 'continue-cleanup' : 'cancel' };
     }),
     ...(options.onInterruptionStep ? { onStep: options.onInterruptionStep } : {}),
+  }, {
+    review: choices.cleanupReview ?? (async value => {
+      const copy = cleanupPrompt(value);
+      const selected = await dialog.showMessageBox(window, { type: 'warning', title: copy.title, message: copy.message,
+        detail: copy.detail, buttons: [copy.cancel, copy.confirm], defaultId: 0, cancelId: 0, noLink: true });
+      return { reviewId: value.reviewId, decision: selected.response === 1 ? 'clear-records' : 'cancel' };
+    }),
+    ...(options.onRecordCleanupStep ? { onStep: options.onRecordCleanupStep } : {}),
   });
   const reportError = (code: string): void => {
     desktop.report(code);

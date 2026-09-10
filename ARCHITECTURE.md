@@ -217,7 +217,7 @@ Main catalog 以最大修订归类会话，不按时间戳排序或越过较新�
 
 启用 checkpoints 的窗口离开在有效确认后冻结输入、排空写入、试挂载，再核验明确丢弃/已验证副本的结束标记，最后发布新 current 并关闭旧会话。开始标记前的失败恢复旧输入；标记失败/未知则保留冻结草稿和源证据，视图回滚、阻止盲目继续。无净修改仍需确认最新归零记录。lastDeparture 将私有记录结果与视图/清理状态分别报告；UI 崩溃不撤销已开始的磁盘决定。
 
-Workspace 可列出脱敏恢复元数据，并经 Main 重新授权文件或目录后准备新 Preview/SourceIndex。最新记录经重建和完整候选核验，以一次仅允许新映射的隔离 Text 批量操作装入尚未发布的视图；所有目标先验证，应用失败或未知关闭候选视图、保留私有检查点。原生挂载前后再检查源文件和同一最新记录，才发布新 current。恢复沿用 checkpointSessionId 和 draftRevision，UI/映射身份独立更新；队列用已核验版本初始化，不重复写入检查点。进程 profile 所有权与 Main 会话所有权分别排除重复进程和窗口，文件写入仍须共用 active.lock。正常入口、历史、Diff 与普通恢复选择已接通；故障处置与清理仍待接入。协议及执行范围见 [草稿检查点](docs/DRAFT_CHECKPOINTS.md) 与 [HAE-011](docs/implementation/HAE-011.md)。
+Workspace 可列出脱敏恢复元数据，并经 Main 重新授权文件或目录后准备新 Preview/SourceIndex。最新记录经重建和完整候选核验，以一次仅允许新映射的隔离 Text 批量操作装入尚未发布的视图；所有目标先验证，应用失败或未知关闭候选视图、保留私有检查点。原生挂载前后再检查源文件和同一最新记录，才发布新 current。恢复沿用 checkpointSessionId 和 draftRevision，UI/映射身份独立更新；队列用已核验版本初始化，不重复写入检查点。进程 profile 所有权与 Main 会话所有权分别排除重复进程和窗口，文件写入仍须共用 active.lock。正常入口、历史、Diff 与普通恢复选择已接通；完整证据的产品中断检查及全部私有记录清理见后续合同，其他故障处置仍待完成。协议及执行范围见 [草稿检查点](docs/DRAFT_CHECKPOINTS.md) 与 [HAE-011](docs/implementation/HAE-011.md)。
 
 源码 Diff 已单独接入有限 Worker 与 Workspace 读取路径。Core 校验完整候选后从同一冻结字节取得实际 before/after 源码，Main 再核对返回范围和切片；缓存及异步结果绑定文档、修订与候选，避免迟到数据替代新草稿。Save 可携带所显示 Diff 的修订/hash，过期确认在事务开始前拒绝，磁盘冲突和备份流程继续独立验证。只读范围不作为写入权限，HAE-009 已接入产品面板和历史控件，详见 [源码 Diff 合同](docs/SOURCE_DIFF.md)。
 
@@ -234,3 +234,7 @@ UI 输入短暂停顿后串行提交 change/Apply，中文组词只同步保护�
 PDF 从已确认的隔离 Preview 草稿经 Chromium printToPDF 生成，冻结输入并在生成后再次校验文档与候选。内存 PDF 使用独立 session 和随机 URL，无 preload、文件桥或 Workspace API；仅该查看器启用内置 PDF 插件。请求只放行本次 PDF、固定 Chromium PDF 组件以及其 resources/theme；导航仅额外允许该组件的 UUID 子框架，普通 HTML/编辑器继续默认拒绝所有 frame 导航。PDF 的查看与独占新文件导出共用同一份字节，导出不覆盖 HTML。打印版式编辑和 PDF 注释导出不属于此合同。
 
 原生 Preview 不能被 React 的 CSS 遮盖；主窗口报告实际占位尺寸，模态/抽屉期间 Main 将其隐藏，收起后恢复。完整交互和未测项见 [工作台合同](docs/LIVE_WORKBENCH.md) 与 [HAE-009](docs/implementation/HAE-009.md)。
+
+## 全部本地记录清理（HAE-011）
+
+Main 仅在无当前文档、当前 profile 及启动时私有目录身份均匹配时检查全部记录，原生单独确认后再封存 record-cleanup.json。完整清单是持续的恢复/写入门槛；精确删除固定文件及空 UUID 目录，退役锚点、处置凭证和本次清单分别在相应原记录消失后移除。重新启动只接受未变删除后缀并重新确认，不删除外来锁或部分证据。关闭及 renderer 丢失后的处理继续由同一 Main 计划协调；未知/收尾警告保留窗口与可用证据。项目文件无写入端口；额度满后的另存退出、清理及再次复核保存已有真实 Windows 产品证据，详见 [清理合同](docs/RECORD_CLEANUP.md)。

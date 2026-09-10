@@ -41,6 +41,7 @@ const entries = {
   'product-mode': ['tests/product/mode.ts', 'out/product-mode'],
   'product-acceptance-child': ['tests/product/acceptance-child.ts', 'out/product-acceptance-child'],
   'product-interruption-child': ['tests/product/interruption-child.ts', 'out/product-interruption-child'],
+  'product-cleanup-child': ['tests/product/cleanup-child.ts', 'out/product-cleanup-child'],
 };
 const defaultTargets = ['main', 'preload-ui', 'preload-preview', 'ui', 'preview', 'preview-tool', 'parser-worker', 'draft-worker', 'diff-worker', 'history-worker', 'native'];
 const requested = process.argv.slice(2);

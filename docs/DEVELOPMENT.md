@@ -56,6 +56,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:product-mode` | 真实产品模式往返、只读拒写、同根离线脚本、浮窗/组合态/取消、独占复制、干净历史与已保存空 Text 的 Undo/Redo、源冲突和关闭；原生决定由 Main 回调驱动 |
 | `npm run test:product-acceptance` | 五处校稿、实际 Main 强杀/产品恢复、复核保存、独立 Edge 重开、撤销后再次保存、整份备份恢复和外部冲突另存；Windows 须有已安装 Edge，其他 OS 明确标记 unavailable |
 | `npm run test:product-interruption` | 完整保存/检查点清理中断的产品检查、原生决定、强杀后继续、零写入拒绝、未知/警告保留、关闭与 renderer 丢失后等待；自制文件、真实 Windows/Electron、Main 测试选择回调，非人工对话框验收 |
+| `npm run test:product-cleanup` | 全部私有记录清理、取消/无效决定、精确强杀恢复、profile/文档互斥、关闭/renderer 生命周期、20 项额度满后另存退出与清理后再次保存；真实 Electron/Windows 和独立字节断言，非人工确认验收 |
 | `npm run test:smoke` | 已构建应用的 Electron 冒烟，独立 out/smoke 入口 |
 | `npm run test:security` | 已构建 preload 的真实项目协议、两种模式、恶意请求和 IPC 测试；独立 out/security 入口 |
 | `npm run test:mapping` | 构建 worker/preload/mapping，真实 Chromium 树、原生点击、世代/对象失效与解析故障实验 |
@@ -71,7 +72,7 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:quit` | 13 组独立 Electron 进程的 app.quit/原生 close、保存等待、取消/组合标志、记录/清理失败与真实退出验证；没有产品菜单或真实 IME 验收 |
 | `npm run test:recovery` | 真实 Electron 的恢复列表/重新授权/新映射安装、进程所有权、恢复后编辑与 Windows 保存去重；自制空白 transport 页面，无产品验收 |
 | `npm run test:source-diff` | 真实 Electron 生产接口读取完整源码 Diff、拒绝旧确认、重连及 Windows 保存字节/冲突检查；无产品 Diff 面板 |
-| `npm run test:history` | 逻辑历史通过真实 Worker、Main Windows 保存端口和隔离 Preview，验证空 Text 安装/恢复、保存点/分支、原生选择/编辑锁、确认丢失及来源/DOM 拒绝；另含可信 Workspace history、v2 检查点和实际进程重启；无产品控件 |
+| `npm run test:history` | 逻辑历史通过真实 Worker、Main Windows 保存端口和隔离 Preview，验证空 Text 安装/恢复、保存点/分支、原生选择/编辑锁、确认丢失及来源/DOM 拒绝；另含可信 Workspace history、v2 检查点和实际进程重启；无产品控件；31 组流程的总预算为 120 秒，单项 Worker/IPC/原生限制不变 |
 | `npm run preview` | 构建后打开原生文件选择器，以禁用页面脚本的模式只读预览 |
 | `npm run preview:interactive` | 同上，允许本地脚本执行，仍无编辑或保存能力 |
 | `npm run preview:directory` | 原生选择根目录及其中 HTML，保留嵌套相对资源路径；只读校稿预览，诊断输出到终端 |
@@ -121,7 +122,7 @@ HAE-010 第一阶段增加 10 项真实存储/进程测试，当时共 151 单�
 
 第四阶段新增 `tests/unit/save-recovery.test.mjs`，验证 Main 备份恢复的 v1/v2 记录、当前文件再次备份、实际恢复/反向恢复、来源损坏/换名/同文改写、外部冲突、互斥、故障和三个真实 Main 强杀点。该阶段 Windows 的 `test:storage` 在 Electron 内嵌 Node 执行准备、提交、恢复三份测试文件；其他平台只重跑准备文件并标记原生替换 unsupported，不据此宣称恢复已在其他平台验证。
 
-HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备、检查点存储和生命周期文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。第二阶段增加七项队列/Apply 单元行为及实际会话实验，验证有界排队、准确版本、错误/重试、Save/关闭协调和 renderer 崩溃。第三阶段增加九项生命周期行为，覆盖最新修订、结束标记、损坏证据、共用锁、配额与实际进程强杀。第四阶段增加七项离开协调单元和十组真实窗口行为；`test:save-session` 共 26 组，整套期限为 90 秒，各交互等待仍单独有界。开发 Node、内嵌 Node 与会话结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。第五阶段新增真实恢复安装与进程占用检查。第六阶段增加冻结字节的源码 Diff Worker、可信读取和 Save review，默认构建目标增加到九个；结果写入 test-results/source-diff.json，完整门槛记录见 [HAE-011](implementation/HAE-011.md)。第九阶段加入 History Worker 和完整 v2 检查点，默认构建目标为十个；test:storage 另运行 history-persistence.test.mjs，覆盖源证明、干净点/Redo、篡改、写入异常和不可降格。第十阶段增加精确提交后、干净点未形成时的恢复协调；第十一阶段增加 checkpoint-compaction.test.mjs，验证当前活动 v2 序列的旧点清理与中断保留。HAE-009 已接入正常产品入口、普通恢复、历史与 Diff 控件；结束失败后的处理、跨会话/备份清理和通用遗留锁处理仍待接入。
+HAE-011 第一阶段新增纯核心检查点、私有存储和原生保存去重三份单元测试，共 18 项。当前 `test:storage` 在所有平台运行准备、检查点存储和生命周期文件，Windows 再加入提交、备份恢复及草稿保存去重三份文件；实际跨平台未测不能由同一源码推定通过。第二阶段增加七项队列/Apply 单元行为及实际会话实验，验证有界排队、准确版本、错误/重试、Save/关闭协调和 renderer 崩溃。第三阶段增加九项生命周期行为，覆盖最新修订、结束标记、损坏证据、共用锁、配额与实际进程强杀。第四阶段增加七项离开协调单元和十组真实窗口行为；`test:save-session` 共 26 组，整套期限为 90 秒，各交互等待仍单独有界。开发 Node、内嵌 Node 与会话结果见 [HAE-011](implementation/HAE-011.md)，合同见 [草稿检查点](DRAFT_CHECKPOINTS.md)。第五阶段新增真实恢复安装与进程占用检查。第六阶段增加冻结字节的源码 Diff Worker、可信读取和 Save review，默认构建目标增加到九个；结果写入 test-results/source-diff.json，完整门槛记录见 [HAE-011](implementation/HAE-011.md)。第九阶段加入 History Worker 和完整 v2 检查点，默认构建目标为十个；test:storage 另运行 history-persistence.test.mjs，覆盖源证明、干净点/Redo、篡改、写入异常和不可降格。第十阶段增加精确提交后、干净点未形成时的恢复协调；第十一阶段增加 checkpoint-compaction.test.mjs，验证当前活动 v2 序列的旧点清理与中断保留。HAE-009 已接入正常产品入口、普通恢复、历史与 Diff 控件；结束失败后的处理和通用遗留锁处理仍待接入；全部私有记录清理的精确范围及运行证据见 [清理合同](RECORD_CLEANUP.md)。
 
 单文件原生选择器以 HTML 父目录为根；目录入口先明确授权根，再选择根内 HTML，切换入口保留原根身份。两种方式都不接受页面消息中的路径。入口必须为有效 UTF-8，保持 BOM、换行、实体拼写与原 CSP 的原始字节。根内的可服务资源对本地脚本可读，请使用独立项目文件夹。
 

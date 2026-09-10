@@ -37,9 +37,11 @@ const args = [kind === 'main' ? root : entry];
 if (kind === 'preview-tool' && process.argv.includes('--interactive')) args.push('--interactive');
 if (kind === 'preview-tool' && process.argv.includes('--directory')) args.push('--directory');
 const child = spawn(electron, args, { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
-// History also includes 24 separately durable edits plus compaction/restart.
-// This is a suite budget; individual workers and IPC keep their existing limits.
-const timeoutMs = ['product', 'product-entry', 'product-mode'].includes(kind) ? 180_000 : ['save-session', 'quit', 'recovery', 'history'].includes(kind) ? 90_000 : 45_000;
+// History has 31 native/worker flows, including 24 durable edits, compaction
+// and Save-lock process restarts. Give that aggregate I/O work a bounded two
+// minutes; individual workers, native calls and IPC keep their existing limits.
+const timeoutMs = kind === 'history' ? 120_000 : ['product', 'product-entry', 'product-mode'].includes(kind) ? 180_000
+  : ['save-session', 'quit', 'recovery'].includes(kind) ? 90_000 : 45_000;
 const timeout = smoke ? setTimeout(() => {
   console.error(`Electron ${kind} exceeded ${timeoutMs / 1000} seconds.`);
   child.kill();

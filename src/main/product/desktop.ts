@@ -11,12 +11,14 @@ import { lockContents, securePreferences } from '../preview/security.ts';
 import { createPdfController } from './pdf.ts';
 import { createInterruptionController } from './interruption.ts';
 import type { InterruptionPorts } from './interruption.ts';
+import { createRecordCleanupController } from './record-cleanup.ts';
+import type { RecordCleanupPorts } from './record-cleanup.ts';
 
 // Application-owned layout and auxiliary windows. No renderer chooses a URL,
 // path, process, web preference, session, or replacement service.
 export function createDesktopController(window: BrowserWindow, outputRoot: string,
   runtime: () => PersistentWorkspaceSession, choosePdf: (name: string) => Promise<string | undefined>,
-  interruptionPorts: InterruptionPorts) {
+  interruptionPorts: InterruptionPorts, cleanupPorts: RecordCleanupPorts) {
   let revision = 1; let panel: PanelMode = 'docked'; let floating: BrowserWindow | null = null;
   let layout: Rectangle = { x: 0, y: 0, width: 0, height: 0 }; let visible = false;
   let disposed = false; let error: string | null = null; let documentId: string | null = null;
@@ -25,6 +27,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
   const notify = (): void => { ++revision; for (const listener of listeners) { try { listener(); } catch { /* Main retains state. */ } } };
   const report = (code: string): void => { error = code; notify(); };
   const interruption = createInterruptionController(outputRoot, runtime, interruptionPorts, notify);
+  const cleanup = createRecordCleanupController(runtime, cleanupPorts, notify);
   let pendingFlush: Readonly<{ id: string; action: 'close' | 'dock' | 'action'; owner: WebContents; promise: Promise<boolean>; finish: (ready: boolean) => void }> | null = null;
   const owner = (): WebContents => panel === 'floating' && floating && !floating.isDestroyed() ? floating.webContents : window.webContents;
   const cleanInput = (): boolean => {
@@ -96,6 +99,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
     flush,
     async beforeClose(): Promise<boolean> {
       if (!await interruption.beforeClose()) { report('INTERRUPTION_REVIEW_REQUIRED'); return false; }
+      if (!await cleanup.beforeClose()) { report('RECORD_CLEANUP_REVIEW_REQUIRED'); return false; }
       return flush('close');
     },
     ownedWindows: (): readonly BrowserWindow[] => [floating, pdf.window].filter((value): value is BrowserWindow => !!value && !value.isDestroyed()),
@@ -120,7 +124,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
       const surface = role(contents);
       const snapshot = (): DesktopState => ({ revision, role: surface, panel, reviewed: [...reviewed.keys()],
         flush: pendingFlush && pendingFlush.owner === contents ? { id: pendingFlush.id, action: pendingFlush.action } : null,
-        pdf: pdf.metadata, pdfBusy: pdf.busy, pdfExport: pdf.exported, interruption: interruption.snapshot(), error });
+        pdf: pdf.metadata, pdfBusy: pdf.busy, pdfExport: pdf.exported, interruption: interruption.snapshot(), cleanup: cleanup.snapshot(), error });
       return Object.freeze({ snapshot,
         onState: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
         authorize(command: WorkspaceCommand) {
@@ -130,6 +134,8 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
           const passive = command.kind === 'desktop' && ['layout', 'flushed'].includes(command.value.kind);
           if (!passive && interruption.requiresReview) throw new Error('INTERRUPTION_REVIEW_REQUIRED');
           if (!passive && interruption.busy) throw new Error('INTERRUPTION_BUSY');
+          if (!passive && cleanup.requiresReview) throw new Error('RECORD_CLEANUP_REVIEW_REQUIRED');
+          if (!passive && cleanup.busy) throw new Error('RECORD_CLEANUP_BUSY');
           if (command.kind === 'edit' && ['begin', 'change', 'apply', 'resolve'].includes(command.value.kind) && owner() !== contents) throw new Error('EDITOR_NOT_OWNER');
           if (command.kind === 'save') {
             const state = runtime().workspace.snapshot().current;
@@ -141,6 +147,11 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
         },
         async execute(command: DesktopCommand, active: () => boolean, signal: AbortSignal): Promise<void> {
           switch (command.kind) {
+            case 'clear-records': {
+              if (surface !== 'main') throw new Error('EDITOR_NOT_OWNER');
+              if (runtime().closing) throw new Error('RECORD_CLEANUP_BUSY');
+              await cleanup.clear(command.stateRevision, active, signal); break;
+            }
             case 'inspect-interruption': {
               if (surface !== 'main') throw new Error('EDITOR_NOT_OWNER');
               if (runtime().closing) throw new Error('INTERRUPTION_BUSY');
@@ -181,6 +192,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
       // Persistent-session disposal must retain its ownership if the exact
       // accepted maintenance result or cleanup remains unconfirmed.
       await interruption.dispose();
+      await cleanup.dispose();
       if (floating && !floating.isDestroyed()) floating.destroy();
       await pdf.dispose(); listeners.clear();
     },

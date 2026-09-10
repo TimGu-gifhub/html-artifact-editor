@@ -1,6 +1,7 @@
 import { isDiffReview } from './source-diff.ts';
 import type { WorkspaceResult } from './workspace-editor.ts';
 import type { InterruptionState } from './interruption.ts';
+import type { CleanupState } from './record-cleanup.ts';
 
 export type PanelMode = 'docked' | 'hidden' | 'floating';
 export type PdfOptions = Readonly<{ paper: 'A4' | 'Letter'; landscape: boolean; background: boolean }>;
@@ -14,6 +15,7 @@ export type DesktopState = Readonly<{
   pdf: PdfPreview | null; pdfBusy: boolean; error: string | null;
   pdfExport: Readonly<{ status: 'created' | 'cancelled' | 'failed' | 'unknown'; name: string | null; code: string | null }> | null;
   interruption?: InterruptionState;
+  cleanup?: CleanupState;
 }>;
 export type DesktopCommand = Readonly<{ kind: 'layout'; x: number; y: number; width: number; height: number; visible: boolean }>
   | Readonly<{ kind: 'panel'; mode: PanelMode }>
@@ -21,7 +23,7 @@ export type DesktopCommand = Readonly<{ kind: 'layout'; x: number; y: number; wi
   | Readonly<{ kind: 'flushed'; id: string; ready: boolean }>
   | Readonly<{ kind: 'pdf-create'; documentId: string; draftRevision: number; candidateHash: string; options: PdfOptions }>
   | Readonly<{ kind: 'pdf-export' | 'pdf-show'; id: string }>
-  | Readonly<{ kind: 'inspect-interruption'; stateRevision: number }>
+  | Readonly<{ kind: 'inspect-interruption' | 'clear-records'; stateRevision: number }>
   | Readonly<{ kind: 'pdf-close' | 'flush-input' }>;
 export type DesktopAPI = Readonly<{ request: (command: DesktopCommand) => Promise<WorkspaceResult> }>;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -46,7 +48,8 @@ export function isDesktopCommand(value: unknown): value is DesktopCommand {
     case 'pdf-show': return count === 2 && uuid(value.id);
     case 'pdf-close': return count === 1;
     case 'flush-input': return count === 1;
-    case 'inspect-interruption': return count === 2 && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
+    case 'inspect-interruption':
+    case 'clear-records': return count === 2 && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
     default: return false;
   }
 }

@@ -14,13 +14,14 @@ import { modeSwitchBlockerText, modeSwitchTarget, runModeSwitch } from './mode-s
 import { loadRecoveryCatalog, RecoveryDialogLifecycle, runRecoveryRestore } from './recovery-flow.ts';
 import type { RecoverySourceMode } from './recovery-flow.ts';
 import { InterruptionDialogLifecycle, interruptionBlocker, interruptionGate, interruptionGateText, runInterruptionCheck } from './interruption-flow.ts';
-import type { InterruptionGate } from './interruption-flow.ts';
+import { CleanupDialogLifecycle, cleanupBlocker, cleanupGate, cleanupGateText, runCleanupCheck } from './cleanup-flow.ts';
 import { classifySaveResult } from './save-result.ts';
 import { EditorPanel } from './editor-panel.tsx';
 import { ReviewPanel } from './review-panel.tsx';
 import { reviewChannel, useReviewStatus } from './review-channel.ts';
 import { BackupsDialog, PdfDialog, RecoveryDialog, ResourcesDialog, SaveDiffDialog } from './dialogs.tsx';
 import { InterruptionDialog } from './interruption-dialog.tsx';
+import { CleanupDialog } from './cleanup-dialog.tsx';
 import { Dialog } from './dialog.tsx';
 import type { SaveError } from './dialogs.tsx';
 import { describeCode } from './util.ts';
@@ -28,6 +29,20 @@ import { IconDock, IconFloat, IconFolder, IconMenu, IconMode, IconOpen, IconPane
 
 const desktopApi = () => window.haeDesktop ?? null;
 const workspaceApi = () => window.haeWorkspace ?? null;
+
+/**
+ * Combined maintenance gate: while Main runs an interruption check or a record
+ * cleanup — or either result awaits review — every other write/open/restore
+ * action in this window is refused (Main double-checks too). Returns the
+ * user-facing explanation, or null when no gate applies.
+ */
+function maintenanceGateText(state: WorkspaceSnapshot | null): string | null {
+  const interruption = interruptionGate(state);
+  if (interruption) return interruptionGateText(interruption);
+  const cleanup = cleanupGate(state);
+  if (cleanup) return cleanupGateText(cleanup);
+  return null;
+}
 
 export function App() {
   const state = useWorkspaceState();
@@ -143,7 +158,7 @@ function useToast(): [Toast | null, (text: string, kind?: 'info' | 'error') => v
   return [toast, show];
 }
 
-type DialogKind = 'diff' | 'pdf' | 'recovery' | 'backups' | 'resources' | 'interruption';
+type DialogKind = 'diff' | 'pdf' | 'recovery' | 'backups' | 'resources' | 'interruption' | 'cleanup';
 
 function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const { state } = props;
@@ -219,6 +234,13 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   useEffect(() => () => interruptionLife.dispose(), [interruptionLife]);
   const [interruptionChecking, setInterruptionChecking] = useState(false);
   const [interruptionError, setInterruptionError] = useState<string | null>(null);
+  // Same binding as the interruption dialog: the synchronous latch covers the
+  // window before the locked dialog re-renders, generations bind late results
+  // to one opening, and unmount invalidates everything in flight.
+  const cleanupLife = useMemo(() => new CleanupDialogLifecycle(), []);
+  useEffect(() => () => cleanupLife.dispose(), [cleanupLife]);
+  const [cleanupChecking, setCleanupChecking] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
 
   const modalOpen = dialog !== null || (drawerOpen && narrow);
   const previewVisible = !!current && !modalOpen && !menuOpen;
@@ -256,14 +278,14 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     try { await task(); } finally { busyGuard.release(); setBusy(false); }
   }, [busyGuard]);
 
-  // Maintenance gate: while Main is checking an interruption or the result
-  // needs review, no other write/open/restore action may start from this
-  // window (Main rejects them too). Read from the live store so callbacks and
-  // keyboard handlers never go stale.
-  const maintenanceGate = useCallback((): InterruptionGate | null => interruptionGate(workspaceStore.getState()), []);
+  // Maintenance gate: while Main is checking an interruption, cleaning local
+  // records, or either result needs review, no other write/open/restore action
+  // may start from this window (Main rejects them too). Read from the live
+  // store so callbacks and keyboard handlers never go stale.
+  const maintenanceGate = useCallback((): string | null => maintenanceGateText(workspaceStore.getState()), []);
   const blockedByMaintenance = useCallback((): boolean => {
     const gate = maintenanceGate();
-    if (gate) showToast(interruptionGateText(gate), 'error');
+    if (gate) showToast(gate, 'error');
     return gate !== null;
   }, [maintenanceGate, showToast]);
 
@@ -528,6 +550,19 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     setDialog(null);
   }, [interruptionLife]);
 
+  const openCleanup = useCallback(() => {
+    const gen = cleanupLife.open();
+    if (gen === null) return; // an accepted check is in flight; never reset it
+    setCleanupError(null);
+    menuButtonRef.current?.focus(); // the menu item unmounts; capture a stable return target first
+    setDialog('cleanup');
+  }, [cleanupLife]);
+
+  const closeCleanup = useCallback(() => {
+    if (!cleanupLife.close()) return; // an accepted check is in flight; stays visible
+    setDialog(null);
+  }, [cleanupLife]);
+
   // The BusyGuard is claimed synchronously before the first await, so a
   // same-frame duplicate click or a competing Ctrl+O never opens a second
   // native chooser. The recovery action latch is claimed synchronously inside
@@ -602,6 +637,38 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     });
   }, [runBusy, guardFlush, controller, interruptionLife]);
 
+  // Same synchronous ordering as the interruption check: BusyGuard first, then
+  // the cleanup action latch, both before the first await — a same-frame
+  // duplicate click, Escape/close or menu reopen can never start a second
+  // check or hide the accepted one. The reply is only a transport ack: ok
+  // never closes the dialog or claims a cleanup; the displayed outcome is
+  // Main's onState cleanup.result.
+  const onCheckCleanup = useCallback(() => {
+    const gen = cleanupLife.current();
+    void runBusy(async () => {
+      if (!cleanupLife.acquire()) return;
+      const belongs = () => cleanupLife.isCurrent(gen) && dialogRef.current === 'cleanup';
+      if (belongs()) setCleanupError(null);
+      setCleanupChecking(true);
+      try {
+        await runCleanupCheck({
+          getState: () => workspaceStore.getState(),
+          isComposing: () => controller.isComposing(),
+          flush: () => guardFlush('清理本地记录'),
+          clear: stateRevision => {
+            const api = desktopApi();
+            if (!api) return Promise.resolve({ ok: false, code: 'MISSING_WORKSPACE_API', state: null, documentId: null, copy: null, outcome: null });
+            return api.request({ kind: 'clear-records', stateRevision });
+          },
+          onError: text => { if (belongs()) setCleanupError(text); },
+        });
+      } finally {
+        cleanupLife.release();
+        setCleanupChecking(false);
+      }
+    });
+  }, [runBusy, guardFlush, controller, cleanupLife]);
+
   const openBackups = useCallback(() => {
     const cur = workspaceStore.getState()?.current;
     if (!cur) return;
@@ -650,11 +717,11 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const inTextarea = event.target instanceof HTMLTextAreaElement;
       const key = event.key.toLowerCase();
-      // 中断检查或待复核期间，写入/打开/恢复快捷键一律不发起（Main 也会拒绝）。
-      const gate = interruptionGate(workspaceStore.getState());
+      // 中断检查/记录清理或待复核期间，写入/打开/恢复快捷键一律不发起（Main 也会拒绝）。
+      const gate = maintenanceGateText(workspaceStore.getState());
       if (gate && ['o', 's', 'z', 'y'].includes(key)) {
         event.preventDefault();
-        showToast(interruptionGateText(gate), 'error');
+        showToast(gate, 'error');
         return;
       }
       if (key === 'o' && !event.shiftKey) { event.preventDefault(); onOpen(false); return; }
@@ -681,13 +748,13 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const history = input?.history ?? null;
   const phaseBusy = state.phase === 'choosing' || state.phase === 'opening' || state.phase === 'saving' || state.phase === 'committing';
   const lastSave = state.lastSave;
-  // Main 中断检查进行中或结果待复核时，本窗口的写入/打开/恢复控件全部停用；
-  // “检查上次中断”的说明/结果对话框仍可查看。
-  const maintenance = interruptionGate(state);
+  // Main 中断检查/记录清理进行中或结果待复核时，本窗口的写入/打开/恢复控件全部停用；
+  // “检查上次中断”“清理本地记录”的说明/结果对话框仍可查看。
+  const maintenance = maintenanceGateText(state);
   const maintenanceOn = maintenance !== null;
   const switchBlocker = entrySwitchBlocker(state, { busy: busy || maintenanceOn, composing: inputView.composing });
   const switchTitle = (fallback: (blocker: NonNullable<typeof switchBlocker>) => string): string | undefined =>
-    !switchBlocker ? undefined : maintenance && !busy ? interruptionGateText(maintenance) : fallback(switchBlocker);
+    !switchBlocker ? undefined : maintenance && !busy ? maintenance : fallback(switchBlocker);
 
   const docked = panel === 'docked' && !!current;
   return (
@@ -785,13 +852,17 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
               <button type="button" role="menuitem" disabled={!current || !input?.canSaveCopy || maintenanceOn}
                 onClick={() => { setMenuOpen(false); onSaveCopy(); }}>另存草稿…</button>
               <button type="button" role="menuitem" disabled={maintenanceOn}
-                title={maintenance ? interruptionGateText(maintenance) : undefined}
+                title={maintenance ?? undefined}
                 onClick={() => { setMenuOpen(false); openRecovery(); }}>恢复草稿记录…</button>
               <button type="button" role="menuitem" disabled={!current || maintenanceOn}
                 onClick={() => { setMenuOpen(false); openBackups(); }}>备份与恢复…</button>
               <button type="button" role="menuitem"
                 onClick={() => { setMenuOpen(false); openInterruption(); }}>检查上次中断…
                 <span className="menu-sub">检查上次退出时是否有未完成的保存或旧记录清理；确认前只读取。</span>
+              </button>
+              <button type="button" role="menuitem"
+                onClick={() => { setMenuOpen(false); openCleanup(); }}>清理本地记录…
+                <span className="menu-sub">永久删除本应用保存的本地草稿、撤销历史与应用备份，删除后无法恢复；源 HTML、CSS、PDF 与项目文件不受影响。确认前会显示清单。</span>
               </button>
               <button type="button" role="menuitem" disabled={!current}
                 onClick={() => { setMenuOpen(false); setDialog('resources'); }}>资源诊断…</button>
@@ -898,7 +969,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           {persistence.status === 'unknown' && '草稿记录状态未知'}
         </span>}
         {state.cleanupPending && <span className="st-item warn">有待清理的临时文件</span>}
-        {maintenance && <span className="st-item warn" role="status">{interruptionGateText(maintenance)}</span>}
+        {maintenance && <span className="st-item warn" role="status">{maintenance}</span>}
         {current && current.project.resources.items.length > 0 && (
           <button type="button" className="st-btn" onClick={() => setDialog('resources')}>
             资源：{current.project.resources.items.length} 项被阻断
@@ -943,6 +1014,12 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           blocker={interruptionBlocker(state, { busy: busy && !interruptionChecking, composing: inputView.composing })}
           checking={interruptionChecking} error={interruptionError}
           onCheck={onCheckInterruption} onClose={closeInterruption} />
+      )}
+      {dialog === 'cleanup' && (
+        <CleanupDialog cleanup={state.desktop?.cleanup ?? null}
+          blocker={cleanupBlocker(state, { busy: busy && !cleanupChecking, composing: inputView.composing })}
+          checking={cleanupChecking} error={cleanupError}
+          onCheck={onCheckCleanup} onClose={closeCleanup} />
       )}
       {dialog === 'backups' && (
         <BackupsDialog catalog={backups.catalog} loading={backups.loading}
@@ -998,10 +1075,10 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
 
   const onDock = useCallback(() => {
     if (busy) return;
-    // 中断检查/待复核期间不停靠（Main 也会拒绝）；说明仍在主窗口查看。
-    const gate = interruptionGate(workspaceStore.getState());
+    // 中断检查/记录清理或待复核期间不停靠（Main 也会拒绝）；说明仍在主窗口查看。
+    const gate = maintenanceGateText(workspaceStore.getState());
     if (gate) {
-      showToast(interruptionGateText(gate), 'error');
+      showToast(gate, 'error');
       return;
     }
     setBusy(true);
@@ -1031,7 +1108,7 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         </div>
         <div className="tb-spacer" />
         <div className="tb-group">
-          <button type="button" className="btn" disabled={busy || interruptionGate(state) !== null} onClick={onDock}>
+          <button type="button" className="btn" disabled={busy || maintenanceGateText(state) !== null} onClick={onDock}>
             <IconDock />停靠到主窗口
           </button>
         </div>
