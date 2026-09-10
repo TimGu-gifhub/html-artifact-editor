@@ -39,6 +39,14 @@ async function until(check: () => boolean, label: string): Promise<void> {
   while (!check()) { if (Date.now() > deadline) throw new Error(`TIMEOUT: ${label}`); await delay(10); }
 }
 function barrier() { let release!: () => void; const wait = new Promise<void>(done => { release = done; }); return { wait, release }; }
+async function transportResult<T>(operation: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([operation, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`TIMEOUT: transport ${label}`)), 6500);
+    })]);
+  } finally { clearTimeout(timer); }
+}
 async function fixture(persistDrafts = false) {
   const root = await mkdtemp(join(results, 'save-window-')); const project = join(root, '项目 🧪');
   await mkdir(project); await mkdir(join(project, 'pages')); const entry = join(project, 'pages', '报告 😀.html');
@@ -68,7 +76,8 @@ async function fixture(persistDrafts = false) {
     saveOriginal: createOriginalSaver(store), backups: createBackupRestorer(store), reviewBackup: value => control.reviewBackup(value),
     ...(persistDrafts ? { checkpoints } : {}),
   });
-  const call = (expression: string): Promise<WorkspaceResult> => ui.webContents.executeJavaScript(expression);
+  const call = (expression: string): Promise<WorkspaceResult> => transportResult(
+    ui.webContents.executeJavaScript(expression), expression.split('(', 1)[0]!);
   const read = async () => { const value = await call('haeWorkspace.read()'); assert.ok(value.ok); assert.ok(value.state); return proofreadSnapshot(value.state); };
   const current = () => proofreadDocument(runtime.workspace.current!);
   const edit = (id: string, command: DocumentCommand) => call(`haeWorkspace.edit(${JSON.stringify(id)},${JSON.stringify(command)})`);
@@ -269,16 +278,18 @@ async function run(): Promise<void> {
   for (const stage of ['prepared-synced', 'native-replaced']) await use(async f => {
     await f.dirty(); const before = f.current(); const stop = barrier(); let waiting = false;
     f.control.step = async step => { if (step === stage) { waiting = true; await stop.wait; } };
-    // A destroyed renderer may never settle executeJavaScript's remote Promise.
-    // Observe the surviving Main operation, not that vanished renderer's promise.
-    void f.save().catch(() => null); await until(() => waiting, stage);
-    f.ui.webContents.forcefullyCrashRenderer(); await until(() => !f.runtime.connected, 'renderer revoked'); stop.release();
-    await until(() => proofreadSnapshot(f.runtime.workspace.snapshot()).phase === 'idle', 'Main save reconciliation');
-    assert.equal(proofreadSnapshot(f.runtime.workspace.snapshot()).lastSave!.status, stage === 'prepared-synced' ? 'cancelled' : 'saved');
-    assert.deepEqual(await readFile(f.entry), stage === 'prepared-synced' ? original : expected);
-    assert.equal((await f.store.scan()).locked, false); await f.runtime.reloadUI();
-    if (stage === 'prepared-synced') { assert.equal(f.current(), before); assert.equal((await f.read()).current!.input.changes.length, 1); }
-    else { assert.notEqual(f.current().id, before.id); assert.equal((await f.read()).current!.input.changes.length, 0); }
+    try {
+      // A destroyed renderer may never settle executeJavaScript's remote Promise.
+      // Observe the surviving Main operation, not that vanished renderer's promise.
+      void f.save().catch(() => null); await until(() => waiting, stage);
+      f.ui.webContents.forcefullyCrashRenderer(); await until(() => !f.runtime.connected, 'renderer revoked'); stop.release();
+      await until(() => proofreadSnapshot(f.runtime.workspace.snapshot()).phase === 'idle', 'Main save reconciliation');
+      assert.equal(proofreadSnapshot(f.runtime.workspace.snapshot()).lastSave!.status, stage === 'prepared-synced' ? 'cancelled' : 'saved');
+      assert.deepEqual(await readFile(f.entry), stage === 'prepared-synced' ? original : expected);
+      assert.equal((await f.store.scan()).locked, false); await f.runtime.reloadUI();
+      if (stage === 'prepared-synced') { assert.equal(f.current(), before); assert.equal((await f.read()).current!.input.changes.length, 1); }
+      else { assert.notEqual(f.current().id, before.id); assert.equal((await f.read()).current!.input.changes.length, 0); }
+    } finally { stop.release(); }
     pass(`${stage}: real UI renderer crash cancels an unstarted replacement or reconciles an already started commit; reconnect reads retained Main state`);
   });
   await use(async f => {

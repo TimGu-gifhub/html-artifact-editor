@@ -4,12 +4,15 @@ import { BrowserWindow, dialog, session } from 'electron';
 import { EDITOR_URL } from '../../contracts/editor.ts';
 import type { BackupReview } from '../../contracts/backup.ts';
 import type { LeaveReview } from '../../contracts/workspace.ts';
+import type { InterruptionSummary } from '../../contracts/interruption.ts';
 import { registerBundledContent } from '../bundled-content.ts';
 import { lockContents, securePreferences } from '../preview/security.ts';
 import { createPersistentWorkspaceSession } from '../workspace/persistent-session.ts';
 import type { PersistentSessionPorts, PersistentWorkspaceSession } from '../workspace/persistent-session.ts';
 import { bindWorkspaceQuit } from '../workspace/quit.ts';
 import { createDesktopController } from './desktop.ts';
+import type { InterruptionPorts } from './interruption.ts';
+import { interruptionPickerTitle, interruptionPrompt } from './interruption-copy.ts';
 
 // Test overrides are Main-only native decisions. Production controls use the
 // same factory, assets, preload, Workspace, parser and Windows transaction.
@@ -20,10 +23,12 @@ export type ProductChoices = Readonly<{
   review?: (value: LeaveReview) => Promise<unknown>;
   backup?: (value: BackupReview) => Promise<unknown>;
   project?: PersistentSessionPorts['projectChoices'];
+  interruptionSource?: () => Promise<string | undefined>;
+  interruptionReview?: (value: InterruptionSummary) => Promise<unknown>;
 }>;
 export async function createProductApplication(outputRoot: string,
   options: Readonly<{ visible?: boolean; bindQuit?: boolean; choices?: ProductChoices;
-    onStorageStep?: PersistentSessionPorts['onStorageStep'] }> = {}) {
+    onStorageStep?: PersistentSessionPorts['onStorageStep']; onInterruptionStep?: InterruptionPorts['onStep'] }> = {}) {
   const uiSession = session.fromPartition(`hae-product-${randomUUID()}`, { cache: false });
   await registerBundledContent(uiSession, 'editor', 'app', resolve(outputRoot, 'ui'));
   const window = new BrowserWindow({ title: 'HTML Artifact Editor', width: 1440, height: 900,
@@ -41,7 +46,22 @@ export async function createProductApplication(outputRoot: string,
       filters: [{ name: extension === 'pdf' ? 'PDF 文档' : 'HTML 文档', extensions: extension === 'pdf' ? ['pdf'] : ['html', 'htm'] }] });
     return selected.canceled ? undefined : selected.filePath;
   };
-  const desktop = createDesktopController(window, outputRoot, current, choices.pdf ?? (name => saveDialog(name, 'pdf')));
+  const desktop = createDesktopController(window, outputRoot, current, choices.pdf ?? (name => saveDialog(name, 'pdf')), {
+    chooseSource: choices.interruptionSource ?? (async () => {
+      const selected = await dialog.showOpenDialog(window, { title: interruptionPickerTitle,
+        properties: ['openFile'], filters: [{ name: 'HTML 文档', extensions: ['html', 'htm'] }] });
+      return selected.canceled ? undefined : selected.filePaths[0];
+    }),
+    review: choices.interruptionReview ?? (async value => {
+      const copy = interruptionPrompt(value);
+      const selected = await dialog.showMessageBox(window, { type: 'warning', title: copy.title,
+        message: copy.message, detail: copy.detail, buttons: [copy.cancel, copy.confirm],
+        defaultId: 0, cancelId: 0, noLink: true });
+      return { reviewId: value.reviewId, decision: selected.response === 1
+        ? value.kind === 'save' ? 'keep-current' : 'continue-cleanup' : 'cancel' };
+    }),
+    ...(options.onInterruptionStep ? { onStep: options.onInterruptionStep } : {}),
+  });
   const reportError = (code: string): void => {
     desktop.report(code);
     if (!runtime?.connected || runtime.workspace.snapshot().phase === 'disposed') {
@@ -71,7 +91,7 @@ export async function createProductApplication(outputRoot: string,
       }),
       bounds: desktop.bounds, reportError, bridgeExtension: desktop.extension,
       ...(options.onStorageStep ? { onStorageStep: options.onStorageStep } : {}),
-      beforeRequestClose: () => desktop.flush('close'), disposeAuxiliary: desktop.dispose,
+      beforeRequestClose: desktop.beforeClose, disposeAuxiliary: desktop.dispose,
     });
     desktop.watch();
     const quit = options.bindQuit === false ? null : bindWorkspaceQuit(window, runtime, reportError, desktop.ownedWindows);

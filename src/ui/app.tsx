@@ -13,11 +13,14 @@ import { BusyGuard, entrySwitchBlocker, entrySwitchBlockerText, runEntrySwitch }
 import { modeSwitchBlockerText, modeSwitchTarget, runModeSwitch } from './mode-switch.ts';
 import { loadRecoveryCatalog, RecoveryDialogLifecycle, runRecoveryRestore } from './recovery-flow.ts';
 import type { RecoverySourceMode } from './recovery-flow.ts';
+import { InterruptionDialogLifecycle, interruptionBlocker, interruptionGate, interruptionGateText, runInterruptionCheck } from './interruption-flow.ts';
+import type { InterruptionGate } from './interruption-flow.ts';
 import { classifySaveResult } from './save-result.ts';
 import { EditorPanel } from './editor-panel.tsx';
 import { ReviewPanel } from './review-panel.tsx';
 import { reviewChannel, useReviewStatus } from './review-channel.ts';
 import { BackupsDialog, PdfDialog, RecoveryDialog, ResourcesDialog, SaveDiffDialog } from './dialogs.tsx';
+import { InterruptionDialog } from './interruption-dialog.tsx';
 import { Dialog } from './dialog.tsx';
 import type { SaveError } from './dialogs.tsx';
 import { describeCode } from './util.ts';
@@ -140,7 +143,7 @@ function useToast(): [Toast | null, (text: string, kind?: 'info' | 'error') => v
   return [toast, show];
 }
 
-type DialogKind = 'diff' | 'pdf' | 'recovery' | 'backups' | 'resources';
+type DialogKind = 'diff' | 'pdf' | 'recovery' | 'backups' | 'resources' | 'interruption';
 
 function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const { state } = props;
@@ -209,6 +212,13 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const recoveryLife = useMemo(() => new RecoveryDialogLifecycle(), []);
   useEffect(() => () => recoveryLife.dispose(), [recoveryLife]);
   const [backups, setBackups] = useState<{ loading: boolean; catalog: WorkspaceBackupCatalog | null; error: string | null; busy: boolean }>({ loading: false, catalog: null, error: null, busy: false });
+  // Same binding as the recovery dialog: the synchronous latch covers the
+  // window before the locked dialog re-renders, generations bind late results
+  // to one opening, and unmount invalidates everything in flight.
+  const interruptionLife = useMemo(() => new InterruptionDialogLifecycle(), []);
+  useEffect(() => () => interruptionLife.dispose(), [interruptionLife]);
+  const [interruptionChecking, setInterruptionChecking] = useState(false);
+  const [interruptionError, setInterruptionError] = useState<string | null>(null);
 
   const modalOpen = dialog !== null || (drawerOpen && narrow);
   const previewVisible = !!current && !modalOpen && !menuOpen;
@@ -246,8 +256,21 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     try { await task(); } finally { busyGuard.release(); setBusy(false); }
   }, [busyGuard]);
 
+  // Maintenance gate: while Main is checking an interruption or the result
+  // needs review, no other write/open/restore action may start from this
+  // window (Main rejects them too). Read from the live store so callbacks and
+  // keyboard handlers never go stale.
+  const maintenanceGate = useCallback((): InterruptionGate | null => interruptionGate(workspaceStore.getState()), []);
+  const blockedByMaintenance = useCallback((): boolean => {
+    const gate = maintenanceGate();
+    if (gate) showToast(interruptionGateText(gate), 'error');
+    return gate !== null;
+  }, [maintenanceGate, showToast]);
+
   const [switching, setSwitching] = useState(false);
-  const onSwitchEntry = useCallback(() => void runBusy(async () => {
+  const onSwitchEntry = useCallback(() => {
+    if (blockedByMaintenance()) return;
+    void runBusy(async () => {
     setSwitching(true);
     try {
       await runEntrySwitch({
@@ -262,12 +285,15 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         showToast,
       });
     } finally { setSwitching(false); }
-  }), [runBusy, guardFlush, controller, showToast]);
+  });
+  }, [runBusy, guardFlush, controller, showToast, blockedByMaintenance]);
 
   const [switchingMode, setSwitchingMode] = useState(false);
   // 模式切换：固定当前文档后先排空实际输入窗口，再用最新修订请求 Main。
   // Main 拥有草稿的取消/放弃/另存决定；这里不新建任何渲染进程侧的草稿路径。
-  const onSwitchMode = useCallback(() => void runBusy(async () => {
+  const onSwitchMode = useCallback(() => {
+    if (blockedByMaintenance()) return;
+    void runBusy(async () => {
     setSwitchingMode(true);
     try {
       await runModeSwitch({
@@ -282,18 +308,21 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         showToast,
       });
     } finally { setSwitchingMode(false); }
-  }), [runBusy, guardFlush, controller, showToast]);
+  });
+  }, [runBusy, guardFlush, controller, showToast, blockedByMaintenance]);
 
   const onOpen = useCallback((directory: boolean) => void runBusy(async () => {
+    if (blockedByMaintenance()) return;
     if (!(await guardFlush('打开'))) return;
     const latest = workspaceStore.getState();
     const api = workspaceApi();
     if (!latest || !api) return;
     const result = directory ? await api.openDirectory(latest.stateRevision) : await api.open(latest.stateRevision);
     if (!result.ok) showToast(describeCode(result.code), 'error');
-  }), [runBusy, guardFlush, showToast]);
+  }), [runBusy, guardFlush, showToast, blockedByMaintenance]);
 
   const onHistory = useCallback((direction: 'undo' | 'redo') => void runBusy(async () => {
+    if (blockedByMaintenance()) return;
     if (!(await guardFlush(direction === 'undo' ? '撤销' : '重做'))) return;
     const cur = workspaceStore.getState()?.current;
     const api = workspaceApi();
@@ -306,9 +335,10 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       stateRevision: cur.input.stateRevision, draftRevision: cur.input.draftRevision, direction,
     } });
     if (!result.ok) showToast(describeCode(result.code), 'error');
-  }), [runBusy, guardFlush, showToast]);
+  }), [runBusy, guardFlush, showToast, blockedByMaintenance]);
 
   const onSaveCopy = useCallback(() => void runBusy(async () => {
+    if (blockedByMaintenance()) return;
     if (!(await guardFlush('另存草稿'))) return;
     const cur = workspaceStore.getState()?.current;
     const api = workspaceApi();
@@ -323,12 +353,13 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     else if (copy?.status === 'cancelled') showToast('已取消另存。');
     else if (copy) showToast(`另存失败${copy.code ? `（${copy.code}）` : '。'}`, 'error');
     else showToast(describeCode(result.code), 'error');
-  }), [runBusy, guardFlush, showToast]);
+  }), [runBusy, guardFlush, showToast, blockedByMaintenance]);
 
   const onPanel = useCallback((mode: PanelMode) => void runBusy(async () => {
+    if (blockedByMaintenance()) return;
     if (!(await guardFlush(mode === 'hidden' ? '隐藏校稿栏' : mode === 'floating' ? '拆卸校稿栏' : '停靠校稿栏'))) return;
     await desktopApi()?.request({ kind: 'panel', mode });
-  }), [runBusy, guardFlush]);
+  }), [runBusy, guardFlush, blockedByMaintenance]);
 
   const handleSaveResult = useCallback((result: WorkspaceResult, documentId: string): boolean => {
     const verdict = classifySaveResult(result, documentId);
@@ -376,6 +407,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
 
   const onSave = useCallback(() => void runBusy(async () => {
     setSaveError(null);
+    if (blockedByMaintenance()) return;
     if (!(await guardFlush('保存'))) return;
     const latest = workspaceStore.getState();
     const cur = latest?.current;
@@ -406,10 +438,11 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     }
     setDiff(diffResult.diff);
     setDialog('diff');
-  }), [runBusy, guardFlush, showToast, handleSaveResult, narrow]);
+  }), [runBusy, guardFlush, showToast, handleSaveResult, narrow, blockedByMaintenance]);
 
   const onConfirmSave = useCallback(() => void runBusy(async () => {
     if (!diff) return;
+    if (blockedByMaintenance()) return;
     const latest = workspaceStore.getState();
     const api = workspaceApi();
     if (!latest || !api) return;
@@ -420,10 +453,11 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       setDialog(null);
       setDiff(null);
     }
-  }), [runBusy, diff, handleSaveResult]);
+  }), [runBusy, diff, handleSaveResult, blockedByMaintenance]);
 
   const onPdfCreate = useCallback(() => void runBusy(async () => {
     setPdfError(null);
+    if (blockedByMaintenance()) return;
     if (!(await guardFlush('生成 PDF'))) return;
     const cur = workspaceStore.getState()?.current;
     const desktop = desktopApi();
@@ -438,7 +472,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       options: pdfOptions,
     });
     if (!result.ok) setPdfError(describeCode(result.code));
-  }), [runBusy, guardFlush, pdfOptions]);
+  }), [runBusy, guardFlush, pdfOptions, blockedByMaintenance]);
 
   const pdf = state.desktop?.pdf ?? null;
   const pdfBelongsToCurrent = !!pdf && !!current && pdf.documentId === current.id;
@@ -481,6 +515,19 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     setDialog(null);
   }, [recoveryLife]);
 
+  const openInterruption = useCallback(() => {
+    const gen = interruptionLife.open();
+    if (gen === null) return; // an accepted check is in flight; never reset it
+    setInterruptionError(null);
+    menuButtonRef.current?.focus(); // the menu item unmounts; capture a stable return target first
+    setDialog('interruption');
+  }, [interruptionLife]);
+
+  const closeInterruption = useCallback(() => {
+    if (!interruptionLife.close()) return; // an accepted check is in flight; stays visible
+    setDialog(null);
+  }, [interruptionLife]);
+
   // The BusyGuard is claimed synchronously before the first await, so a
   // same-frame duplicate click or a competing Ctrl+O never opens a second
   // native chooser. The recovery action latch is claimed synchronously inside
@@ -491,6 +538,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     const gen = recoveryLife.current();
     void runBusy(async () => {
       if (!recoveryLife.acquire()) return;
+      if (blockedByMaintenance()) { recoveryLife.release(); return; }
       setRecovery(value => ({ ...value, busySession: sessionId, error: null }));
       // Results apply only while the originating opening is current and the
       // recovery dialog is still the one on screen: a late restore result
@@ -520,7 +568,39 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         }
       }
     });
-  }, [runBusy, guardFlush, controller, recoveryLife]);
+  }, [runBusy, guardFlush, controller, recoveryLife, blockedByMaintenance]);
+
+  // Same synchronous ordering as restore: BusyGuard first, then the
+  // interruption action latch, both before the first await — a same-frame
+  // duplicate click, Escape/close or menu reopen can never start a second
+  // check or hide the accepted one. The reply is only a transport ack: ok
+  // never closes the dialog or claims a repair; the displayed outcome is
+  // Main's onState interruption.result.
+  const onCheckInterruption = useCallback(() => {
+    const gen = interruptionLife.current();
+    void runBusy(async () => {
+      if (!interruptionLife.acquire()) return;
+      const belongs = () => interruptionLife.isCurrent(gen) && dialogRef.current === 'interruption';
+      if (belongs()) setInterruptionError(null);
+      setInterruptionChecking(true);
+      try {
+        await runInterruptionCheck({
+          getState: () => workspaceStore.getState(),
+          isComposing: () => controller.isComposing(),
+          flush: () => guardFlush('检查中断'),
+          inspect: stateRevision => {
+            const api = desktopApi();
+            if (!api) return Promise.resolve({ ok: false, code: 'MISSING_WORKSPACE_API', state: null, documentId: null, copy: null, outcome: null });
+            return api.request({ kind: 'inspect-interruption', stateRevision });
+          },
+          onError: text => { if (belongs()) setInterruptionError(text); },
+        });
+      } finally {
+        interruptionLife.release();
+        setInterruptionChecking(false);
+      }
+    });
+  }, [runBusy, guardFlush, controller, interruptionLife]);
 
   const openBackups = useCallback(() => {
     const cur = workspaceStore.getState()?.current;
@@ -533,6 +613,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   }, []);
 
   const onRestoreBackup = useCallback((backup: BackupSummary) => void runBusy(async () => {
+    if (blockedByMaintenance()) return;
     if (!(await guardFlush('恢复备份'))) return;
     const latest = workspaceStore.getState();
     const cur = latest?.current;
@@ -551,15 +632,16 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     } else if (result.outcome !== 'cancelled') {
       setBackups(value => ({ ...value, error: describeCode(result.code) }));
     }
-  }), [runBusy, guardFlush, showToast]);
+  }), [runBusy, guardFlush, showToast, blockedByMaintenance]);
 
   const onRetryPersistence = useCallback(() => {
+    if (blockedByMaintenance()) return;
     const cur = workspaceStore.getState();
     const currentDoc = cur?.current;
     const api = workspaceApi();
     if (!currentDoc?.persistence || !currentDoc.input || !api) return;
     void api.retryPersistence(currentDoc.id, currentDoc.input.draftRevision);
-  }, []);
+  }, [blockedByMaintenance]);
 
   // Global shortcuts. Composition never triggers app-level actions.
   useEffect(() => {
@@ -568,6 +650,13 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const inTextarea = event.target instanceof HTMLTextAreaElement;
       const key = event.key.toLowerCase();
+      // 中断检查或待复核期间，写入/打开/恢复快捷键一律不发起（Main 也会拒绝）。
+      const gate = interruptionGate(workspaceStore.getState());
+      if (gate && ['o', 's', 'z', 'y'].includes(key)) {
+        event.preventDefault();
+        showToast(interruptionGateText(gate), 'error');
+        return;
+      }
       if (key === 'o' && !event.shiftKey) { event.preventDefault(); onOpen(false); return; }
       // 脚本只读预览：编辑、撤销/重做与保存快捷键明确拒绝，不静默也不冒充成功。
       if (workspaceStore.getState()?.current?.mode === 'interactive' && ['s', 'z', 'y'].includes(key)) {
@@ -592,7 +681,13 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const history = input?.history ?? null;
   const phaseBusy = state.phase === 'choosing' || state.phase === 'opening' || state.phase === 'saving' || state.phase === 'committing';
   const lastSave = state.lastSave;
-  const switchBlocker = entrySwitchBlocker(state, { busy, composing: inputView.composing });
+  // Main 中断检查进行中或结果待复核时，本窗口的写入/打开/恢复控件全部停用；
+  // “检查上次中断”的说明/结果对话框仍可查看。
+  const maintenance = interruptionGate(state);
+  const maintenanceOn = maintenance !== null;
+  const switchBlocker = entrySwitchBlocker(state, { busy: busy || maintenanceOn, composing: inputView.composing });
+  const switchTitle = (fallback: (blocker: NonNullable<typeof switchBlocker>) => string): string | undefined =>
+    !switchBlocker ? undefined : maintenance && !busy ? interruptionGateText(maintenance) : fallback(switchBlocker);
 
   const docked = panel === 'docked' && !!current;
   return (
@@ -604,64 +699,62 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           {dirtyDocument && <span className="doc-flag">未保存</span>}
         </div>
         <div className="tb-group collapsible">
-          <button type="button" className="btn" disabled={busy || phaseBusy} onClick={() => onOpen(false)}>
+          <button type="button" className="btn" disabled={busy || phaseBusy || maintenanceOn} onClick={() => onOpen(false)}>
             <IconOpen />打开 HTML
           </button>
-          <button type="button" className="btn" disabled={busy || phaseBusy} onClick={() => onOpen(true)}>
+          <button type="button" className="btn" disabled={busy || phaseBusy || maintenanceOn} onClick={() => onOpen(true)}>
             <IconFolder />打开目录
           </button>
         </div>
         <div className="tb-group">
           <button type="button" className="btn icon" aria-label={`撤销（${history?.undoCount ?? 0} 条）`}
             title={readonly ? '脚本只读预览不能撤销；返回静态校稿后可继续编辑。' : undefined}
-            disabled={busy || readonly || !history?.canUndo || inputView.composing} onClick={() => onHistory('undo')}>
+            disabled={busy || maintenanceOn || readonly || !history?.canUndo || inputView.composing} onClick={() => onHistory('undo')}>
             <IconUndo />
           </button>
           <button type="button" className="btn icon" aria-label={`重做（${history?.redoCount ?? 0} 条）`}
             title={readonly ? '脚本只读预览不能重做；返回静态校稿后可继续编辑。' : undefined}
-            disabled={busy || readonly || !history?.canRedo || inputView.composing} onClick={() => onHistory('redo')}>
+            disabled={busy || maintenanceOn || readonly || !history?.canRedo || inputView.composing} onClick={() => onHistory('redo')}>
             <IconRedo />
           </button>
         </div>
         <div className="tb-spacer" />
         <div className="tb-group">
           <button type="button" className="btn collapsible" disabled={switchBlocker !== null}
-            title={switchBlocker
-              ? modeSwitchBlockerText(switchBlocker)
-              : readonly
-                ? '停止页面脚本并重新加载为静态校稿；有未保存修改时会先提供取消、放弃或另存草稿的选择。'
-                : '离线运行页面本地脚本查看效果；动态文字不能编辑，也不会写回 HTML。'}
+            title={switchTitle(modeSwitchBlockerText) ?? (readonly
+              ? '停止页面脚本并重新加载为静态校稿；有未保存修改时会先提供取消、放弃或另存草稿的选择。'
+              : '离线运行页面本地脚本查看效果；动态文字不能编辑，也不会写回 HTML。')}
             onClick={onSwitchMode}>
             <IconMode />{switchingMode ? '正在切换…' : modeSwitchTarget(current?.mode) === 'interactive' ? '只读预览' : '返回静态校稿'}
           </button>
           <button type="button" className="btn narrow-only" disabled={!changes.length} onClick={() => setDrawerOpen(true)}>
             变更 <span className={changes.length ? 'count has' : 'count'}>{changes.length}</span>
           </button>
-          <button type="button" className="btn primary" disabled={busy || phaseBusy || !current || readonly || !state.canSave}
+          <button type="button" className="btn primary" disabled={busy || phaseBusy || maintenanceOn || !current || readonly || !state.canSave}
             title={readonly ? '脚本只读预览不能保存；返回静态校稿后再保存。' : undefined}
             onClick={onSave}>
             <IconSave />{changes.length ? `复核并保存（${reviewedCount}/${changes.length}）` : '保存'}
           </button>
-          <button type="button" className="btn collapsible" disabled={busy || !current || readonly || state.desktop?.pdfBusy}
+          <button type="button" className="btn collapsible" disabled={busy || maintenanceOn || !current || readonly || state.desktop?.pdfBusy}
             title={readonly ? '脚本只读预览不能生成草稿 PDF；返回静态校稿后再生成。' : undefined}
             onClick={() => { setPdfError(null); setDialog('pdf'); }}>
             <IconPdf />PDF
           </button>
           {panel === 'docked' && <>
-            <button type="button" className="btn icon" aria-label="隐藏校稿栏" disabled={busy} onClick={() => onPanel('hidden')}>
+            <button type="button" className="btn icon" aria-label="隐藏校稿栏" disabled={busy || maintenanceOn} onClick={() => onPanel('hidden')}>
               <IconPanelHide />
             </button>
-            <button type="button" className="btn icon" aria-label="在独立窗口中校稿" disabled={busy} onClick={() => onPanel('floating')}>
+            <button type="button" className="btn icon" aria-label="在独立窗口中校稿" disabled={busy || maintenanceOn} onClick={() => onPanel('floating')}>
               <IconFloat />
             </button>
           </>}
           {panel === 'hidden' && (
-            <button type="button" className="btn" disabled={busy} onClick={() => onPanel('docked')}>
+            <button type="button" className="btn" disabled={busy || maintenanceOn} onClick={() => onPanel('docked')}>
               <IconPanelShow />恢复校稿栏
             </button>
           )}
           {panel === 'floating' && (
-            <button type="button" className="btn" disabled={busy} onClick={() => onPanel('docked')}>
+            <button type="button" className="btn" disabled={busy || maintenanceOn} onClick={() => onPanel('docked')}>
               <IconDock />收回校稿栏
             </button>
           )}
@@ -671,29 +764,35 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
               <IconMenu />
             </button>
             {menuOpen && <div className="menu" role="menu">
-              <button type="button" role="menuitem" className="narrow-only" onClick={() => { setMenuOpen(false); onOpen(false); }}>打开 HTML…</button>
-              <button type="button" role="menuitem" className="narrow-only" onClick={() => { setMenuOpen(false); onOpen(true); }}>打开目录…</button>
+              <button type="button" role="menuitem" className="narrow-only" disabled={maintenanceOn} onClick={() => { setMenuOpen(false); onOpen(false); }}>打开 HTML…</button>
+              <button type="button" role="menuitem" className="narrow-only" disabled={maintenanceOn} onClick={() => { setMenuOpen(false); onOpen(true); }}>打开目录…</button>
               <button type="button" role="menuitem" disabled={switchBlocker !== null}
-                title={switchBlocker ? entrySwitchBlockerText(switchBlocker) : undefined}
+                title={switchTitle(entrySwitchBlockerText)}
                 onClick={() => { setMenuOpen(false); menuButtonRef.current?.focus(); onSwitchEntry(); }}>
                 {switching ? '正在切换目录内 HTML…' : '切换目录内 HTML…'}
                 {current && <span className="menu-sub">{`${current.project.name} / ${current.project.entry}`}</span>}
               </button>
               <button type="button" role="menuitem" disabled={switchBlocker !== null}
-                title={switchBlocker ? modeSwitchBlockerText(switchBlocker) : undefined}
+                title={switchTitle(modeSwitchBlockerText)}
                 onClick={() => { setMenuOpen(false); menuButtonRef.current?.focus(); onSwitchMode(); }}>
                 {switchingMode ? '正在切换模式…' : readonly ? '返回静态校稿' : '切换为脚本只读预览'}
                 <span className="menu-sub">{readonly
                   ? '停止页面脚本并重新加载为静态校稿；动态文字仍不能写回。'
                   : '离线运行页面本地脚本查看效果；动态文字不能编辑。有未保存修改时会先提供取消、放弃或另存草稿的选择。'}</span>
               </button>
-              <button type="button" role="menuitem" className="narrow-only" disabled={!current || readonly}
+              <button type="button" role="menuitem" className="narrow-only" disabled={!current || readonly || maintenanceOn}
                 onClick={() => { setMenuOpen(false); setPdfError(null); setDialog('pdf'); }}>PDF 打印预览…</button>
-              <button type="button" role="menuitem" disabled={!current || !input?.canSaveCopy}
+              <button type="button" role="menuitem" disabled={!current || !input?.canSaveCopy || maintenanceOn}
                 onClick={() => { setMenuOpen(false); onSaveCopy(); }}>另存草稿…</button>
-              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); openRecovery(); }}>恢复草稿记录…</button>
-              <button type="button" role="menuitem" disabled={!current}
+              <button type="button" role="menuitem" disabled={maintenanceOn}
+                title={maintenance ? interruptionGateText(maintenance) : undefined}
+                onClick={() => { setMenuOpen(false); openRecovery(); }}>恢复草稿记录…</button>
+              <button type="button" role="menuitem" disabled={!current || maintenanceOn}
                 onClick={() => { setMenuOpen(false); openBackups(); }}>备份与恢复…</button>
+              <button type="button" role="menuitem"
+                onClick={() => { setMenuOpen(false); openInterruption(); }}>检查上次中断…
+                <span className="menu-sub">检查上次退出时是否有未完成的保存或旧记录清理；确认前只读取。</span>
+              </button>
               <button type="button" role="menuitem" disabled={!current}
                 onClick={() => { setMenuOpen(false); setDialog('resources'); }}>资源诊断…</button>
               <button type="button" role="menuitem" onClick={() => setMenuOpen(false)}>关闭菜单</button>
@@ -707,7 +806,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
             脚本只读预览：离线运行页面本地脚本，显示源文件效果；动态文字不能编辑，编辑、复核、保存与草稿 PDF 已停用。
             <span className="conflict-actions">
               <button type="button" className="btn sm" disabled={switchBlocker !== null}
-                title={switchBlocker ? modeSwitchBlockerText(switchBlocker) : '重新加载页面并停止脚本；返回后可继续校对。'}
+                title={switchTitle(modeSwitchBlockerText) ?? '重新加载页面并停止脚本；返回后可继续校对。'}
                 onClick={onSwitchMode}>
                 {switchingMode ? '正在返回…' : '返回静态校稿'}
               </button>
@@ -725,7 +824,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
               ? `上次保存未完成，写入未提交${lastSave.code ? `（${lastSave.code}）` : ''}；草稿与证据已保留。`
               : `上次保存结果未知${lastSave.code ? `（${lastSave.code}）` : ''}，文件可能已写入；请勿盲目重试，可先另存草稿保留修改。`}
             <span className="conflict-actions">
-              <button type="button" className="btn sm" disabled={!input?.canSaveCopy} onClick={onSaveCopy}>另存草稿…</button>
+              <button type="button" className="btn sm" disabled={!input?.canSaveCopy || maintenanceOn} onClick={onSaveCopy}>另存草稿…</button>
             </span>
           </div>
         )}
@@ -733,7 +832,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           <div className="banner conflict-banner" role="alert">
             保存已提交，但按新文件版本重建草稿未完成；文件可能已包含本次修改。草稿与证据已保留，请勿直接重试保存。
             <span className="conflict-actions">
-              <button type="button" className="btn sm" disabled={!input?.canSaveCopy} onClick={onSaveCopy}>另存草稿…</button>
+              <button type="button" className="btn sm" disabled={!input?.canSaveCopy || maintenanceOn} onClick={onSaveCopy}>另存草稿…</button>
             </span>
           </div>
         )}
@@ -741,7 +840,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           <div className="banner readonly-banner" role="alert">
             草稿记录写入失败{persistence.code ? `（${persistence.code}）` : ''}，当前修改仍在内存中。
             {persistence.canRetry && <span className="conflict-actions">
-              <button type="button" className="btn sm" onClick={onRetryPersistence}>重试写入</button>
+              <button type="button" className="btn sm" disabled={maintenanceOn} onClick={onRetryPersistence}>重试写入</button>
             </span>}
           </div>
         )}
@@ -757,10 +856,10 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
               <p>在预览中点击一段文字即可修改，停顿后自动更新预览；逐条复核后点击“保存”才会写回原文件（自动备份）。</p>
               <p className="hint">支持范围：静态 HTML 中可安全映射的文字；脚本动态生成的内容以只读预览显示，不能修改。</p>
               <div className="editor-actions">
-                <button type="button" className="btn primary" disabled={busy || phaseBusy} data-autofocus onClick={() => onOpen(false)}>
+                <button type="button" className="btn primary" disabled={busy || phaseBusy || maintenanceOn} data-autofocus onClick={() => onOpen(false)}>
                   <IconOpen />打开 HTML 文件…
                 </button>
-                <button type="button" className="btn" disabled={busy || phaseBusy} onClick={() => onOpen(true)}>
+                <button type="button" className="btn" disabled={busy || phaseBusy || maintenanceOn} onClick={() => onOpen(true)}>
                   <IconFolder />打开目录…
                 </button>
               </div>
@@ -799,12 +898,13 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           {persistence.status === 'unknown' && '草稿记录状态未知'}
         </span>}
         {state.cleanupPending && <span className="st-item warn">有待清理的临时文件</span>}
+        {maintenance && <span className="st-item warn" role="status">{interruptionGateText(maintenance)}</span>}
         {current && current.project.resources.items.length > 0 && (
           <button type="button" className="st-btn" onClick={() => setDialog('resources')}>
             资源：{current.project.resources.items.length} 项被阻断
           </button>
         )}
-        {pdf && <button type="button" className="st-btn" onClick={() => { setPdfError(null); setDialog('pdf'); }}>
+        {pdf && <button type="button" className="st-btn" disabled={maintenanceOn} onClick={() => { setPdfError(null); setDialog('pdf'); }}>
           PDF：{pdf.name}{!pdfBelongsToCurrent ? '（先前快照）' : pdfStale ? '（可能已过期）' : ''}
         </button>}
         <span className="st-spacer" />
@@ -837,6 +937,12 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         <RecoveryDialog catalog={recovery.catalog} loading={recovery.loading}
           busySession={recovery.busySession} error={recovery.error}
           onRestore={onRestore} onClose={closeRecovery} />
+      )}
+      {dialog === 'interruption' && (
+        <InterruptionDialog interruption={state.desktop?.interruption ?? null}
+          blocker={interruptionBlocker(state, { busy: busy && !interruptionChecking, composing: inputView.composing })}
+          checking={interruptionChecking} error={interruptionError}
+          onCheck={onCheckInterruption} onClose={closeInterruption} />
       )}
       {dialog === 'backups' && (
         <BackupsDialog catalog={backups.catalog} loading={backups.loading}
@@ -892,6 +998,12 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
 
   const onDock = useCallback(() => {
     if (busy) return;
+    // 中断检查/待复核期间不停靠（Main 也会拒绝）；说明仍在主窗口查看。
+    const gate = interruptionGate(workspaceStore.getState());
+    if (gate) {
+      showToast(interruptionGateText(gate), 'error');
+      return;
+    }
     setBusy(true);
     void (async () => {
       try {
@@ -919,7 +1031,7 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         </div>
         <div className="tb-spacer" />
         <div className="tb-group">
-          <button type="button" className="btn" disabled={busy} onClick={onDock}>
+          <button type="button" className="btn" disabled={busy || interruptionGate(state) !== null} onClick={onDock}>
             <IconDock />停靠到主窗口
           </button>
         </div>

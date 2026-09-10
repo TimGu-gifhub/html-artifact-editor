@@ -19,6 +19,8 @@
 
 ## 前端交接
 
+“更多操作 → 检查上次中断”提供重启后的完整保存事务与检查点清理核验、单独原生确认及结果提示。当前有文档时只显示说明，不自动关闭或放弃。检查过程、原生关闭与界面丢失均等待同一次 Main 处理；未知结果/警告保留证据并禁止直接重试。完整合同见 [产品中断检查](INTERRUPTION_WORKFLOW.md)。
+
 前端作者：Kimi Code CLI 0.42.0，`kimi-code/k3` / 服务端 `k3`，thinking enabled / high；2026-09-10 核对 [官方模型列表](https://www.kimi.com/code/docs/kimi-code/models.html) 和 [K3 发布公告](https://www.kimi.com/news/kimi-k3)。实际执行与验收记录另列于实现记录，配置不等于完成。
 
 允许 Kimi 修改 `src/ui/**` 和新增 `tests/product/ui-*.mjs`；不得修改 contracts、preload、Main、platform、core、依赖或构建。视觉依据为 `docs/design/hae-007/` 的方案 B。主代理提供 [Workspace API](../src/contracts/workspace-editor.ts)、[输入状态](../src/contracts/input.ts)、[桌面 API](../src/contracts/desktop.ts) 并负责集成和独立验证。
@@ -26,6 +28,8 @@
 `window.haeWorkspace` 维持已有 API，`window.haeDesktop.request` 仅在正式产品窗口暴露。桌面状态随 `WorkspaceSnapshot.desktop` 发布，独立 revision 不替代文档 stateRevision。role 区分主窗口/编辑浮窗；panel 决定当前输入控件归属。原生 Preview 的 bounds 必须由主窗口中实际占位元素计算，菜单/抽屉/模态打开时明确隐藏原生 Preview，关闭时恢复同一视图及滚动位置；不能用 CSS 假设可以遮盖原生视图。
 
 `flush` 是 Main 绑定当前输入窗口的单次关闭/停靠请求。UI 排空输入后仅对该 id 返回 flushed；组词或失败返回 ready=false。复核在 Main 保存，跨停靠/浮窗保持。PDF 在单独受限的本地 PDF 窗口显示，桌面状态仅包含名称、版本和大小，不暴露私有路径或原始字节。
+
+中断检查任务的前端交接另允许 Kimi 编写 `src/main/product/interruption-copy.ts` 的纯文案函数；仅 type import 和字符串格式化，不能包含平台调用、授权、回调或文件操作。原生按钮的默认取消、源选择、决定绑定与事务均由主代理负责。其余 Main 禁写规则继续适用。
 
 ## 验证边界
 
