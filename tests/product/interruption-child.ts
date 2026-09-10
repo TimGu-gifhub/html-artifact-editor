@@ -14,6 +14,7 @@ import { source, css, edits } from './acceptance-fixture.ts';
 
 const [mode = '', profile = '', projectArg = '', requestedSession = '', observation = 'baseline-matches'] = process.argv.slice(2);
 const modes = ['seed-prepared', 'seed-committed', 'seed-candidate', 'seed-compaction', 'seed-incomplete', 'empty', 'unsupported', 'basic',
+  'seed-partial-intent', 'seed-partial-backup', 'seed-partial-candidate', 'seed-partial-seal',
   'simple', 'stale-review', 'close-join', 'loss-before', 'loss-after', 'unknown', 'warning', 'seed-resolution'];
 if (!profile || !projectArg || !mode || !modes.includes(mode)) throw Error('Invalid interruption arguments');
 const project = projectArg, entry = join(project, 'report.html'), outputRoot = resolve(__dirname, '..');
@@ -46,6 +47,7 @@ async function click(window: BrowserWindow, selector: string, label = ''): Promi
   }, 'enabled control ' + selector + ' ' + label);
   assert.ok(hit.point);
   window.focus(); window.webContents.focus();
+  await until(() => window.isFocused() && window.webContents.isFocused(), 'native UI focus before click');
   window.webContents.sendInputEvent({ type: 'mouseDown', ...hit.point, button: 'left', clickCount: 1 });
   window.webContents.sendInputEvent({ type: 'mouseUp', ...hit.point, button: 'left', clickCount: 1 });
 }
@@ -84,8 +86,10 @@ async function run(): Promise<void> {
     },
     review: async value => ({ reviewId: value.reviewId, decision: 'cancel' }),
   }, onStorageStep: async (kind, step) => {
-    const target = mode === 'seed-incomplete' ? 'backup-created' : mode === 'seed-prepared' ? 'prepared-synced' : mode === 'seed-committed' ? 'committed-synced'
-      : mode === 'seed-candidate' ? 'native-replaced' : mode === 'seed-compaction' ? 'compaction-after-origin.bin' : null;
+    const partial: Readonly<Record<string, string>> = { 'seed-incomplete': 'intent-created', 'seed-partial-intent': 'intent-synced',
+      'seed-partial-backup': 'backup-created', 'seed-partial-candidate': 'candidate-created', 'seed-partial-seal': 'prepared-created' };
+    const target = partial[mode] ?? (mode === 'seed-prepared' ? 'prepared-synced' : mode === 'seed-committed' ? 'committed-synced'
+      : mode === 'seed-candidate' ? 'native-replaced' : mode === 'seed-compaction' ? 'compaction-after-origin.bin' : null);
     if (!target || step !== target) return;
     assert.equal(kind, mode === 'seed-compaction' ? 'checkpoint' : 'save');
     const document = proofreadDocument(product!.runtime.workspace.current!);
@@ -306,6 +310,9 @@ async function run(): Promise<void> {
   if (lastSummary.kind === 'save') {
     for (const [name, digest] of Object.entries(before)) if (name !== 'active.lock') assert.equal(after[name], digest, 'original transaction ' + name);
     assert.equal(Object.keys(after).filter(name => /^save-resolution-.*\.complete\.json$/u.test(name)).length, 1);
+    const name = Object.keys(after).find(name => /^save-resolution-[a-f0-9-]+\.json$/u.test(name))!;
+    const record = JSON.parse(await readFile(join(privateRoot, name), 'utf8'));
+    assert.equal(record.version, lastSummary.stage === 'incomplete' ? 2 : 1);
   } else {
     const journal = JSON.parse(await readFile(join(project, '../seed-journal.json'), 'utf8'));
     assert.equal(after['compaction.json'], undefined);
@@ -348,8 +355,18 @@ async function run(): Promise<void> {
     undoCount: state().current!.input.history!.undoCount, chooseCalls, reviewCalls });
   close();
 }
-void run().catch((error: unknown) => {
+void run().catch(async (error: unknown) => {
+  let uiEvidence: unknown = null;
+  try {
+    if (product && !product.window.isDestroyed() && !product.window.webContents.isCrashed()) {
+      const page = await Promise.race([product.window.webContents.executeJavaScript('({text:document.body.innerText,focus:document.activeElement?.outerHTML})'),
+        delay(2500).then(() => ({ unavailable: true }))]);
+      uiEvidence = { page, desktop: product.desktop.extension(product.window.webContents).snapshot(),
+        previewBounds: product.runtime.host.current?.getBounds() };
+      await writeFile(join(project, '../interruption-failed.png'), await captureReady(product.window.webContents));
+    }
+  } catch { /* Retain the original failure even when the renderer is unavailable. */ }
   receipt({ event: 'failed', error: String(error), stack: error instanceof Error ? error.stack : null,
-    workspace: product?.runtime.workspace.snapshot(), interruption: snapshotStatus?.() });
+    workspace: product?.runtime.workspace.snapshot(), interruption: snapshotStatus?.(), uiEvidence });
   app.exit(1);
 });

@@ -3,6 +3,7 @@ import { sameStoredIdentity } from '../../contracts/save-record.ts';
 import { digest } from '../../platform/storage-files.ts';
 import type { CheckedDirectory } from '../../platform/storage-files.ts';
 import { removalIdentity } from '../../platform/checkpoint-removal.ts';
+import { verifyIncompleteSave } from './incomplete-save.ts';
 
 const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 // The original transaction remains the backup authority. A receipt records an
@@ -24,6 +25,7 @@ export async function readSaveResolutions(root: CheckedDirectory, names: readonl
       const actual = await folder.read(item.name, item.size);
       if (actual.bytes.length !== item.size || actual.hash !== item.hash || !sameStoredIdentity(removalIdentity(actual.stat), item.identity)) throw new Error('STORAGE_REVIEW_REQUIRED');
     }
+    if (record.version === 2) await verifyIncompleteSave(folder, id, { targetKey: record.targetKey, ...record.current });
     const seal = selected.includes(completeName) ? await root.read(completeName, 1024) : null;
     if (seal) {
       const value = decode(seal.bytes);

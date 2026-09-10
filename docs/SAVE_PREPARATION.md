@@ -49,6 +49,8 @@ Windows 的 ReplaceFileW 会升级某些旧式 ACL 的继承格式。实现比�
 
 ## 重启只读检查
 
+经 [准备中断明确处置](INCOMPLETE_SAVE_RECOVERY.md) 完整封印的 v2 记录，在 scan 中列为 abandoned；原始 inspect 继续反映残留文件的 incomplete/invalid 状态。它不是有效备份、准备完成或保存成功的证明。所有原文件和处置引用仍占原配额，不能通过分类变化释放容量或删除证据。
+
 `scan()` 只枚举有界私有命名空间，报告 records、locked、unrecognized；不会从 journal 自动打开用户文件。每项记录可用 `inspect(transactionId, readTarget?)` 检查。readTarget 只能由 Main 对已重新选择/授权的源文件提供，不接受记录内的路径。目标尚未选择时状态为 unavailable。
 
 | 状态 | 含义；均不触发写盘 |

@@ -95,6 +95,13 @@ test('M2 product interruption workflow: real killed processes, native resolution
     report.passed.push('no supported lock and active document exclusion; stale revision and narrow Main command');
     const cases = [
       ['incomplete', 'incomplete', 'unsupported', 'baseline-matches'],
+      ['partial-intent', 'partial-intent', 'simple', 'baseline-matches'],
+      ['partial-backup', 'partial-backup', 'basic', 'baseline-matches'],
+      ['partial-candidate', 'partial-candidate', 'simple', 'baseline-matches'],
+      ['partial-seal', 'partial-seal', 'simple', 'baseline-matches'],
+      ['partial-resolution-restart', 'partial-backup', 'seed-resolution', 'baseline-matches'],
+      ['partial-unknown', 'partial-backup', 'unknown', 'baseline-matches'],
+      ['partial-warning', 'partial-backup', 'warning', 'baseline-matches'],
       ['baseline', 'prepared', 'basic', 'baseline-matches'],
       ['committed', 'committed', 'simple', 'committed-matches'],
       ['candidate', 'candidate', 'simple', 'candidate-on-disk'],

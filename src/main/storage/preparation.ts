@@ -25,7 +25,7 @@ export type PreparationResult = Readonly<{ status: 'failed'; code: string; trans
   | Readonly<{ status: 'prepared'; code: null; transactionId: string; intent: SaveIntent; cancel: () => Promise<void>;
     commit: () => Promise<ReplacementResult> }>;
 export type PreparationInspection = Readonly<{
-  transactionId: string; phase: 'incomplete' | 'invalid' | 'prepared' | 'cancelled' | 'replacing' | 'committed';
+  transactionId: string; phase: 'incomplete' | 'invalid' | 'prepared' | 'cancelled' | 'replacing' | 'committed' | 'abandoned';
   state: RecoveryState; intent: SaveIntent | null;
 }>;
 async function optionalRead(folder: CheckedDirectory, name: string, limit: number) {
@@ -154,14 +154,20 @@ export async function createSavePreparationStore(path: string, onStep: (step: st
       let locked = false; let unrecognized = false;
       const resolutions = await readCompactionResolutions(root, entries.map(item => item.name));
       if (resolutions.some(row => !row.seal)) unrecognized = true;
-      if ((await readSaveResolutions(root, entries.map(item => item.name))).some(row => !row.seal)) unrecognized = true;
+      const saveResolutions = await readSaveResolutions(root, entries.map(item => item.name));
+      if (saveResolutions.some(row => !row.seal)) unrecognized = true;
+      const abandoned = new Set(saveResolutions.filter(row => row.seal && row.record.version === 2).map(row => row.record.transactionId));
       for (const item of entries) {
         if (resolutionFile(item.name) || saveResolutionFile(item.name)) continue;
         if (item.name === 'active.lock') { locked = true; continue; }
         if (item.kind === 'directory' && isTransactionId(item.name)) {
           const files = await (await root.directory(item.name)).entries(7);
           if (files.some(file => file.name === 'record.json') && !files.some(file => file.name === 'intent.json')) continue;
-          records.push(await inspect(item.name));
+          const inspected = await inspect(item.name);
+          // Keep the original incomplete evidence in the catalog. A sealed
+          // v2 decision classifies it as abandoned, never as a usable backup
+          // or committed Save; raw inspect still describes the original files.
+          records.push(abandoned.has(item.name) ? Object.freeze({ ...inspected, phase: 'abandoned' as const, state: 'unavailable' as const }) : inspected);
         }
         else unrecognized = true;
       }

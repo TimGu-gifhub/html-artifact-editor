@@ -6,15 +6,16 @@ import { MAX_SOURCE_BYTES } from './source-tree.ts';
 
 export const SAVE_RESOLUTION_LIMIT = 16 * 1024;
 export const SAVE_FILES = ['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json', 'cancelled.json', 'replacing.json', 'committed.json'] as const;
+export const SAVE_PREPARATION_FILES = ['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json'] as const;
 export type SaveFile = typeof SAVE_FILES[number];
 export type SaveFileProof = Readonly<{ name: SaveFile; size: number; hash: string; identity: StoredFileIdentity }>;
 export type SaveResolution = Readonly<{
-  version: 1; transactionId: string; targetKey: string; createdAt: number; decision: 'keep-current';
-  observed: 'baseline-matches' | 'candidate-on-disk' | 'committed-matches' | 'conflict';
+  transactionId: string; targetKey: string; createdAt: number; decision: 'keep-current';
   current: Readonly<{ hash: string; size: number; identity: StoredFileIdentity }>;
   lockText: string; lock: Omit<SaveFileProof, 'name'>;
   evidence: Readonly<{ directory: DirectoryIdentity; files: readonly SaveFileProof[] }>;
-}>;
+}> & (Readonly<{ version: 1; observed: 'baseline-matches' | 'candidate-on-disk' | 'committed-matches' | 'conflict' }>
+  | Readonly<{ version: 2; observed: 'baseline-matches' }>);
 export type SaveResolutionSeal = Readonly<{ version: 1; transactionId: string; resolutionHash: string; phase: 'complete' }>;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const proof = (value: unknown, keys: number, max: number): boolean => object(value) && Object.keys(value).length === keys
@@ -31,7 +32,7 @@ export function saveResolutionFile(name: string): Readonly<{ id: string; complet
   return match && isTransactionId(match[1]) ? { id: match[1], complete: !!match[2] } : null;
 }
 export function isSaveResolution(value: unknown): value is SaveResolution {
-  if (!object(value) || Object.keys(value).length !== 10 || value.version !== 1 || !isTransactionId(value.transactionId)
+  if (!object(value) || Object.keys(value).length !== 10 || (value.version !== 1 && value.version !== 2) || !isTransactionId(value.transactionId)
     || !isContentHash(value.targetKey) || !Number.isSafeInteger(value.createdAt) || (value.createdAt as number) <= 0
     || value.decision !== 'keep-current' || !['baseline-matches', 'candidate-on-disk', 'committed-matches', 'conflict'].includes(value.observed as string)
     || !proof(value.current, 3, MAX_SOURCE_BYTES) || !proof(value.lock, 3, 1024)
@@ -43,7 +44,10 @@ export function isSaveResolution(value: unknown): value is SaveResolution {
       item.name === 'backup.bin' || item.name === 'candidate.bin' ? MAX_SOURCE_BYTES : SAVE_RESOLUTION_LIMIT) || names.has(item.name as string)) return false;
     names.add(item.name as string);
   }
-  if (!['intent.json', 'backup.bin', 'candidate.bin', 'prepared.json'].every(name => names.has(name))) return false;
+  if (value.version === 1) {
+    if (!SAVE_PREPARATION_FILES.every(name => names.has(name))) return false;
+  } else if (value.observed !== 'baseline-matches' || !names.has('intent.json')
+    || [...names].some(name => !SAVE_PREPARATION_FILES.includes(name as typeof SAVE_PREPARATION_FILES[number]))) return false;
   try {
     const lock: unknown = JSON.parse(value.lockText);
     return isSaveLock(lock) && lock.transactionId === value.transactionId && lock.targetKey === value.targetKey;

@@ -27,6 +27,8 @@ review 协议只有 guarded 和 reviewed 回执以及 finish-review 指令，绑
 
 ## 持久记录与崩溃窗口
 
+第八阶段另支持 [保存准备中断的明确放弃](INCOMPLETE_SAVE_RECOVERY.md)：完整意图、严格匹配的原文件及符合写入顺序的残留前缀，经同一原生 guard 和新确认后写入 v2 keep-current 处置记录。原始不完整事务保留并列为 abandoned，不作为备份或已保存结果；缺失意图、替换阶段记录和损坏处置记录继续阻止。下述 v1 完整事务路径保持原有条件。
+
 只接受严格 `{version, transactionId, targetKey}` 保存锁和完整有效的 prepared / cancelled / replacing / committed 事务。原有 intent、backup、candidate、prepared 及相关阶段记录均核验；缺失、损坏、混合文件、错误目标、其他无法归类记录和检查点/结束事务锁拒绝。既有 v1 普通保存与 v2 备份恢复记录保持兼容。
 
 [审查记录格式](../src/contracts/save-resolution.ts) 在私有根追加 `save-resolution-<id>.json`（最多 16 KiB）：版本、事务/目标 ID、决定、观测分类、当前源 hash/大小/身份、原锁文本及版本、原事务目录身份和每个固定文件的 hash/大小/身份。它没有绝对路径或页面 offset，不复制原始 HTML 到 renderer。
@@ -41,4 +43,4 @@ review 协议只有 guarded 和 reviewed 回执以及 finish-review 指令，绑
 
 [存储实验](../tests/unit/save-resolution.test.mjs) 使用真实文件、Windows 助手和被强杀的子进程，覆盖准备/取消、完整各阶段、文件占用、改写/冲突、审查中断以及单独备份恢复。底层 profile 回调替身不代替进程所有权验证；[Electron 进程实验](../tests/history/save-recovery-child.ts) 另外验证真实 profile 竞争、强杀后 Main 接管、生产文档历史恢复/Undo，以及提交未确认时拒绝旧历史回放。完整执行证据见 [HAE-010](implementation/HAE-010.md)。
 
-未完成：部分保存事务、空锁、部分/冲突审查记录的后续处置，活动窗口内存状态的暂停/解冻，结束事务锁，跨会话/备份/sidecar 清理。产品已接入完整事务的重新选择、独立原生确认及结果提示；其他失败处置仍待实现。Windows 10/macOS、真实 IME/对话框/报告操作、磁盘满/断电与全尺寸性能仍待验收；M2 保持未完成。
+未完成：缺少完整意图或无法验证写入顺序的保存准备中断、空锁、部分/冲突审查记录的后续处置，活动窗口内存状态的暂停/解冻，结束事务锁，跨会话/备份/sidecar 清理。产品已接入完整事务及可验证准备中断的重新选择、独立原生确认及结果提示；其他失败处置仍待实现。Windows 10/macOS、真实 IME/对话框/报告操作、磁盘满/断电与全尺寸性能仍待验收；M2 保持未完成。

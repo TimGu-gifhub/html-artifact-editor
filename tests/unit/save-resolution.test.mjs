@@ -15,6 +15,7 @@ import { openSaveSource } from '../../src/platform/save-source.ts';
 import { createWindowsReplacer } from '../../src/platform/windows-replacement.ts';
 import { createWindowsRecoveryGuard } from '../../src/platform/windows-recovery-guard.ts';
 import { isSaveResolution, saveResolutionFile } from '../../src/contracts/save-resolution.ts';
+import { createBackupRestorer } from '../../src/main/storage/backups.ts';
 
 const win = { skip: process.platform !== 'win32', timeout: 60000 };
 const original = Buffer.from('\ufeff<!doctype html>\r\n<h1>原文 &amp; 😀</h1><p>保持</p><!-- literal -->');
@@ -187,4 +188,106 @@ test('unknown lock shapes and incomplete/mixed transactions cannot authorize rel
   });
   assert.deepEqual(await plan.commit('keep-current'), { status: 'resolved', observed: 'baseline-matches', code: 'SAVE_RECOVERY_CONFIRMED_WITH_WARNING' });
   assert.equal((await (await createSavePreparationStore(late.privateRoot)).scan()).locked, false);
+});
+
+test('complete intent plus unchanged source permits explicit abandonment at each incomplete preparation boundary, retaining bytes and enabling a fresh Save', win, async () => {
+  for (const stage of ['intent-synced', 'backup-created', 'backup-written', 'backup-synced',
+    'candidate-created', 'candidate-written', 'candidate-synced', 'prepared-created']) {
+    const f = await fixture(stage); const before = await snapshot(f.privateRoot);
+    const cancelled = await prepare(f); assert.equal(cancelled.summary.phase, 'incomplete');
+    assert.equal(cancelled.cancel(), true); assert.deepEqual(await snapshot(f.privateRoot), before);
+    const plan = await prepare(f); assert.equal(plan.summary.observed, 'baseline-matches');
+    assert.equal((await plan.commit('keep-current')).status, 'resolved');
+    assert.deepEqual(await readFile(f.entry), original);
+    const after = await snapshot(f.privateRoot);
+    for (const [name, hash] of Object.entries(before)) if (name !== 'active.lock') assert.equal(after[name], hash, stage + ':' + name);
+    const rows = await readSaveResolutions(await checkedDirectory(f.privateRoot), await readdir(f.privateRoot));
+    assert.equal(rows[0].record.version, 2); assert.ok(rows[0].seal);
+    assert.equal(isSaveResolution({ ...rows[0].record, observed: 'conflict' }), false);
+    assert.equal(isSaveResolution({ ...rows[0].record, version: 3 }), false);
+    const store = await createSavePreparationStore(f.privateRoot, undefined, await createWindowsReplacer(helper));
+    const scan = await store.scan(); assert.equal(scan.locked, false); assert.equal(scan.unrecognized, false);
+    assert.equal(scan.records[0].phase, 'abandoned');
+    assert.ok(['incomplete', 'invalid'].includes((await store.inspect(f.id, f.source.current)).phase), 'raw evidence is never repaired into prepared');
+    assert.deepEqual((await createBackupRestorer(store).list(f.source)).entries, []);
+    await assert.rejects(store.reviewBackup(f.source, f.id), /BACKUP_RECORD_INVALID/);
+    assert.equal((await (await createDraftCheckpointStore(f.privateRoot)).catalog()).reviewRequired, false);
+    const next = await store.prepare(f.source, { bytes: expected, baseHash: digest(original), resultHash: digest(expected) });
+    assert.equal(next.status, 'prepared', next.code); assert.equal((await next.commit()).status, 'committed');
+    assert.deepEqual(await readFile(f.entry), expected);
+    // Later Saves cannot make the original receipt or partial bytes disappear.
+    const settled = await snapshot(f.privateRoot);
+    for (const [name, hash] of Object.entries(after)) assert.equal(settled[name], hash);
+    assert.equal((await store.scan()).records.find(row => row.transactionId === f.id).phase, 'abandoned');
+  }
+});
+
+test('partial backup/candidate/seal prefixes are preserved; inconsistent ordering, missing intent, wrong source and replacement markers remain blocked', win, async () => {
+  for (const part of ['backup', 'candidate', 'prepared']) {
+    const f = await fixture(part + '-created'); const target = join(f.privateRoot, f.id, part === 'prepared' ? 'prepared.json' : part + '.bin');
+    let bytes = part === 'backup' ? original : expected;
+    if (part === 'prepared') bytes = Buffer.from(JSON.stringify({ version: 1, transactionId: f.id,
+      intentHash: digest(await readFile(join(f.privateRoot, f.id, 'intent.json'))), phase: 'prepared' }) + '\n');
+    await writeFile(target, bytes.subarray(0, 11)); const before = await snapshot(f.privateRoot);
+    assert.equal((await (await prepare(f)).commit('keep-current')).status, 'resolved');
+    const after = await snapshot(f.privateRoot);
+    for (const [name, hash] of Object.entries(before)) if (name !== 'active.lock') assert.equal(after[name], hash);
+    assert.deepEqual(await readFile(f.entry), original);
+  }
+  for (const mode of ['missing-intent', 'bad-backup-prefix', 'candidate-before-backup', 'bad-candidate-hash', 'bad-seal-prefix',
+    'replacing-marker', 'cancelled-marker', 'source-rewrite', 'fresh-rewritten-source']) {
+    const f = await fixture(mode === 'missing-intent' ? 'intent-created' : mode === 'bad-seal-prefix' ? 'prepared-created' : 'backup-created');
+    const folder = join(f.privateRoot, f.id);
+    if (mode === 'bad-backup-prefix') await writeFile(join(folder, 'backup.bin'), 'corrupted');
+    if (mode === 'candidate-before-backup') await writeFile(join(folder, 'candidate.bin'), expected);
+    if (mode === 'bad-candidate-hash') { await writeFile(join(folder, 'backup.bin'), original); await writeFile(join(folder, 'candidate.bin'), Buffer.alloc(expected.length)); }
+    if (mode === 'bad-seal-prefix') await writeFile(join(folder, 'prepared.json'), '{"force":');
+    if (mode === 'replacing-marker' || mode === 'cancelled-marker') await writeFile(join(folder, mode.split('-')[0] + '.json'), '{}');
+    if (mode === 'source-rewrite' || mode === 'fresh-rewritten-source') await writeFile(f.entry, original);
+    if (mode === 'fresh-rewritten-source') f.source = await openSaveSource(f.entry, original);
+    const before = await snapshot(f.privateRoot); await assert.rejects(prepare(f), undefined, mode);
+    assert.deepEqual(await snapshot(f.privateRoot), before); assert.deepEqual(await readFile(f.entry), original);
+  }
+});
+
+test('v2 abandoned-preparation decisions resume after real process loss, preserve their anchors and reject partial or changed receipts', win, async () => {
+  for (const stage of ['save-recovery-record-ready', 'save-recovery-complete-ready', 'save-recovery-after-lock']) {
+    const f = await fixture('backup-created');
+    const child = await childAt('tests/storage/save-resolution-child.mjs', [f.privateRoot, f.entry, stage], stage); await child.stop();
+    const store = await createSavePreparationStore(f.privateRoot); const scan = await store.scan();
+    assert.equal(scan.locked, stage !== 'save-recovery-after-lock');
+    if (scan.locked) assert.equal((await (await prepare(f)).commit('keep-current')).status, 'resolved');
+    assert.equal((await store.scan()).records[0].phase, 'abandoned'); assert.deepEqual(await readFile(f.entry), original);
+    await writeFile(join(f.privateRoot, f.id, 'backup.bin'), Buffer.alloc(0));
+    await assert.rejects(store.scan()); await assert.rejects((await createDraftCheckpointStore(f.privateRoot)).catalog());
+    assert.equal((await store.prepare(f.source, { bytes: expected, baseHash: digest(original), resultHash: digest(expected) })).status, 'failed');
+  }
+  for (const stage of ['save-recovery-record-created', 'save-recovery-complete-created']) {
+    const f = await fixture('backup-created');
+    const plan = await prepare(f, async step => { if (step === stage) throw Error('torn v2 decision'); });
+    assert.equal((await plan.commit('keep-current')).status, 'unknown'); const before = await snapshot(f.privateRoot);
+    await assert.rejects(prepare(f)); assert.deepEqual(await snapshot(f.privateRoot), before); assert.deepEqual(await readFile(f.entry), original);
+  }
+});
+
+test('an interrupted backup restoration preparation is separately abandoned without replay, then a fresh explicit restoration preserves its evidence', win, async () => {
+  const f = await fixture('committed-synced');
+  assert.equal((await (await prepare(f)).commit('keep-current')).status, 'resolved');
+  const child = await childAt('tests/storage/commit-child.mjs',
+    [f.privateRoot, f.entry, join(f.root, 'candidate.html'), 'backup-created', f.id], 'backup-created');
+  await child.stop();
+  const lock = JSON.parse(await readFile(join(f.privateRoot, 'active.lock'), 'utf8'));
+  const intent = JSON.parse(await readFile(join(f.privateRoot, lock.transactionId, 'intent.json'), 'utf8'));
+  assert.equal(intent.version, 2); assert.equal(intent.restoreOf.transactionId, f.id);
+  f.source = await openSaveSource(f.entry, expected);
+  const before = await snapshot(f.privateRoot);
+  const plan = await prepare(f); assert.equal(plan.summary.phase, 'incomplete');
+  assert.equal((await plan.commit('keep-current')).status, 'resolved');
+  assert.deepEqual(await readFile(f.entry), expected, 'abandonment must never replay the previous backup choice');
+  const store = await createSavePreparationStore(f.privateRoot, undefined, await createWindowsReplacer(helper));
+  assert.equal((await store.scan()).records.find(row => row.transactionId === lock.transactionId).phase, 'abandoned');
+  const next = await store.prepareRestore(f.source, f.id); assert.equal(next.status, 'prepared', next.code);
+  assert.equal((await next.commit()).status, 'committed'); assert.deepEqual(await readFile(f.entry), original);
+  const after = await snapshot(f.privateRoot);
+  for (const [name, hash] of Object.entries(before)) if (name !== 'active.lock') assert.equal(after[name], hash);
 });

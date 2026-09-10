@@ -14,6 +14,7 @@ export function createBackupRestorer(store: Awaited<ReturnType<typeof createSave
       const catalog = await store.scan(); const entries: BackupSummary[] = [];
       let reviewRequired = catalog.unrecognized;
       for (const row of catalog.records) {
+        if (row.phase === 'abandoned') continue;
         if (row.phase === 'invalid' || row.phase === 'incomplete') { reviewRequired = true; continue; }
         if (row.intent?.targetKey !== source.targetKey) continue;
         if (entries.length >= 20) throw new Error('BACKUP_LIMIT');

@@ -11,6 +11,7 @@ import { createSavePreparationStore } from './preparation.ts';
 import { createDraftCheckpointStore } from './checkpoints.ts';
 import { readSaveResolutions } from './save-resolutions.ts';
 import { draftOwnership } from './draft-ownership.ts';
+import { verifyIncompleteSave } from './incomplete-save.ts';
 
 type Snapshot = Awaited<ReturnType<CheckedDirectory['read']>>;
 type Result = Readonly<{ status: 'resolved' | 'failed' | 'unknown'; observed: SaveResolution['observed']; code: string | null }>;
@@ -34,7 +35,10 @@ export async function prepareSaveResolution(path: string, source: SaveSource, ve
     if (!isSaveLock(lockValue) || lockValue.targetKey !== source.targetKey) throw new Error('SAVE_RECOVERY_UNAVAILABLE');
     const id = lockValue.transactionId; const folder = await root.directory(id);
     const inspect = await store.inspect(id, source.current);
-    if (inspect.phase === 'invalid' || inspect.phase === 'incomplete' || !inspect.intent
+    const incomplete = inspect.phase === 'invalid' || inspect.phase === 'incomplete';
+    const baseline = { targetKey: source.targetKey, hash: source.baseHash, size: source.size, identity: source.identity };
+    if (incomplete) await verifyIncompleteSave(folder, id, baseline, source.bytes);
+    else if (inspect.phase === 'abandoned' || !inspect.intent
       || !['baseline-matches', 'candidate-on-disk', 'committed-matches', 'conflict'].includes(inspect.state)) throw new Error('SAVE_RECOVERY_UNAVAILABLE');
     const rows = await readSaveResolutions(root, (await root.entries(512)).map(item => item.name));
     const previous = rows.find(row => row.record.transactionId === id);
@@ -44,12 +48,16 @@ export async function prepareSaveResolution(path: string, source: SaveSource, ve
       const file = await folder.read(entry.name, entry.name.endsWith('.bin') ? MAX_SOURCE_BYTES : SAVE_RESOLUTION_LIMIT);
       files.push(Object.freeze({ name: entry.name as SaveFile, ...proof(file) }));
     }
-    const record: SaveResolution = previous?.record ?? Object.freeze({ version: 1, transactionId: id, targetKey: source.targetKey,
-      createdAt: Date.now(), decision: 'keep-current', observed: inspect.state as SaveResolution['observed'],
+    const binding = { transactionId: id, targetKey: source.targetKey,
+      createdAt: Date.now(), decision: 'keep-current' as const,
       current: Object.freeze({ hash: source.baseHash, size: source.size, identity: source.identity }), lockText: text(lock), lock: proof(lock),
-      evidence: Object.freeze({ directory: folder.identityChain.at(-1)!, files: Object.freeze(files) }) });
+      evidence: Object.freeze({ directory: folder.identityChain.at(-1)!, files: Object.freeze(files) }) };
+    const record: SaveResolution = previous?.record ?? Object.freeze(incomplete
+      ? { ...binding, version: 2, observed: 'baseline-matches' }
+      : { ...binding, version: 1, observed: inspect.state as SaveResolution['observed'] });
     if (!isSaveResolution(record) || !same(lock, record.lock) || text(lock) !== record.lockText || record.current.hash !== source.baseHash
-      || record.current.size !== source.size || !sameStoredIdentity(record.current.identity, source.identity)) changed();
+      || record.current.size !== source.size || !sameStoredIdentity(record.current.identity, source.identity)
+      || (record.version === 2) !== incomplete) changed();
     let receipt = previous?.file ?? null; let complete = previous?.seal ?? null;
     const receiptName = saveResolutionName(id); const completeName = saveResolutionName(id, true);
     let live = (): void => {};
@@ -65,7 +73,9 @@ export async function prepareSaveResolution(path: string, source: SaveSource, ve
         else if (entries.some(item => item.name === name)) changed();
       }
       const current = await store.inspect(id, source.current);
-      if (current.phase !== inspect.phase || current.state !== record.observed || !current.intent || current.intent.targetKey !== record.targetKey) changed();
+      if (current.phase !== inspect.phase || (!incomplete && current.state !== record.observed)
+        || !current.intent || current.intent.targetKey !== record.targetKey) changed();
+      if (incomplete) await verifyIncompleteSave(folder, id, baseline, source.bytes);
       const identity = (await root.directory(id)).identityChain.at(-1)!;
       if (identity.dev !== record.evidence.directory.dev || identity.ino !== record.evidence.directory.ino
         || (await folder.entries(7)).length !== record.evidence.files.length) changed();
@@ -73,7 +83,8 @@ export async function prepareSaveResolution(path: string, source: SaveSource, ve
       const catalog = await drafts.catalog();
       if (catalog.unclassified.some(name => name !== receiptName)) throw new Error('STORAGE_REVIEW_REQUIRED');
       const allSaves = await store.scan();
-      if (allSaves.records.some(value => value.phase === 'invalid' || value.phase === 'incomplete')) throw new Error('STORAGE_REVIEW_REQUIRED');
+      if (allSaves.records.some(value => (value.phase === 'invalid' || value.phase === 'incomplete')
+        && !(incomplete && value.transactionId === id))) throw new Error('STORAGE_REVIEW_REQUIRED');
       await source.verify(); verifyProfile(); live();
     };
     await verify(); await onStep('save-recovery-prepared'); await verify();
@@ -86,7 +97,8 @@ export async function prepareSaveResolution(path: string, source: SaveSource, ve
       if (entries.length + count > 512 || used + bytes > 200 * 1024 * 1024) throw new Error('BACKUP_LIMIT');
     };
     return Object.freeze({ status: 'prepared' as const,
-      summary: Object.freeze({ name: source.name, transactionId: id, phase: inspect.phase, observed: record.observed, decision: 'keep-current' as const }),
+      summary: Object.freeze({ name: source.name, transactionId: id, phase: incomplete ? 'incomplete' as const : inspect.phase,
+        observed: record.observed, decision: 'keep-current' as const }),
       cancel(): boolean { if (commitment) return false; cancelled = true; release(); return true; },
       commit(decision: 'keep-current'): Promise<Result> {
         if (decision !== 'keep-current') throw new Error('SAVE_RECOVERY_DECISION_REQUIRED');

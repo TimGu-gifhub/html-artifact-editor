@@ -2,7 +2,7 @@
 // versions are capabilities of the renderer; Main owns the native decision.
 export type SaveObservation = 'baseline-matches' | 'committed-matches' | 'candidate-on-disk' | 'conflict';
 export type InterruptionSummary = Readonly<{ reviewId: string; name: string }> & (
-  Readonly<{ kind: 'save'; observed: SaveObservation; stage: 'prepared' | 'cancelled' | 'replacing' | 'committed' }>
+  Readonly<{ kind: 'save'; observed: SaveObservation; stage: 'incomplete' | 'prepared' | 'cancelled' | 'replacing' | 'committed' }>
   | Readonly<{ kind: 'compaction'; draftRevision: number; obsoleteCount: number }>
 );
 export type InterruptionDecision = Readonly<{
