@@ -12,6 +12,8 @@ Main 提供既有 chooseOpen、chooseCopy、review、reviewBackup、projectChoic
 
 固定位置为 Electron userData 的直接子目录 **workspace-records**。工厂先获取 Electron profile 的进程锁，再核验目录链和身份；仅在不存在时创建已核验父目录下的已知直接子目录。文件、链接、目录替换、权限失败均报错，不迁移、不清空，也不随机换一个目录逃避旧证据。保存、草稿、结束标记、清理/恢复记录继续共用原 active.lock、身份注册表和配额，原记录格式不变。
 
+HAE-009 正常入口实测发现，MSIX 宿主子进程的 AppData 虚拟化也可能使逻辑 userData 与真实位置不一致；此时拒绝启动，不放宽目录合同。普通 Explorer 桌面会话启动同一构建已通过。开发应使用独立 Windows 终端，详见 [启动排错](DEVELOPMENT.md#启动环境与-appdata-重定向)。
+
 同一进程在异步启动前同步占用运行实例；第二次启动或第二个窗口返回 EDITOR_RUNTIME_ACTIVE。实际 profile 锁排除其他 Electron 进程。已持有的锁绑定此前确认的 userData，修改路径不能把旧锁当作新 profile 的所有权；运行期间 userData/sessionData 与锁状态须保持一致。独立 profile 不构成全机器文件互斥，原有文件版本、冲突和备份校验仍必须执行。
 
 启动本身不选择项目、不恢复草稿、不改 HTML、不解除旧锁。旧记录通过既有 listRecovery/restore 等入口显式处理；无法识别的目录项使 listRecovery 返回 DRAFT_STORAGE_REVIEW_REQUIRED，recovery=null，文件原样保留。恢复摘要没有路径、私有字节或写入权限。

@@ -157,3 +157,11 @@ HAE-010 第五阶段把 [七项保存中断处置实验](../tests/unit/save-reso
 - npm 子进程提示找不到 node/tsc，但 PowerShell 能找到：检查继承的 PATH 是否异常过长。可在新终端使用仅含本次工具链所需目录的进程级 PATH；不修改系统 PATH。本次本地验证采用此方式隔离宿主环境问题。
 - 内嵌终端继承 `ELECTRON_RUN_AS_NODE`：启动脚本仅对子进程移除此标志，确保运行真正 Electron。
 - 启动超时或冒烟失败：保留 failed/running 报告并返回非零退出码；即使 Electron 意外以 0 退出，也不能误报通过。修复后重新构建和执行检查。
+
+### 启动环境与 AppData 重定向
+
+Windows 开发请从独立终端进入仓库并运行上述命令。2026-09-10 实际复现：从一个 MSIX 打包宿主创建的子进程启动时，逻辑 userData 的真实路径落入宿主包的 LocalCache，正常入口在装配持久化服务前返回 `STORAGE_LOCATION_CHANGED`。当时尚未选择文档，也未建立 workspace-records。MSIX 对新建 AppData 文件夹的虚拟化行为见 [Microsoft 文档](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes#appdata-operations-on-windows-10-version-1903-and-later)。
+
+同一构建随后从已有 Explorer 桌面会话启动，实际输出 `product workspace ready`，工作台窗口可见且响应，固定 userData/workspace-records 的身份检查通过。此验证只证明正常入口启动，不替代打开/保存对话框或真实输入法人工验收。测试入口使用独立临时 profile，所以其通过不能覆盖宿主的路径虚拟化。
+
+当前不支持上述重定向启动环境；保留逻辑路径与真实目录一致的校验，不自动迁移、清空或改用另一个 profile 来逃避证据。遇到该错误时先退出未打开文档的失败启动，从独立 Windows 终端重试；若仍报错，保留目录并检查路径、链接及权限，不删除恢复记录。
