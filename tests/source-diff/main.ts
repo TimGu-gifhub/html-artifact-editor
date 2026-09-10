@@ -1,3 +1,4 @@
+import { proofreadSnapshot } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -65,7 +66,7 @@ async function run(): Promise<void> {
   await use(async f => {
     await f.restore(); await f.select('h1'); await f.change('not yet applied');
     const result = await readDiff(f); assert.equal(result.ok, true); const diff = result.diff!;
-    assert.equal(result.state!.current!.input.hasUnappliedInput, true); assert.deepEqual(rebuild(original, diff), expected);
+    assert.equal(proofreadSnapshot(result.state!).current!.input.hasUnappliedInput, true); assert.deepEqual(rebuild(original, diff), expected);
     if (process.platform === 'win32') assert.equal((await reviewedSave(f, diff)).code, 'UNAPPLIED_INPUT');
     const value = (await f.read()).current!;
     assert.equal((await f.edit(value.id, { kind: 'change', value: { ...version(value.input), inputRevision: value.input.input!.revision + 1, newText: '组合输入', composing: true } })).ok, true);
@@ -117,7 +118,7 @@ async function run(): Promise<void> {
     });
     await use(async f => {
       await f.restore(); const diff = (await readDiff(f)).diff!; const old = f.current(); await writeFile(f.entry, 'external current contents');
-      const result = await reviewedSave(f, diff); assert.equal(result.ok, false); assert.equal(result.state!.lastSave!.status, 'failed');
+      const result = await reviewedSave(f, diff); assert.equal(result.ok, false); assert.equal(proofreadSnapshot(result.state!).lastSave!.status, 'failed');
       assert.equal(f.current(), old); assert.equal(await readFile(f.entry, 'utf8'), 'external current contents');
       assert.equal((await readDiff(f)).diff!.candidateHash, diff.candidateHash); assert.deepEqual(Buffer.from(old.draft.candidate.bytes), expected);
       pass('a matching Diff review does not bypass the original-file conflict check; external bytes and the applied draft remain intact on failed Save');

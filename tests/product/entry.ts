@@ -1,3 +1,4 @@
+import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -80,7 +81,7 @@ async function run(): Promise<void> {
     project: {
       chooseDirectory: async () => { rootCalls++; return rootChoice; },
       chooseEntry: async directory => { entryCalls++; chooserRoots.push(directory);
-        const input=product.runtime.workspace.snapshot().current?.input;
+        const input=proofreadSnapshot(product.runtime.workspace.snapshot()).current?.input;
         if(input) { assert.equal(input.hasUnappliedInput,false); chooserInput=input.input?.appliedText ?? null; }
         return entryGate ?? entryChoice;
       },
@@ -89,7 +90,7 @@ async function run(): Promise<void> {
     review: async value => { reviewCalls++; return {reviewId:value.reviewId,decision:leaveDecision}; },
   }});
   const {window,runtime,desktop}=product;
-  const state=()=>runtime.workspace.snapshot();
+  const state=()=>proofreadSnapshot(runtime.workspace.snapshot());
   const ui=(code:string)=>window.webContents.executeJavaScript(code);
   const desk=()=>desktop.extension(window.webContents).snapshot();
   const errors:string[]=[];
@@ -121,7 +122,7 @@ async function run(): Promise<void> {
       if(choice!=='valid') assert.equal(state().current,null);
     }
     await until(()=>state().current?.input.mappingStatus==='ready'&&(runtime.host.current?.getBounds().width??0)>0,'first native entry ready');
-    const first=runtime.workspace.current!, firstId=first.id, grantIdentity=first.preview.grant.rootIdentity;
+    const first=proofreadDocument(runtime.workspace.current!), firstId=first.id, grantIdentity=first.preview.grant.rootIdentity;
     assert.equal(state().current!.project.entry,'报告/入口.html'); assert.equal(first.preview.grant.root,root);
     assert.equal(await first.preview.contents.executeJavaScript('getComputedStyle(document.body).color'),'rgb(12, 34, 56)');
     assert.equal(await first.preview.contents.executeJavaScript('typeof entryScript'),'undefined');
@@ -181,7 +182,7 @@ async function run(): Promise<void> {
       assert.equal(await readFile(occupiedCopy,'utf8'),'existing destination'); await filesUnchanged();
     }
     copyChoice=copyPath; await switchEntry(); await until(()=>state().current?.id!==firstId&&state().phase==='idle','copy then authorized switch'); await idle();
-    const next=runtime.workspace.current!; assert.equal(next.preview.grant.root,root); assert.deepEqual(next.preview.grant.rootIdentity,grantIdentity);
+    const next=proofreadDocument(runtime.workspace.current!); assert.equal(next.preview.grant.root,root); assert.deepEqual(next.preview.grant.rootIdentity,grantIdentity);
     assert.equal(state().current!.project.entry,'附录/入口.html'); assert.equal(state().current!.input.changes.length,0);
     assert.equal(state().current!.input.input,null); assert.equal(state().current!.input.history!.undoCount,0); assert.equal(desk().reviewed.length,0);
     await until(()=>first.preview.contents.isDestroyed(),'old entry mapping retired');
@@ -197,9 +198,9 @@ async function run(): Promise<void> {
     const entryButton=await ui('(() => {const e=[...document.querySelectorAll("[role=menuitem]")].find(e=>e.textContent.includes("切换目录内 HTML"));if(!e||e.disabled)return false;e.focus();return document.activeElement===e;})()');
     assert.equal(entryButton,true); entryChoice=firstPath; leaveDecision='discard'; key(window.webContents,'Enter');
     await until(()=>state().current?.id!==next.id&&state().phase==='idle','keyboard narrow entry switch'); await idle();
-    assert.equal(state().current!.project.entry,'报告/入口.html'); assert.deepEqual(runtime.workspace.current!.preview.grant.rootIdentity,grantIdentity);
+    assert.equal(state().current!.project.entry,'报告/入口.html'); assert.deepEqual(proofreadDocument(runtime.workspace.current!).preview.grant.rootIdentity,grantIdentity);
     assert.equal(state().current!.input.changes.length,0); assert.equal(state().current!.input.history!.undoCount,0); assert.equal(desk().reviewed.length,0);
-    assert.equal(await runtime.workspace.current!.preview.contents.executeJavaScript('document.querySelector("h1").textContent'),'报告 & 😀');
+    assert.equal(await proofreadDocument(runtime.workspace.current!).preview.contents.executeJavaScript('document.querySelector("h1").textContent'),'报告 & 😀');
     assert.equal(rootCalls,4); assert.ok(chooserRoots.every(value=>value===root)); await filesUnchanged(); assert.deepEqual(errors,[]);
     pass('narrow-window keyboard entry switching honors explicit discard and retains the original directory identity and every source/resource byte');
 

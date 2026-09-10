@@ -9,7 +9,7 @@ function doc(name, dirty = false) {
   const listeners = new Set(); let state = { stateRevision: 1, phase: 'idle', draftPhase: 'idle', draftRevision: dirty ? 2 : 1,
     candidateHash: dirty ? draftHash : baseHash, input: null, hasUnappliedInput: false,
     changes: dirty ? [{ nodeId: 'n1', oldText: 'original', newText: 'draft' }] : [] };
-  const value = { id: randomUUID(), name, saveSource: Object.freeze({ name }), closed: 0, held: false,
+  const value = { id: randomUUID(), mode: 'proofread', name, saveSource: Object.freeze({ name }), closed: 0, held: false,
     project: () => ({ name: 'fixture', entry: name, resources: { items: [], truncated: false } }),
     update(fields) { state = { ...state, ...fields, stateRevision: state.stateRevision + 1 }; for (const listener of listeners) listener(); },
     onState(listener) { listeners.add(listener); return () => listeners.delete(listener); },

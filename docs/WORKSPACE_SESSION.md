@@ -18,6 +18,7 @@ Windows 的 [持久化启动工厂](PERSISTENT_STARTUP.md) 在这一会话外统
 | `open(stateRevision)` | 按窗口状态版本请求 Main 文件选择器，完整准备后处理旧文档离开确认 |
 | `openDirectory(stateRevision)` | Main 先选择并固定根目录身份，再选择根内 HTML；取消任一步保持当前文档 |
 | `switchEntry(documentId, stateRevision)` | 只在操作所属 current 文档的既有根内选择入口，不能自动重新授权或接受 UI 路径 |
+| `switchMode(documentId, stateRevision, mode)` | mode 只允许 proofread/interactive；Main 先处理旧草稿，再以原根授权重新准备并验证文件版本，成功使用新文档身份 |
 | `readDiff(documentId, draftRevision, candidateHash)` | 读取指定已应用候选的完整源码 Diff；不改变输入、不写检查点或 HTML，过期结果拒绝 |
 | `save(documentId, stateRevision, review?)` | Main 显式保存已应用候选并重建基线；review 绑定所显示 Diff 的 draftRevision/candidateHash，过期确认拒绝；未应用输入/组合态拒绝，不隐式 Apply |
 | `listBackups(documentId)` | 只读列出当前目标的完整备份元数据，绑定 documentId，不返回私有字节/路径；并发列表读取有界 |
@@ -34,6 +35,8 @@ documentId 必须随用户操作一起捕获，不能在迟到回调中自动换
 
 Diff 基于打开/最近保存时的原始字节和同一冻结候选，由有限 Worker 计算；不包含未应用输入。UI 必须按文字显示原始源码，不执行它，范围仅用于显示，不能作为文件写入权限。产品从 Diff 发起 Save 时须携带实际显示的 review；即使后来候选 hash 相同，旧修订也不能确认新保存。该校验不替代磁盘冲突、备份或输入保护。完整字段、缓存、取消与错误合同见 [源码 Diff](SOURCE_DIFF.md)。
 
+`current.mode` 明确区分 proofread 与 interactive；只读文档的 input/persistence 均为 null，无映射、草稿或 writer。编辑、Diff、保存、备份替换和检查点重试在 Main 拒绝；私有干净历史只用于返回后的完整源码重建，不出现在 UI 状态中。具体准备、版本与初始空历史规则见 [模式合同](MODE_SWITCH.md)。
+
 `current.project` 是只读显示摘要：根目录名称、根内相对 entry 和有界 resources 诊断。诊断变化也推进 Workspace 状态版本并经 onState 发送。它不含本机绝对路径、目录身份或授权对象；entry/诊断 target 不能回传为文件操作参数。具体类型、脱敏和截断规则见 [目录资源合同](PROJECT_RESOURCES.md)。
 
 传输复用 [统一来源检查](../src/main/editor/transport.ts)：指定 WebContents、Session、精确 `editor://app/index.html`、握手后固定的真实主框架、随机连接 ID 和递增 sequence。Preview、子框架、同源其他窗口、旧连接及重放无权限。preload 内部保留连接身份，过滤旧版本和外来状态；不存在通用 invoke、force、dispose、路径或任意 channel 方法。
@@ -44,7 +47,7 @@ Diff 基于打开/最近保存时的原始字节和同一冻结候选，由有�
 
 [PreviewHost](../src/platform/preview-host.ts) 拥有原生子视图附着关系；Workspace 拥有输入、预览内容和清理。新增视图、设置尺寸或移除旧视图失败时，先恢复旧视图再拒绝提交。成功挂载后若最终权限核验失败，调用回滚；旧输入、候选及文档 ID 不改变。原生缩放/回滚无法确定结果时，设置 cleanupPending 并阻止 Apply、Save、Open 和 Close，保留现场。Main 可保留晚到的 change 输入；当前没有用户可操作的视图故障恢复流程。
 
-打开/确认期间允许当前文档的晚到 change，使旧离开决定失效；begin/apply/resolve/save-copy 在 Workspace 非 idle 时拒绝。原文件保存及重建、离开决定的 committing 阶段也拒绝 change，防止冻结候选之后接受新输入。Main holdDeparture 将 InputController 置于 leaving，只保留原输入和映射，不关闭它们；预检或挂载失败可释放冻结，标记结果不确定则保留冻结。此方法没有 renderer 命令。组合态和版本约束继续有效。HAE-008 的目录打开/入口切换复用同一路径；编辑窗口内的交互预览切换仍待接入。
+打开/确认期间允许当前文档的晚到 change，使旧离开决定失效；begin/apply/resolve/save-copy 在 Workspace 非 idle 时拒绝。原文件保存及重建、离开决定的 committing 阶段也拒绝 change，防止冻结候选之后接受新输入。Main holdDeparture 将 InputController 置于 leaving，只保留原输入和映射，不关闭它们；预检或挂载失败可释放冻结，标记结果不确定则保留冻结。此方法没有 renderer 命令。组合态和版本约束继续有效。HAE-008 的目录打开、入口与模式切换复用同一离开屏障；模式切换特意先处理旧草稿，再创建可能运行本地脚本的新预览。两个方向都在试挂载前后核验文件版本，只读离开无需伪造输入或检查点。
 
 导航、重载、renderer 崩溃和销毁撤销连接，取消未开始结束标记的打开/确认等待，不销毁 Main 当前输入。未返回的另存选择器也可结束等待；迟到路径或异常被消费，不启动后续写入。已经授权并开始的保存或结束标记不因 UI 失效而中断或重试，Main 继续核验其结果。
 

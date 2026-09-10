@@ -84,6 +84,13 @@ export function IconDock(props: IconProps) {
   </>);
 }
 
+export function IconMode(props: IconProps) {
+  return base(props, <>
+    <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" />
+    <circle cx="8" cy="8" r="1.8" />
+  </>);
+}
+
 export function IconMenu(props: IconProps) {
   return base(props, <>
     <circle cx="3" cy="8" r="0.9" fill="currentColor" stroke="none" />

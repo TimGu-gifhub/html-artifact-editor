@@ -1,3 +1,4 @@
+import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -56,8 +57,8 @@ export async function fixture(outputRoot: string, results: string,
     ...(process.platform === 'win32' ? { saveOriginal: createOriginalSaver(store) } : {}),
   });
   const call = (expression: string): Promise<WorkspaceResult> => ui.webContents.executeJavaScript(expression);
-  const read = async () => { const value = await call('haeWorkspace.read()'); assert.equal(value.ok, true); return value.state!; };
-  const current = () => runtime.workspace.current!;
+  const read = async () => { const value = await call('haeWorkspace.read()'); assert.equal(value.ok, true); return proofreadSnapshot(value.state!); };
+  const current = () => proofreadDocument(runtime.workspace.current!);
   const restore = async (mode: 'file' | 'directory' = 'directory') => call(`haeWorkspace.restore(${JSON.stringify(record.sessionId)},${(await read()).stateRevision},${JSON.stringify(mode)})`);
   const open = async () => call(`haeWorkspace.open(${(await read()).stateRevision})`);
   const edit = (id: string, value: DocumentCommand) => call(`haeWorkspace.edit(${JSON.stringify(id)},${JSON.stringify(value)})`);

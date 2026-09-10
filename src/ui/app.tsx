@@ -10,6 +10,7 @@ import { LiveInputController, useLiveInput } from './live-input.ts';
 import { ensureInputFlushed } from './flush.ts';
 import type { FlushDeps } from './flush.ts';
 import { BusyGuard, entrySwitchBlocker, entrySwitchBlockerText, runEntrySwitch } from './entry-switch.ts';
+import { modeSwitchBlockerText, modeSwitchTarget, runModeSwitch } from './mode-switch.ts';
 import { classifySaveResult } from './save-result.ts';
 import { EditorPanel } from './editor-panel.tsx';
 import { ReviewPanel } from './review-panel.tsx';
@@ -18,7 +19,7 @@ import { BackupsDialog, PdfDialog, RecoveryDialog, ResourcesDialog, SaveDiffDial
 import { Dialog } from './dialog.tsx';
 import type { SaveError } from './dialogs.tsx';
 import { describeCode } from './util.ts';
-import { IconDock, IconFloat, IconFolder, IconMenu, IconOpen, IconPanelHide, IconPanelShow, IconPdf, IconRedo, IconSave, IconUndo } from './icons.tsx';
+import { IconDock, IconFloat, IconFolder, IconMenu, IconMode, IconOpen, IconPanelHide, IconPanelShow, IconPdf, IconRedo, IconSave, IconUndo } from './icons.tsx';
 
 const desktopApi = () => window.haeDesktop ?? null;
 const workspaceApi = () => window.haeWorkspace ?? null;
@@ -143,6 +144,8 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const { state } = props;
   const current = state.current;
   const input = current?.input ?? null;
+  // 脚本只读预览：Main 提供 mode=interactive、input=null、persistence=null。
+  const readonly = current?.mode === 'interactive';
   const panel: PanelMode = state.desktop?.panel ?? 'docked';
   const owner = panel !== 'floating';
   const controlVisible = panel === 'docked';
@@ -245,6 +248,26 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     } finally { setSwitching(false); }
   }), [runBusy, guardFlush, controller, showToast]);
 
+  const [switchingMode, setSwitchingMode] = useState(false);
+  // 模式切换：固定当前文档后先排空实际输入窗口，再用最新修订请求 Main。
+  // Main 拥有草稿的取消/放弃/另存决定；这里不新建任何渲染进程侧的草稿路径。
+  const onSwitchMode = useCallback(() => void runBusy(async () => {
+    setSwitchingMode(true);
+    try {
+      await runModeSwitch({
+        getState: () => workspaceStore.getState(),
+        isComposing: () => controller.isComposing(),
+        flush: () => guardFlush('切换模式'),
+        switchMode: (documentId, stateRevision, mode) => {
+          const api = workspaceApi();
+          if (!api) return Promise.resolve({ ok: false, code: 'MISSING_WORKSPACE_API', state: null, documentId, copy: null, outcome: null });
+          return api.switchMode(documentId, stateRevision, mode);
+        },
+        showToast,
+      });
+    } finally { setSwitchingMode(false); }
+  }), [runBusy, guardFlush, controller, showToast]);
+
   const onOpen = useCallback((directory: boolean) => void runBusy(async () => {
     if (!(await guardFlush('打开'))) return;
     const latest = workspaceStore.getState();
@@ -259,6 +282,10 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     const cur = workspaceStore.getState()?.current;
     const api = workspaceApi();
     if (!cur || !api) return;
+    if (!cur.input) {
+      showToast('脚本只读预览不能撤销或重做；返回静态校稿后可继续编辑。', 'error');
+      return;
+    }
     const result = await api.edit(cur.id, { kind: 'history', value: {
       stateRevision: cur.input.stateRevision, draftRevision: cur.input.draftRevision, direction,
     } });
@@ -270,6 +297,10 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     const cur = workspaceStore.getState()?.current;
     const api = workspaceApi();
     if (!cur || !api) return;
+    if (!cur.input) {
+      showToast('脚本只读预览没有可另存的草稿；返回静态校稿后再操作。', 'error');
+      return;
+    }
     const result = await api.edit(cur.id, { kind: 'save-copy', stateRevision: cur.input.stateRevision });
     const copy = result.copy;
     if (copy?.status === 'created') showToast(`草稿副本已保存：${copy.name}`);
@@ -334,6 +365,10 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     const cur = latest?.current;
     const api = workspaceApi();
     if (!latest || !cur || !api) return;
+    if (!cur.input) {
+      showToast('脚本只读预览不能保存；返回静态校稿后再保存。', 'error');
+      return;
+    }
     const changes = cur.input.changes;
     if (changes.length === 0) {
       showToast('当前没有净修改，无需保存。');
@@ -377,6 +412,10 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     const cur = workspaceStore.getState()?.current;
     const desktop = desktopApi();
     if (!cur || !desktop) return;
+    if (!cur.input) {
+      setPdfError('脚本只读预览不能生成草稿 PDF；返回静态校稿后再生成。');
+      return;
+    }
     const result = await desktop.request({
       kind: 'pdf-create', documentId: cur.id,
       draftRevision: cur.input.draftRevision, candidateHash: cur.input.candidateHash,
@@ -445,6 +484,10 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     const cur = latest?.current;
     const api = workspaceApi();
     if (!latest || !cur || !api) return;
+    if (!cur.input) {
+      setBackups(value => ({ ...value, error: '脚本只读预览下不能恢复备份；返回静态校稿后再恢复。' }));
+      return;
+    }
     setBackups(value => ({ ...value, busy: true, error: null }));
     const result = await api.restoreBackup(cur.id, latest.stateRevision, backup.reference);
     setBackups(value => ({ ...value, busy: false }));
@@ -460,7 +503,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     const cur = workspaceStore.getState();
     const currentDoc = cur?.current;
     const api = workspaceApi();
-    if (!currentDoc?.persistence || !api) return;
+    if (!currentDoc?.persistence || !currentDoc.input || !api) return;
     void api.retryPersistence(currentDoc.id, currentDoc.input.draftRevision);
   }, []);
 
@@ -471,15 +514,21 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const inTextarea = event.target instanceof HTMLTextAreaElement;
       const key = event.key.toLowerCase();
-      if (key === 'o' && !event.shiftKey) { event.preventDefault(); onOpen(false); }
-      else if (key === 's' && event.shiftKey) { event.preventDefault(); onSaveCopy(); }
+      if (key === 'o' && !event.shiftKey) { event.preventDefault(); onOpen(false); return; }
+      // 脚本只读预览：编辑、撤销/重做与保存快捷键明确拒绝，不静默也不冒充成功。
+      if (workspaceStore.getState()?.current?.mode === 'interactive' && ['s', 'z', 'y'].includes(key)) {
+        event.preventDefault();
+        showToast('脚本只读预览不能编辑或保存；可使用工具栏“返回静态校稿”。', 'error');
+        return;
+      }
+      if (key === 's' && event.shiftKey) { event.preventDefault(); onSaveCopy(); }
       else if (key === 's') { event.preventDefault(); onSave(); }
       else if (key === 'z' && !inTextarea) { event.preventDefault(); onHistory(event.shiftKey ? 'redo' : 'undo'); }
       else if (key === 'y' && !inTextarea) { event.preventDefault(); onHistory('redo'); }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [controller, onOpen, onSave, onSaveCopy, onHistory]);
+  }, [controller, onOpen, onSave, onSaveCopy, onHistory, showToast]);
 
   const persistence = current?.persistence ?? null;
   const changes = input?.changes ?? [];
@@ -497,6 +546,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       <header className="toolbar">
         <div className="tb-group tb-doc">
           <span className="doc-name">{current?.name ?? '未打开文档'}</span>
+          {current && <span className={readonly ? 'mode-badge readonly' : 'mode-badge'}>{readonly ? '只读预览' : '静态校稿'}</span>}
           {dirtyDocument && <span className="doc-flag">未保存</span>}
         </div>
         <div className="tb-group collapsible">
@@ -509,24 +559,37 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         </div>
         <div className="tb-group">
           <button type="button" className="btn icon" aria-label={`撤销（${history?.undoCount ?? 0} 条）`}
-            disabled={busy || !history?.canUndo || inputView.composing} onClick={() => onHistory('undo')}>
+            title={readonly ? '脚本只读预览不能撤销；返回静态校稿后可继续编辑。' : undefined}
+            disabled={busy || readonly || !history?.canUndo || inputView.composing} onClick={() => onHistory('undo')}>
             <IconUndo />
           </button>
           <button type="button" className="btn icon" aria-label={`重做（${history?.redoCount ?? 0} 条）`}
-            disabled={busy || !history?.canRedo || inputView.composing} onClick={() => onHistory('redo')}>
+            title={readonly ? '脚本只读预览不能重做；返回静态校稿后可继续编辑。' : undefined}
+            disabled={busy || readonly || !history?.canRedo || inputView.composing} onClick={() => onHistory('redo')}>
             <IconRedo />
           </button>
         </div>
         <div className="tb-spacer" />
         <div className="tb-group">
+          <button type="button" className="btn collapsible" disabled={switchBlocker !== null}
+            title={switchBlocker
+              ? modeSwitchBlockerText(switchBlocker)
+              : readonly
+                ? '停止页面脚本并重新加载为静态校稿；有未保存修改时会先提供取消、放弃或另存草稿的选择。'
+                : '离线运行页面本地脚本查看效果；动态文字不能编辑，也不会写回 HTML。'}
+            onClick={onSwitchMode}>
+            <IconMode />{switchingMode ? '正在切换…' : modeSwitchTarget(current?.mode) === 'interactive' ? '只读预览' : '返回静态校稿'}
+          </button>
           <button type="button" className="btn narrow-only" disabled={!changes.length} onClick={() => setDrawerOpen(true)}>
             变更 <span className={changes.length ? 'count has' : 'count'}>{changes.length}</span>
           </button>
-          <button type="button" className="btn primary" disabled={busy || phaseBusy || !current || !state.canSave}
+          <button type="button" className="btn primary" disabled={busy || phaseBusy || !current || readonly || !state.canSave}
+            title={readonly ? '脚本只读预览不能保存；返回静态校稿后再保存。' : undefined}
             onClick={onSave}>
             <IconSave />{changes.length ? `复核并保存（${reviewedCount}/${changes.length}）` : '保存'}
           </button>
-          <button type="button" className="btn collapsible" disabled={busy || !current || state.desktop?.pdfBusy}
+          <button type="button" className="btn collapsible" disabled={busy || !current || readonly || state.desktop?.pdfBusy}
+            title={readonly ? '脚本只读预览不能生成草稿 PDF；返回静态校稿后再生成。' : undefined}
             onClick={() => { setPdfError(null); setDialog('pdf'); }}>
             <IconPdf />PDF
           </button>
@@ -562,7 +625,15 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
                 {switching ? '正在切换目录内 HTML…' : '切换目录内 HTML…'}
                 {current && <span className="menu-sub">{`${current.project.name} / ${current.project.entry}`}</span>}
               </button>
-              <button type="button" role="menuitem" className="narrow-only" disabled={!current}
+              <button type="button" role="menuitem" disabled={switchBlocker !== null}
+                title={switchBlocker ? modeSwitchBlockerText(switchBlocker) : undefined}
+                onClick={() => { setMenuOpen(false); menuButtonRef.current?.focus(); onSwitchMode(); }}>
+                {switchingMode ? '正在切换模式…' : readonly ? '返回静态校稿' : '切换为脚本只读预览'}
+                <span className="menu-sub">{readonly
+                  ? '停止页面脚本并重新加载为静态校稿；动态文字仍不能写回。'
+                  : '离线运行页面本地脚本查看效果；动态文字不能编辑。有未保存修改时会先提供取消、放弃或另存草稿的选择。'}</span>
+              </button>
+              <button type="button" role="menuitem" className="narrow-only" disabled={!current || readonly}
                 onClick={() => { setMenuOpen(false); setPdfError(null); setDialog('pdf'); }}>PDF 打印预览…</button>
               <button type="button" role="menuitem" disabled={!current || !input?.canSaveCopy}
                 onClick={() => { setMenuOpen(false); onSaveCopy(); }}>另存草稿…</button>
@@ -577,6 +648,18 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         </div>
       </header>
       <div className="banners">
+        {readonly && (
+          <div className="banner readonly-banner" role="status">
+            脚本只读预览：离线运行页面本地脚本，显示源文件效果；动态文字不能编辑，编辑、复核、保存与草稿 PDF 已停用。
+            <span className="conflict-actions">
+              <button type="button" className="btn sm" disabled={switchBlocker !== null}
+                title={switchBlocker ? modeSwitchBlockerText(switchBlocker) : '重新加载页面并停止脚本；返回后可继续校对。'}
+                onClick={onSwitchMode}>
+                {switchingMode ? '正在返回…' : '返回静态校稿'}
+              </button>
+            </span>
+          </div>
+        )}
         {input?.mappingStatus === 'invalidated' && (
           <div className="banner readonly-banner" role="alert">
             页面映射已失效{input.mappingReason ? `（${input.mappingReason}）` : ''}，编辑已暂停；请重新打开文档。
@@ -636,21 +719,22 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       </div>
       {docked && (
         <aside className="editor-panel" aria-label="校稿栏">
-          <EditorPanel hasDocument={!!current} input={input} controller={controller} onRetryBegin={onRetryBegin} />
+          <EditorPanel hasDocument={!!current} mode={current?.mode ?? 'proofread'} input={input} controller={controller} onRetryBegin={onRetryBegin} />
         </aside>
       )}
       {docked && (
         <section className="changes-panel" aria-label="复核列表">
-          <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} />
+          <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} readonly={readonly} />
         </section>
       )}
       <footer className="statusbar">
         <span className="st-item" role="status">
           {!current && '未打开文档'}
-          {current && inputView.composing && '组词中'}
-          {current && !inputView.composing && (inputView.busy || inputView.applying) && '正在更新预览…'}
-          {current && !inputView.composing && !inputView.busy && !inputView.applying && inputView.dirty && '有待预览的输入'}
-          {current && !inputView.composing && !inputView.busy && !inputView.applying && !inputView.dirty
+          {current && readonly && '脚本只读预览 · 不能编辑'}
+          {current && !readonly && inputView.composing && '组词中'}
+          {current && !readonly && !inputView.composing && (inputView.busy || inputView.applying) && '正在更新预览…'}
+          {current && !readonly && !inputView.composing && !inputView.busy && !inputView.applying && inputView.dirty && '有待预览的输入'}
+          {current && !readonly && !inputView.composing && !inputView.busy && !inputView.applying && !inputView.dirty
             && (changes.length ? `${changes.length} 条未保存修改${allReviewed ? '，已全部复核' : ''}` : '无未保存修改')}
         </span>
         {persistence && <span className={persistence.status === 'failed' || persistence.status === 'unknown' ? 'st-item warn' : 'st-item'}>
@@ -670,11 +754,11 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           PDF：{pdf.name}{!pdfBelongsToCurrent ? '（先前快照）' : pdfStale ? '（可能已过期）' : ''}
         </button>}
         <span className="st-spacer" />
-        <span className="st-hint">实时预览不写入 HTML 文件</span>
+        <span className="st-hint">{readonly ? '只读预览不写入 HTML 文件' : '实时预览不写入 HTML 文件'}</span>
       </footer>
       {drawerOpen && narrow && (
         <Dialog title="复核变更" drawer onClose={() => setDrawerOpen(false)}>
-          <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} />
+          <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} readonly={readonly} />
         </Dialog>
       )}
       {dialog === 'diff' && (diff ? (
@@ -686,7 +770,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         <SaveDiffFallback error={saveError} onClose={() => { setDialog(null); setSaveError(null); }} />
       ))}
       {dialog === 'pdf' && (
-        <PdfDialog pdf={pdf} pdfBusy={state.desktop?.pdfBusy ?? false} stale={pdfStale}
+        <PdfDialog pdf={pdf} pdfBusy={state.desktop?.pdfBusy ?? false} stale={pdfStale} readonly={readonly}
           belongsToCurrent={pdfBelongsToCurrent}
           options={pdfOptions} error={pdfError}
           onOptions={setPdfOptions} onCreate={onPdfCreate}
@@ -702,7 +786,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       )}
       {dialog === 'backups' && (
         <BackupsDialog catalog={backups.catalog} loading={backups.loading}
-          busy={backups.busy} error={backups.error}
+          busy={backups.busy} readonly={readonly} error={backups.error}
           onRestore={onRestoreBackup} onClose={() => setDialog(null)} />
       )}
       {dialog === 'resources' && current && (
@@ -727,6 +811,7 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const { state } = props;
   const current = state.current;
   const input = current?.input ?? null;
+  const readonly = current?.mode === 'interactive';
   const panel = state.desktop?.panel ?? 'floating';
   const owner = panel === 'floating';
   const controller = useController(state, owner);
@@ -775,6 +860,7 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
       <header className="toolbar">
         <div className="tb-group tb-doc">
           <span className="doc-name">{current?.name ?? '校稿'}</span>
+          {current && <span className={readonly ? 'mode-badge readonly' : 'mode-badge'}>{readonly ? '只读预览' : '静态校稿'}</span>}
           {dirtyDocument && <span className="doc-flag">未保存</span>}
         </div>
         <div className="tb-spacer" />
@@ -785,18 +871,19 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         </div>
       </header>
       <div className="editor-panel float">
-        <EditorPanel hasDocument={!!current} input={input} controller={controller}
+        <EditorPanel hasDocument={!!current} mode={current?.mode ?? 'proofread'} input={input} controller={controller}
           onRetryBegin={() => { controller.retry(); setBeginNonce(value => value + 1); }} />
       </div>
       <div className="changes-panel float">
-        <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} />
+        <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} readonly={readonly} />
       </div>
       <footer className="statusbar">
         <span className="st-item" role="status">
-          {inputView.composing && '组词中'}
-          {!inputView.composing && (inputView.busy || inputView.applying) && '正在更新预览…'}
-          {!inputView.composing && !inputView.busy && !inputView.applying && inputView.dirty && '有待预览的输入'}
-          {!inputView.composing && !inputView.busy && !inputView.applying && !inputView.dirty
+          {readonly && '脚本只读预览 · 不能编辑'}
+          {!readonly && inputView.composing && '组词中'}
+          {!readonly && !inputView.composing && (inputView.busy || inputView.applying) && '正在更新预览…'}
+          {!readonly && !inputView.composing && !inputView.busy && !inputView.applying && inputView.dirty && '有待预览的输入'}
+          {!readonly && !inputView.composing && !inputView.busy && !inputView.applying && !inputView.dirty
             && (changes.length ? `${changes.length} 条未保存修改` : '无未保存修改')}
         </span>
         <span className="st-spacer" />

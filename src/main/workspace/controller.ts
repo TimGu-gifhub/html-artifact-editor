@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isLeaveDecision } from '../../contracts/workspace.ts';
 import type { LeaveReview, WorkspaceDepartureReport, WorkspaceOutcome, WorkspacePhase, WorkspaceSaveReport, WorkspaceSnapshot } from '../../contracts/workspace.ts';
 import type { InputSnapshot } from '../../contracts/input.ts';
-import type { DraftStore, OpenDocument, prepareDocument } from './document.ts';
+import type { DraftStore, OpenDocument, ProofreadDocument, prepareDocument } from './document.ts';
 import type { ProjectSource } from '../protocol/project-files.ts';
 import type { OriginalSaver, OriginalSaveResult } from '../storage/original.ts';
 import { isRestoreReference, isTransactionId } from '../../contracts/save-record.ts';
@@ -14,6 +14,8 @@ import { isBackupDecision } from '../../contracts/backup.ts';
 import type { BackupReview, WorkspaceBackupCatalog } from '../../contracts/backup.ts';
 import type { RestoreReference } from '../../contracts/save-record.ts';
 import type { BackupRestorer } from '../storage/backups.ts';
+import type { PreviewMode } from '../../contracts/preview.ts';
+import type { prepareInteractiveDocument } from './interactive-document.ts';
 
 export type WorkspaceDecisions = Readonly<{
   review: (value: LeaveReview) => Promise<unknown>;
@@ -21,12 +23,13 @@ export type WorkspaceDecisions = Readonly<{
   reviewBackup?: (value: BackupReview) => Promise<unknown>;
 }>;
 export type ActivateDocument = (next: OpenDocument | null, previous: OpenDocument | null) => () => void;
-type DepartureProof = Readonly<{ input: InputSnapshot; reason: 'discarded' | 'copied' | null }>;
+type DepartureProof = Readonly<{ input: InputSnapshot | null; reason: 'discarded' | 'copied' | null }>;
 // Private Main coordinator. It has no renderer/path IPC or implicit HTML Save.
 // The synchronous activation port must restore its prior state before throwing.
 // A successful activation returns a rollback for a failed final authority check.
 export function createWorkspace(outputRoot: string, decisions: WorkspaceDecisions, prepare: typeof prepareDocument,
-  activate: ActivateDocument = () => () => {}, saveOriginal?: OriginalSaver, checkpoints?: DraftStore, backups?: BackupRestorer) {
+  activate: ActivateDocument = () => () => {}, saveOriginal?: OriginalSaver, checkpoints?: DraftStore, backups?: BackupRestorer,
+  prepareInteractive?: typeof prepareInteractiveDocument) {
   let current: OpenDocument | null = null;
   let phase: WorkspacePhase = 'idle';
   let revision = 1;
@@ -57,14 +60,14 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     for (const listener of listeners) { try { listener(); } catch { /* State is owned by Main. */ } }
   };
   const snapshot = (): WorkspaceSnapshot => Object.freeze({ stateRevision: revision, phase,
-    current: current ? Object.freeze({ id: current.id, name: current.name, input: current.input.snapshot(), project: current.project(),
+    current: current ? Object.freeze({ id: current.id, name: current.name, mode: current.mode, input: current.input?.snapshot() ?? null, project: current.project(),
       persistence: current.persistence?.snapshot() ?? null }) : null,
     review, backupReview, cleanupPending: activationUncertain || failedCleanup.size > 0 || !!lastDeparture?.cleanupPending, lastSave, lastDeparture,
     canSave: !!saveOriginal && phase === 'idle' && !disposed && !activationUncertain && !failedCleanup.size
-      && !lastSave?.requiresReview && !lastDeparture?.requiresReview && !!current && current.input.snapshot().canSaveCopy
+      && !lastSave?.requiresReview && !lastDeparture?.requiresReview && current?.mode === 'proofread' && current.input.snapshot().canSaveCopy
       && (!current.history || current.history.available)
       && current.mapping.status === 'ready' && current.draft.candidate.patches.length > 0 });
-  const inputReady = (state: InputSnapshot | undefined): void => {
+  const inputReady = (state: InputSnapshot | null | undefined): void => {
     if (!state) return;
     if (state.phase !== 'idle' || !['idle', 'uncertain'].includes(state.draftPhase)) throw new Error('DOCUMENT_BUSY');
     if (state.input?.composing) throw new Error('INPUT_COMPOSING');
@@ -75,7 +78,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     if (expectedRevision !== revision) throw new Error('STALE_WORKSPACE');
     if (activationUncertain || failedCleanup.size) throw new Error('DOCUMENT_CLEANUP_REQUIRED');
     if (lastDeparture?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
-    inputReady(current?.input.snapshot());
+    inputReady(current?.input?.snapshot());
     pending = new AbortController();
     savingOperation = isSave; operationSave = null;
     operationDone = new Promise<WorkspaceSaveReport | null>(done => { finishOperation = done; });
@@ -106,14 +109,15 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     try { await value.close(); failedCleanup.delete(value); }
     catch { failedCleanup.add(value); }
   };
-  const sameInput = (before: InputSnapshot, after: InputSnapshot): boolean =>
-    before.stateRevision === after.stateRevision && before.draftRevision === after.draftRevision
+  const sameInput = (before: InputSnapshot | null, after: InputSnapshot | null): boolean =>
+    before === null || after === null ? before === after : before.stateRevision === after.stateRevision && before.draftRevision === after.draftRevision
     && before.candidateHash === after.candidateHash && before.phase === after.phase && before.draftPhase === after.draftPhase;
-  const permission = async (action: 'open' | 'close', next: OpenDocument | null,
+  const permission = async (action: LeaveReview['action'], next: Pick<OpenDocument, 'name'> | null,
     operation: AbortController): Promise<DepartureProof | null | false> => {
     live(operation);
     const leaving = current;
     if (!leaving) return null;
+    if (leaving.mode === 'interactive') return { input: null, reason: null };
     const before = leaving.input.snapshot(); inputReady(before);
     if (!before.hasUnappliedInput && before.changes.length === 0) return { input: before, reason: null };
     review = Object.freeze({ reviewId: randomUUID(), action, currentName: leaving.name, nextName: next?.name ?? null,
@@ -177,19 +181,20 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     };
   };
   const install = (next: OpenDocument | null, check: () => void): OpenDocument | null => stageInstall(next, check).publish();
-  const depart = async (next: OpenDocument | null, proof: DepartureProof | null, operation: AbortController): Promise<OpenDocument | null> => {
+  const depart = async (next: OpenDocument | null, proof: DepartureProof | null, operation: AbortController,
+    verifyActivation: (() => Promise<void>) | null = next?.verifyRecovery ?? null): Promise<OpenDocument | null> => {
     const leaving = current;
     const checkInput = (): void => {
       live(operation);
-      if (current ? !proof || !sameInput(proof.input, current.input.snapshot()) : proof !== null) throw new Error('STALE_DOCUMENT_REVIEW');
-      inputReady(current?.input.snapshot());
+      if (current ? !proof || !sameInput(proof.input, current.input?.snapshot() ?? null) : proof !== null) throw new Error('STALE_DOCUMENT_REVIEW');
+      inputReady(current?.input?.snapshot());
     };
     checkInput();
-    if (!leaving?.persistence || !checkpoints || !proof) {
-      if (!next?.verifyRecovery) return install(next, checkInput);
-      await next.verifyRecovery(); checkInput();
+    if (leaving?.mode !== 'proofread' || !leaving.persistence || !checkpoints || !proof?.input) {
+      if (!verifyActivation) return install(next, checkInput);
+      await verifyActivation(); checkInput();
       const staged = stageInstall(next, checkInput);
-      try { await next.verifyRecovery(); checkInput(); return staged.publish(); }
+      try { await verifyActivation(); checkInput(); return staged.publish(); }
       catch (error) { staged.rollback(); throw error; }
     }
     const release = leaving.input.holdDeparture(proof.input.stateRevision);
@@ -212,7 +217,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       }
       // Stage the native view first. Failed attachment must never mark a live
       // draft as discarded. Keep its input and current identity until settlement.
-      await next?.verifyRecovery?.(); check();
+      await verifyActivation?.(); check();
       staged = stageInstall(next, () => check());
       if (proof.reason !== null) {
         check(); started = true;
@@ -230,7 +235,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
         cleanupPending: durable.cleanupPending, requiresReview: durable.cleanupPending });
       // Once an authorized marker starts, renderer loss cannot revoke that disk
       // decision. Main finishes a verified result, as with an original-file Save.
-      await next?.verifyRecovery?.();
+      await verifyActivation?.();
       check(started); const previous = staged.publish(); published = true; return previous;
     } catch (error) {
       try { staged?.rollback(); } catch { error = new Error('DOCUMENT_ACTIVATION_UNKNOWN'); }
@@ -289,6 +294,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (disposed || phase !== 'idle') throw new Error('WORKSPACE_BUSY');
       if (lastDeparture?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
       if (!current || current.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (current.mode !== 'proofread') throw new Error('READ_ONLY_MODE');
       if (!current.persistence) throw new Error('DRAFT_PERSISTENCE_UNAVAILABLE');
       inputReady(current.input.snapshot());
       current.persistence.retry(draftRevision);
@@ -296,6 +302,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     async readDiff(documentId: string, draftRevision: number, candidateHash: string): Promise<WorkspaceDiff> {
       const value = current;
       if (disposed || !value || value.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (value.mode !== 'proofread') throw new Error('READ_ONLY_MODE');
       if (!isDiffReview({ draftRevision, candidateHash })) throw new Error('STALE_SOURCE_DIFF');
       const diff = await value.sourceDiff.read(draftRevision, candidateHash);
       if (disposed || current !== value) throw new Error('STALE_DOCUMENT');
@@ -318,6 +325,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     async restoreBackup(expectedRevision: number, documentId: string, reference: RestoreReference): Promise<Readonly<{ status: WorkspaceSaveReport['status']; state: WorkspaceSnapshot }>> {
       const leaving = current; const reviewBackup = decisions.reviewBackup;
       if (!leaving || leaving.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (leaving.mode !== 'proofread') throw new Error('READ_ONLY_MODE');
       if (!backups || !reviewBackup) throw new Error('BACKUP_RESTORE_UNAVAILABLE');
       if (!isRestoreReference(reference)) throw new Error('BACKUP_RECORD_INVALID');
       if (lastSave?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
@@ -327,7 +335,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       if (leaving.mapping.status !== 'ready' || (leaving.history && !leaving.history.available)) throw new Error('DRAFT_UNAVAILABLE');
       const selectedReference = Object.freeze({ ...reference });
       const operation = begin(expectedRevision, 'reviewing', true);
-      let next: OpenDocument | null = null; let release: (() => void) | undefined; let keepFrozen = false;
+      let next: ProofreadDocument | null = null; let release: (() => void) | undefined; let keepFrozen = false;
       const report = (status: WorkspaceSaveReport['status'], code: string | null, cleanupPending = false, requiresReview = false): void => {
         lastSave = Object.freeze({ documentId: current?.id ?? documentId, operation: 'backup-restore', status, code, cleanupPending, requiresReview }); operationSave = lastSave; notify();
       };
@@ -393,6 +401,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
     async save(expectedRevision: number, documentId: string, reviewed?: DiffReview): Promise<Readonly<{ status: WorkspaceSaveReport['status']; state: WorkspaceSnapshot }>> {
       const leaving = current;
       if (!leaving || leaving.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (leaving.mode !== 'proofread') throw new Error('READ_ONLY_MODE');
       if (reviewed !== undefined && (!isDiffReview(reviewed) || reviewed.draftRevision !== leaving.draft.revision
         || reviewed.candidateHash !== leaving.draft.candidate.resultHash)) throw new Error('STALE_SOURCE_DIFF');
       if (!saveOriginal) throw new Error('SAVE_PLATFORM_UNSUPPORTED');
@@ -400,7 +409,7 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       const before = leaving.input.snapshot();
       if (before.hasUnappliedInput) throw new Error(before.input?.composing ? 'INPUT_COMPOSING' : 'UNAPPLIED_INPUT');
       const operation = begin(expectedRevision, 'saving', true);
-      let next: OpenDocument | null = null;
+      let next: ProofreadDocument | null = null;
       const report = (status: WorkspaceSaveReport['status'], code: string | null, cleanupPending = false, requiresReview = false): void => {
         lastSave = Object.freeze({ documentId: current?.id ?? documentId, status, code, cleanupPending, requiresReview }); operationSave = lastSave; notify();
       };
@@ -447,6 +456,46 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
           }
         })();
       } finally { await retire(next); rebuilding = null; finish(); }
+      return { status, state: snapshot() };
+    },
+    async switchMode(expectedRevision: number, documentId: string, mode: PreviewMode): Promise<WorkspaceOutcome> {
+      const leaving = current;
+      if (!leaving || leaving.id !== documentId) throw new Error('STALE_DOCUMENT');
+      if (mode !== 'proofread' && mode !== 'interactive') throw new Error('INVALID_PREVIEW_IDENTITY');
+      if (lastSave?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
+      if (mode === 'interactive' && !prepareInteractive) throw new Error('PREVIEW_MODE_UNAVAILABLE');
+      const operation = begin(expectedRevision, 'reviewing');
+      lastDeparture = null;
+      let candidate: OpenDocument | null = null;
+      let status: WorkspaceOutcome['status'] = 'cancelled';
+      try {
+        if (mode !== leaving.mode) {
+          // Resolve the old draft before any local script is run. Native review
+          // and exclusive-copy semantics remain the same as opening another file.
+          const proof = await permission('mode', { name: leaving.name }, operation);
+          if (proof !== false) {
+            await leaving.saveSource.verify(); live(operation);
+            phase = 'opening'; notify();
+            if (mode === 'interactive') {
+              if (leaving.mode !== 'proofread') throw new Error('STALE_DOCUMENT');
+              const history = proof?.reason === null ? leaving.history?.capture() : undefined;
+              candidate = await prepareInteractive!(outputRoot, leaving.preview.grant, ++generation, operation.signal, history);
+            } else {
+              if (leaving.mode !== 'interactive') throw new Error('STALE_DOCUMENT');
+              candidate = await prepare(outputRoot, leaving.preview.grant, ++generation, operation.signal,
+                checkpoints, undefined, leaving.historyContinuation);
+            }
+            live(operation);
+            const prepared = candidate;
+            const verifyActivation = async (): Promise<void> => {
+              await leaving.saveSource.verify(); await prepared.saveSource.verify();
+              if (prepared.saveSource.baseHash !== leaving.saveSource.baseHash) throw new Error('FILE_CHANGED');
+            };
+            const previous = await depart(prepared, proof, operation, verifyActivation);
+            candidate = null; await retire(previous); status = 'opened';
+          }
+        }
+      } finally { await retire(candidate); finish(); }
       return { status, state: snapshot() };
     },
     open: openDocument,

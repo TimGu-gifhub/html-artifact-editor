@@ -3,10 +3,11 @@ import type { ProjectSummary } from './resources.ts';
 import type { DraftPersistenceState } from './persistence.ts';
 import type { BackupReview } from './backup.ts';
 import type { DesktopState } from './desktop.ts';
+import type { PreviewMode } from './preview.ts';
 
 export type WorkspacePhase = 'idle' | 'choosing' | 'opening' | 'reviewing' | 'saving' | 'committing' | 'disposed';
 export type LeaveReview = Readonly<{
-  reviewId: string; action: 'open' | 'close'; currentName: string; nextName: string | null;
+  reviewId: string; action: 'open' | 'close' | 'mode'; currentName: string; nextName: string | null;
   hasUnappliedInput: boolean; changeCount: number; inputStateRevision: number;
 }>;
 export type LeaveDecision = Readonly<{ reviewId: string; decision: 'cancel' | 'discard' | 'save-copy' }>;
@@ -21,7 +22,7 @@ export type WorkspaceDepartureReport = Readonly<{
 }>;
 export type WorkspaceSnapshot = Readonly<{
   stateRevision: number; phase: WorkspacePhase;
-  current: Readonly<{ id: string; name: string; input: InputSnapshot; project: ProjectSummary; persistence: DraftPersistenceState | null }> | null;
+  current: Readonly<{ id: string; name: string; mode: PreviewMode; input: InputSnapshot | null; project: ProjectSummary; persistence: DraftPersistenceState | null }> | null;
   review: LeaveReview | null; backupReview: BackupReview | null; cleanupPending: boolean; lastSave: WorkspaceSaveReport | null;
   lastDeparture: WorkspaceDepartureReport | null; canSave: boolean;
   desktop?: DesktopState;

@@ -1,3 +1,4 @@
+import { proofreadSnapshot } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -172,8 +173,8 @@ async function run(): Promise<void> {
     f.control.host = step => { if (step === 'attached' && !changed) { changed = true; writeFileSync(f.entry, 'external before retirement settles'); } };
     const result = await f.restore(); assert.equal(result.code, 'DRAFT_RECOVERY_CONFLICT'); assert.equal(f.current(), old);
     assert.equal(f.runtime.host.current, old.preview.view); assert.equal(old.input.snapshot().phase, 'leaving');
-    assert.equal(old.draft.candidate.resultHash, oldHash); assert.equal(result.state!.lastDeparture!.status, 'retired');
-    assert.equal(result.state!.lastDeparture!.code, 'DRAFT_RECOVERY_CONFLICT'); assert.equal(result.state!.lastDeparture!.requiresReview, true);
+    assert.equal(old.draft.candidate.resultHash, oldHash); assert.equal(proofreadSnapshot(result.state!).lastDeparture!.status, 'retired');
+    assert.equal(proofreadSnapshot(result.state!).lastDeparture!.code, 'DRAFT_RECOVERY_CONFLICT'); assert.equal(proofreadSnapshot(result.state!).lastDeparture!.requiresReview, true);
     assert.equal((await f.open()).code, 'DOCUMENT_RECOVERY_REQUIRED'); assert.equal(f.checkpoints.isSessionActive(f.record.sessionId), false);
     assert.equal(await readFile(f.entry, 'utf8'), 'external before retirement settles'); assert.deepEqual(await readFile(other), original);
     pass('if recovery verification fails after the old retirement is confirmed, Main rolls back and retains that frozen old draft with the accurate retired status and recovery-conflict evidence');

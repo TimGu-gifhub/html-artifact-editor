@@ -1,3 +1,4 @@
+import { proofreadSnapshot } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
@@ -43,9 +44,9 @@ export async function checkBackupRestore({ use, until, barrier, pass, original, 
     const result = await restore(f, reference);
     assert.ok(result.ok, result.code ?? 'restore failed'); assert.equal(result.outcome, 'backup-restored'); assert.equal(result.documentId, before.id);
     assert.notEqual(f.current().id, before.id); assert.equal(f.runtime.host.current, f.current().preview.view);
-    assert.equal(result.state!.lastSave!.operation, 'backup-restore'); assert.equal(result.state!.lastSave!.requiresReview, false);
-    assert.equal(result.state!.backupReview, null); assert.equal(result.state!.current!.input.changes.length, 0);
-    assert.equal(result.state!.current!.input.history!.undoCount, 0); assert.equal(result.state!.current!.input.history!.redoCount, 0);
+    assert.equal(proofreadSnapshot(result.state!).lastSave!.operation, 'backup-restore'); assert.equal(proofreadSnapshot(result.state!).lastSave!.requiresReview, false);
+    assert.equal(proofreadSnapshot(result.state!).backupReview, null); assert.equal(proofreadSnapshot(result.state!).current!.input.changes.length, 0);
+    assert.equal(proofreadSnapshot(result.state!).current!.input.history!.undoCount, 0); assert.equal(proofreadSnapshot(result.state!).current!.input.history!.redoCount, 0);
     assert.deepEqual(Buffer.from(f.current().saveSource.bytes), original); assert.deepEqual(await readFile(f.entry), original); await resources(f);
     assert.equal(await f.current().preview.contents.executeJavaScript('document.querySelector("h1").textContent'), 'A & 😀');
     const records = (await f.store.scan()).records; assert.equal(records.length, 2);
@@ -126,7 +127,7 @@ export async function checkBackupRestore({ use, until, barrier, pass, original, 
     f.control.reviewBackup = async value => { waiting = true; await stop.wait; return { reviewId: value.reviewId, decision: 'restore' }; };
     void restore(f, reference).catch(() => null); await until(() => waiting, 'backup confirmation');
     f.ui.webContents.forcefullyCrashRenderer(); await until(() => !f.runtime.connected, 'backup review renderer lost');
-    await until(() => f.runtime.workspace.snapshot().phase === 'idle', 'revoked backup review settled');
+    await until(() => proofreadSnapshot(f.runtime.workspace.snapshot()).phase === 'idle', 'revoked backup review settled');
     stop.release(); await f.runtime.reloadUI(); assert.equal(f.current(), before);
     assert.equal(before.input.snapshot().phase, 'idle'); assert.equal((await f.store.scan()).records.length, 1);
     assert.deepEqual(await readFile(f.entry), expected); await resources(f);
@@ -169,8 +170,8 @@ export async function checkBackupRestore({ use, until, barrier, pass, original, 
     try {
       void restore(f, reference).catch(() => null); await until(() => waiting, `backup ${stage}`);
       f.ui.webContents.forcefullyCrashRenderer(); await until(() => !f.runtime.connected, 'backup renderer revoked'); stop.release();
-      await until(() => f.runtime.workspace.snapshot().phase === 'idle', 'backup Main reconciliation');
-      assert.equal(f.runtime.workspace.snapshot().lastSave!.status, stage === 'prepared-synced' ? 'cancelled' : 'backup-restored');
+      await until(() => proofreadSnapshot(f.runtime.workspace.snapshot()).phase === 'idle', 'backup Main reconciliation');
+      assert.equal(proofreadSnapshot(f.runtime.workspace.snapshot()).lastSave!.status, stage === 'prepared-synced' ? 'cancelled' : 'backup-restored');
       assert.deepEqual(await readFile(f.entry), stage === 'prepared-synced' ? expected : original);
       assert.equal((await f.store.scan()).locked, false); await f.runtime.reloadUI();
       if (stage === 'prepared-synced') { assert.equal(f.current(), before); assert.equal(before.input.snapshot().phase, 'idle'); }
@@ -183,9 +184,9 @@ export async function checkBackupRestore({ use, until, barrier, pass, original, 
   await use(async f => {
     const reference = await seed(f); approve(f); const before = f.current();
     f.control.step = async step => { if (step === 'native-replaced') throw new Error('BACKUP_TEST_UNKNOWN'); };
-    const result = await restore(f, reference); assert.equal(result.state!.lastSave!.status, 'unknown'); assert.equal(result.ok, false);
+    const result = await restore(f, reference); assert.equal(proofreadSnapshot(result.state!).lastSave!.status, 'unknown'); assert.equal(result.ok, false);
     assert.equal(f.current(), before); assert.equal(f.runtime.host.current, before.preview.view); assert.equal(before.input.snapshot().phase, 'leaving');
-    assert.equal(result.state!.lastSave!.requiresReview, true); assert.equal((await f.store.scan()).locked, true);
+    assert.equal(proofreadSnapshot(result.state!).lastSave!.requiresReview, true); assert.equal((await f.store.scan()).locked, true);
     assert.deepEqual(await readFile(f.entry), original); assert.deepEqual(Buffer.from(before.saveSource.bytes), expected);
     assert.equal((await restore(f, reference)).code, 'DOCUMENT_RECOVERY_REQUIRED'); assert.equal((await f.save()).code, 'DOCUMENT_RECOVERY_REQUIRED');
     await resources(f);
@@ -209,8 +210,8 @@ export async function checkBackupRestore({ use, until, barrier, pass, original, 
     const reference = await seed(f); approve(f); const before = f.current();
     f.control.step = async step => { if (step === 'release-lock') throw new Error('BACKUP_CLEANUP_TEST'); };
     const result = await restore(f, reference); assert.equal(result.ok, true); assert.equal(result.outcome, 'backup-restored');
-    assert.notEqual(f.current().id, before.id); assert.equal(result.state!.lastSave!.cleanupPending, true);
-    assert.equal(result.state!.lastSave!.code, 'SAVE_CLEANUP_PENDING'); assert.equal(result.state!.lastSave!.requiresReview, true);
+    assert.notEqual(f.current().id, before.id); assert.equal(proofreadSnapshot(result.state!).lastSave!.cleanupPending, true);
+    assert.equal(proofreadSnapshot(result.state!).lastSave!.code, 'SAVE_CLEANUP_PENDING'); assert.equal(proofreadSnapshot(result.state!).lastSave!.requiresReview, true);
     assert.equal((await restore(f, reference)).code, 'DOCUMENT_RECOVERY_REQUIRED'); assert.equal((await f.store.scan()).locked, true);
     assert.deepEqual(await readFile(f.entry), original); await resources(f);
     pass('a verified backup restore with failed private-lock cleanup reports success with a separate cleanup warning and blocks another replacement');

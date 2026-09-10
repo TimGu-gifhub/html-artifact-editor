@@ -8,6 +8,8 @@ type ReviewPanelProps = Readonly<{
   /** Effective set to display (local intent while a request is pending). */
   reviewed: readonly string[];
   pending: boolean;
+  /** 脚本只读预览：没有变更可复核，展示真实原因而不是“没有修改”。 */
+  readonly?: boolean;
 }>;
 
 /** 复核列表：逐条勾选当前净变更，全选只作用于当前全部条目。 */
@@ -37,8 +39,13 @@ export function ReviewPanel(props: ReviewPanelProps) {
       </div>
       <div className="changes-list">
         {props.changes.length === 0 && <div className="changes-empty">
-          <p>当前没有未保存的修改。</p>
-          <p>保存前需要在此勾选全部变更；再次修改某条会自动取消其勾选。</p>
+          {props.readonly ? <>
+            <p>脚本只读预览不跟踪文字修改。</p>
+            <p>返回静态校稿后，修改会在此列出；全部勾选复核后才能保存。</p>
+          </> : <>
+            <p>当前没有未保存的修改。</p>
+            <p>保存前需要在此勾选全部变更；再次修改某条会自动取消其勾选。</p>
+          </>}
         </div>}
         {props.changes.map(change => (
           <div className="change-item" key={change.nodeId}>
@@ -57,7 +64,9 @@ export function ReviewPanel(props: ReviewPanelProps) {
           </div>
         ))}
       </div>
-      <div className="changes-foot">勾选表示你已核对这条“原文 → 新文”。全部勾选后才能保存。</div>
+      <div className="changes-foot">{props.readonly
+        ? '只读预览下复核与保存已停用；返回静态校稿后恢复。'
+        : '勾选表示你已核对这条“原文 → 新文”。全部勾选后才能保存。'}</div>
     </div>
   );
 }

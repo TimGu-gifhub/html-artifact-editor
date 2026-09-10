@@ -16,6 +16,7 @@ import { createSourceDiffReader } from '../draft/source-diff.ts';
 import { assertHistoryWorkerAvailable, createHistoryController } from '../draft/history.ts';
 import type { HistoryController } from '../draft/history.ts';
 import type { HistoryCheckpoint } from '../../core/history/timeline.ts';
+import type { InteractiveDocument } from './interactive-document.ts';
 
 export type DraftStore = Awaited<ReturnType<typeof createDraftCheckpointStore>>;
 
@@ -76,7 +77,9 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
       candidate: draft.candidate, revision: recovery!.draftRevision, checkpointId: recovery!.checkpointId!,
       ...(history ? { history: history.capture() } : {}),
     } : undefined) : null;
-    if (savedHistory || recoveryPlan?.kind === 'saved') persistence?.enqueue(draft.candidate, draft.revision, history!.capture());
+    // A mode roundtrip may retain untouched revision 1. It has no durable edit
+    // sequence yet; enqueueing it would halt the queue's strict revision guard.
+    if ((savedHistory && draft.revision > 1) || recoveryPlan?.kind === 'saved') persistence?.enqueue(draft.candidate, draft.revision, history!.capture());
     if (recoveryPlan?.kind === 'saved') {
       const durable = await persistence!.settle();
       if (durable.status !== 'persisted' || durable.cleanupPending || durable.persisted?.draftRevision !== draft.revision
@@ -117,7 +120,7 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
       return () => { stopInput(); stopResources(); stopPersistence?.(); };
     };
     signal.throwIfAborted(); signal.removeEventListener('abort', abortPreparation);
-    return Object.freeze({ id: preview.identity.sessionId, name: basename(entry), entry, project, onState,
+    return Object.freeze({ id: preview.identity.sessionId, mode: 'proofread' as const, name: basename(entry), entry, project, onState,
       preview, mapping, draft, input, writer, saveSource, persistence, sourceDiff, history, checkpointSessionId, verifyRecovery, close });
   } catch (error) {
     signal.removeEventListener('abort', abortPreparation); lifetime.abort();
@@ -130,4 +133,5 @@ export async function prepareDocument(outputRoot: string, source: ProjectSource,
     throw error;
   }
 }
-export type OpenDocument = Awaited<ReturnType<typeof prepareDocument>>;
+export type ProofreadDocument = Awaited<ReturnType<typeof prepareDocument>>;
+export type OpenDocument = ProofreadDocument | InteractiveDocument;

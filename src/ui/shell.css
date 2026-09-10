@@ -142,6 +142,14 @@ body { overflow: hidden; }
   background: var(--warn-bg); border: 1px solid var(--warn-border);
   border-radius: 9px; padding: 1px 8px; white-space: nowrap;
 }
+.mode-badge {
+  font-size: 11px; color: var(--text-2);
+  background: var(--surface-3); border: 1px solid var(--border);
+  border-radius: 9px; padding: 1px 8px; white-space: nowrap;
+}
+.mode-badge.readonly {
+  color: var(--warn); background: var(--warn-bg); border-color: var(--warn-border);
+}
 .ic { width: 15px; height: 15px; display: block; }
 
 .btn {

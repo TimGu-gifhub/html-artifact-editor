@@ -1,3 +1,4 @@
+import { proofreadSnapshot } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -31,7 +32,7 @@ void app.whenReady().then(async () => {
   }, (window, runtime) => { quit = bindWorkspaceQuit(window, runtime, code => errors.push(code)); });
   const report = (exit: 'native' | 'harness-after-block'): void => {
     assert.deepEqual(readFileSync(entry), expected); assert.deepEqual(readFileSync(join(root, 'keep.css')), css);
-    const state = f.runtime.workspace.snapshot();
+    const state = proofreadSnapshot(f.runtime.workspace.snapshot());
     writeFileSync(reportPath, JSON.stringify({ status: 'passed', mode, exit, flags, errors, reviews, willQuit,
       destroyed: f.window.isDestroyed(), ready: quit.ready, departure: state.lastDeparture?.status ?? null,
       persistence: state.current?.persistence?.status ?? null, bytesHash: digest(readFileSync(entry)) }, null, 2));
@@ -89,7 +90,7 @@ void app.whenReady().then(async () => {
     }
     if (mode === 'save-unknown') {
       expected = Buffer.from(original.toString().replace('2025 年度报告 &amp; 😀', '等待已有保存完成 🧪')); hold.release();
-      assert.equal(await request, 'blocked'); assert.equal((await saving).state!.lastSave!.status, 'unknown');
+      assert.equal(await request, 'blocked'); assert.equal(proofreadSnapshot((await saving).state!).lastSave!.status, 'unknown');
       assert.equal(f.window.isDestroyed(), false); assert.equal(await quit.requestQuit(), 'blocked'); assert.equal(preparations, 1);
       flags.push('unknown-native-save-retains-window-and-journal-without-retry'); await blocked(); return;
     }
@@ -128,7 +129,7 @@ void app.whenReady().then(async () => {
     step = async (kind, value) => { if (kind === 'checkpoint' && value === 'retirement-created') { attempts++; throw new Error('self-made retirement failure'); } };
     decide = async value => ({ reviewId: value.reviewId, decision: 'discard' }); app.quit();
     assert.equal(await quit.requestQuit(), 'blocked'); assert.equal(attempts, 1); assert.equal(f.window.isDestroyed(), false);
-    assert.equal(f.runtime.workspace.snapshot().lastDeparture!.requiresReview, true);
+    assert.equal(proofreadSnapshot(f.runtime.workspace.snapshot()).lastDeparture!.requiresReview, true);
     assert.equal(await quit.requestQuit(), 'blocked'); assert.equal(attempts, 1);
     flags.push('failed-retirement-keeps-process-window-and-evidence'); await blocked(); return;
   }

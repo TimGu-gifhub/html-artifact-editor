@@ -69,8 +69,8 @@ export async function createPersistentWorkspaceSession(window: BrowserWindow, ou
         await active.dispose();
         const state = active.workspace.snapshot();
         if (state.cleanupPending || state.lastSave?.requiresReview || state.lastDeparture?.requiresReview
-          || state.current?.persistence?.cleanupPending || state.current?.input.draftPhase === 'uncertain'
-          || state.current?.input.lastCopy?.status === 'unknown') throw new Error('EDITOR_RUNTIME_CLEANUP_REQUIRED');
+          || state.current?.persistence?.cleanupPending || state.current?.input?.draftPhase === 'uncertain'
+          || state.current?.input?.lastCopy?.status === 'unknown') throw new Error('EDITOR_RUNTIME_CLEANUP_REQUIRED');
         // Main maintenance or a document whose cleanup failed may still own the
         // store even after the window disappeared. Never release around it.
         const release = storageOwnership.claimMaintenance();

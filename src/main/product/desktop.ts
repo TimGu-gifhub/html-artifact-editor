@@ -40,7 +40,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
       clearTimeout(timeout); contents.removeListener('destroyed', lost); contents.removeListener('render-process-gone', lost);
       pendingFlush = null;
       const accepted = ready && !disposed && owner() === contents && cleanInput();
-      if (!accepted) error = runtime().workspace.current?.input.snapshot().input?.composing ? 'INPUT_COMPOSING' : 'INPUT_FLUSH_REQUIRED';
+      if (!accepted) error = runtime().workspace.current?.input?.snapshot().input?.composing ? 'INPUT_COMPOSING' : 'INPUT_FLUSH_REQUIRED';
       else if (error === 'INPUT_COMPOSING' || error === 'INPUT_FLUSH_REQUIRED') error = null;
       notify(); resolveFlush(accepted);
     };
@@ -97,7 +97,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
         const current = runtime().workspace.snapshot().current;
         const priorReview = [...reviewed.keys()].join(',');
         if (documentId !== (current?.id ?? null)) { documentId = current?.id ?? null; reviewed.clear(); }
-        const changes = current?.input.changes ?? [];
+        const changes = current?.input?.changes ?? [];
         for (const [id, proof] of reviewed) {
           const change = changes.find(value => value.nodeId === id);
           if (!change || change.oldText !== proof.oldText || change.newText !== proof.newText) reviewed.delete(id);
@@ -105,7 +105,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
         // Workspace listeners can have already published their snapshot. Send
         // a desktop revision after clearing a changed item's review marker.
         if (priorReview !== [...reviewed.keys()].join(',')) notify();
-        if (!window.isDestroyed()) window.setTitle(`${changes.length || current?.input.hasUnappliedInput ? '* ' : ''}${current?.name ?? 'HTML Artifact Editor'} · HTML Artifact Editor`);
+        if (!window.isDestroyed()) window.setTitle(`${changes.length || current?.input?.hasUnappliedInput ? '* ' : ''}${current?.name ?? 'HTML Artifact Editor'} · HTML Artifact Editor`);
       });
     },
     extension(contents: WebContents): WorkspaceBridgeExtension {
@@ -120,7 +120,8 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
           if (command.kind === 'edit' && ['begin', 'change', 'apply', 'resolve'].includes(command.value.kind) && owner() !== contents) throw new Error('EDITOR_NOT_OWNER');
           if (command.kind === 'save') {
             const state = runtime().workspace.snapshot().current;
-            if (!state || state.id !== command.documentId || !command.review || state.input.changes.some(change => {
+            if (state?.mode === 'interactive') throw new Error('READ_ONLY_MODE');
+            if (!state?.input || state.id !== command.documentId || !command.review || state.input.changes.some(change => {
               const proof = reviewed.get(change.nodeId); return !proof || proof.oldText !== change.oldText || proof.newText !== change.newText;
             })) throw new Error('REVIEW_REQUIRED');
           }
@@ -140,9 +141,11 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
             case 'flush-input': if (!await flush('action')) throw new Error('INPUT_FLUSH_REQUIRED'); break;
             case 'review': {
               const current = runtime().workspace.snapshot().current;
-              if (!current || current.id !== command.documentId || current.input.draftRevision !== command.draftRevision
+              if (current?.mode === 'interactive') throw new Error('READ_ONLY_MODE');
+              if (!current?.input || current.id !== command.documentId || current.input.draftRevision !== command.draftRevision
                 || current.input.candidateHash !== command.candidateHash) throw new Error('STALE_SOURCE_DIFF');
-              const selected = command.nodeIds.map(id => current.input.changes.find(change => change.nodeId === id));
+              const input = current.input;
+              const selected = command.nodeIds.map(id => input.changes.find(change => change.nodeId === id));
               if (selected.some(value => !value)) throw new Error('STALE_SOURCE_DIFF');
               reviewed.clear(); for (const change of selected) reviewed.set(change!.nodeId, { oldText: change!.oldText, newText: change!.newText });
               error = null; notify(); break;

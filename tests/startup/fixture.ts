@@ -1,3 +1,4 @@
+import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -53,8 +54,8 @@ export async function fixture(outputRoot: string, root: string, entry: string, o
     setup?.(window, runtime);
     await window.loadURL(EDITOR_URL);
     const call = (expression: string): Promise<WorkspaceResult> => window.webContents.executeJavaScript(expression);
-    const read = async () => { const r = await call('haeWorkspace.read()'); assert.ok(r.ok, r.code ?? 'read failed'); return r.state!; };
-    const current = () => runtime.workspace.current!;
+    const read = async () => { const r = await call('haeWorkspace.read()'); assert.ok(r.ok, r.code ?? 'read failed'); return proofreadSnapshot(r.state!); };
+    const current = () => proofreadDocument(runtime.workspace.current!);
     const edit = (command: DocumentCommand) => call(`haeWorkspace.edit(${JSON.stringify(current().id)},${JSON.stringify(command)})`);
     const change = async (text: string, composing = false) => {
       const state = (await read()).current!.input;

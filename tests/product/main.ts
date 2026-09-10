@@ -1,3 +1,4 @@
+import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -21,12 +22,16 @@ async function until(check: () => boolean | Promise<boolean>, label: string, tim
   while (!await check()) { if (Date.now() > end) throw new Error(`TIMEOUT: ${label}`); await delay(25); }
 }
 async function click(window: BrowserWindow, selector: string, text?: string): Promise<void> {
-  const point = await window.webContents.executeJavaScript(`(() => {
+  const locate = () => window.webContents.executeJavaScript(`(() => {
     const elements = [...document.querySelectorAll(${JSON.stringify(selector)})];
     const el = elements.find(value => value.getBoundingClientRect().width > 0 && !value.disabled
       && (${JSON.stringify(text ?? null)} === null || value.textContent.includes(${JSON.stringify(text ?? '')})));
     if (!el) return null; const box = el.getBoundingClientRect(); return {x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2)};
   })()`);
+  // Wait for React to publish the requested control, without repeating the
+  // click or inferring readiness from an earlier Main snapshot.
+  let point = await locate();
+  await until(async () => { if (!point) point = await locate(); return !!point; }, `enabled control: ${selector} ${text ?? ''}`, 3000);
   assert.ok(point, `missing enabled control: ${selector} ${text ?? ''}`);
   window.focus(); window.webContents.focus();
   window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
@@ -65,7 +70,7 @@ async function run() {
     review: async value => ({ reviewId: value.reviewId, decision: leaveDecision }),
     backup: async value => { ++backupReviews; return { reviewId: value.reviewId, decision: 'cancel' }; },
   } });
-  const { window, runtime, desktop } = product; const state = () => runtime.workspace.snapshot();
+  const { window, runtime, desktop } = product; const state = () => proofreadSnapshot(runtime.workspace.snapshot());
   const desk = () => desktop.extension(window.webContents).snapshot();
   const settled = (text: string) => { const input = state().current?.input; return input?.input?.appliedText === text && !input.hasUnappliedInput && input.phase === 'idle'; };
   const uiErrors: string[] = [];
@@ -75,7 +80,7 @@ async function run() {
     await until(() => window.webContents.executeJavaScript('!!document.querySelector(".app")'), 'production React workbench');
     await click(window, '.toolbar button', '打开 HTML');
     await until(() => !!state().current && (runtime.host.current?.getBounds().width ?? 0) > 100, 'document and native Preview layout');
-    const first = runtime.workspace.current!;
+    const first = proofreadDocument(runtime.workspace.current!);
     assert.equal(first.mapping.status, 'ready');
     assert.deepEqual(await first.preview.contents.executeJavaScript('({require:typeof require,process:typeof process,workspace:typeof haeWorkspace,desktop:typeof haeDesktop,pageRan:typeof pageRan})'),
       { require: 'undefined', process: 'undefined', workspace: 'undefined', desktop: 'undefined', pageRan: 'undefined' });
@@ -168,7 +173,7 @@ async function run() {
     await click(window, '.toolbar button[aria-label="在独立窗口中校稿"]');
     await until(() => desk().panel === 'floating', 'floating editor ownership');
     const floating = desktop.ownedWindows().find(value => !value.getTitle().includes('PDF'))!;
-    await select(runtime.workspace.current!.preview.contents, 'h1');
+    await select(proofreadDocument(runtime.workspace.current!).preview.contents, 'h1');
     await typeDraft(floating, '浮窗中的中文 🧪'); await until(() => settled('浮窗中的中文 🧪'), 'floating input updates Main document');
     await until(() => floating.webContents.executeJavaScript('document.querySelector(".field-foot .badge-ok")?.textContent === "草稿已预览"'), 'floating UI acknowledgement');
     await delay(200); // Let Chromium composite the acknowledged React state.
@@ -198,7 +203,7 @@ async function run() {
     pass('Undo stays in drafts; a real floating editor shares one document, native close docks without losing text, and hide/show resizes Preview');
 
     await writeFile(join(results, 'product-ui.png'), await captureReady(window.webContents));
-    await writeFile(join(results, 'product-preview.png'), await captureReady(runtime.workspace.current!.preview.contents));
+    await writeFile(join(results, 'product-preview.png'), await captureReady(proofreadDocument(runtime.workspace.current!).preview.contents));
     window.setContentSize(960, 640); await delay(200);
     assert.equal(await window.webContents.executeJavaScript('document.documentElement.scrollWidth <= innerWidth'), true);
     await click(window, '.toolbar button.narrow-only', '变更');
@@ -213,10 +218,15 @@ async function run() {
     pass('960×640 product controls fit; review drawer hides native content; native close cancellation preserves input and explicit discard drains the runtime');
     const fault = await createProductApplication(outputRoot, { visible: false, bindQuit: false, choices: { open: async () => entry } });
     try {
+      // The fault case is another real product window. A ready source mapping
+      // alone does not mean its native view has received the React layout yet.
+      fault.window.showInactive();
       await until(() => fault.window.webContents.executeJavaScript('[...document.querySelectorAll("button")].some(button => button.textContent.includes("打开 HTML"))'), 'second product UI ready');
       await click(fault.window, 'button', '打开 HTML');
-      await until(() => fault.runtime.workspace.snapshot().current?.input.mappingStatus === 'ready', 'second product document ready');
-      await select(fault.runtime.workspace.current!.preview.contents, 'h1');
+      await until(() => proofreadSnapshot(fault.runtime.workspace.snapshot()).current?.input.mappingStatus === 'ready'
+        && fault.runtime.workspace.snapshot().phase === 'idle'
+        && (fault.runtime.host.current?.getBounds().width ?? 0) > 100, 'second product document and native layout ready');
+      await select(proofreadDocument(fault.runtime.workspace.current!).preview.contents, 'h1');
       await until(() => fault.window.webContents.executeJavaScript('!!document.querySelector("textarea.draft-input")'), 'fault input ready');
       await fault.window.webContents.executeJavaScript(`(() => {
         const input = document.querySelector('textarea.draft-input'); input.focus();
@@ -224,9 +234,9 @@ async function run() {
       })()`);
       const retainedText = '映射失效时仍须保留的中文输入 🧪';
       await typeDraft(fault.window, retainedText);
-      assert.notEqual(fault.runtime.workspace.snapshot().current!.input.input!.appliedText, retainedText);
-      await fault.runtime.workspace.current!.preview.contents.executeJavaScript("document.querySelector('h1').firstChild.data = 'TEST_FAULT_MUTATION'");
-      await until(() => fault.runtime.workspace.snapshot().current?.input.mappingStatus === 'invalidated', 'fault invalidates real mapping');
+      assert.notEqual(proofreadSnapshot(fault.runtime.workspace.snapshot()).current!.input.input!.appliedText, retainedText);
+      await proofreadDocument(fault.runtime.workspace.current!).preview.contents.executeJavaScript("document.querySelector('h1').firstChild.data = 'TEST_FAULT_MUTATION'");
+      await until(() => proofreadSnapshot(fault.runtime.workspace.snapshot()).current?.input.mappingStatus === 'invalidated', 'fault invalidates real mapping');
       await until(() => fault.window.webContents.executeJavaScript(`(() => {
         const input = document.querySelector('textarea[aria-label="保留的输入（可复制）"]');
         return input?.readOnly === true && input.disabled === false && input.value === ${JSON.stringify(retainedText)};

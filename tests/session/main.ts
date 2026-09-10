@@ -1,3 +1,4 @@
+import { proofreadDocument, proofreadSnapshot } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -8,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { app, BrowserWindow, session, webContents } from 'electron';
 import { EDITOR_URL } from '../../src/contracts/editor.ts';
 import type { InputSnapshot } from '../../src/contracts/input.ts';
-import type { LeaveReview, WorkspaceSnapshot } from '../../src/contracts/workspace.ts';
+import type { LeaveReview } from '../../src/contracts/workspace.ts';
 import type { DocumentCommand, WorkspaceConnection, WorkspaceResult } from '../../src/contracts/workspace-editor.ts';
 import { WORKSPACE_STATE } from '../../src/contracts/workspace-editor.ts';
 import { registerSchemes } from '../../src/main/application.ts';
@@ -27,7 +28,7 @@ const pass = (value: string): void => { passed.push(value); console.log(`PASS: $
 const hash = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 let ui: BrowserWindow;
 let runtime: ReturnType<typeof createWorkspaceSession>;
-const activeDocument = () => runtime.workspace.current!;
+const activeDocument = () => proofreadDocument(runtime.workspace.current!);
 function deferred<T>() {
   let resolveValue!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -38,9 +39,9 @@ async function until(check: () => boolean, label: string): Promise<void> {
   const deadline = Date.now() + 3500;
   while (!check()) { if (Date.now() > deadline) throw new Error(`TIMEOUT: ${label}`); await delay(10); }
 }
-async function read(): Promise<WorkspaceSnapshot> {
+async function read(): Promise<ReturnType<typeof proofreadSnapshot>> {
   const result: WorkspaceResult = await ui.webContents.executeJavaScript('haeWorkspace.read()');
-  assert.equal(result.ok, true); assert.ok(result.state); return result.state;
+  assert.equal(result.ok, true); assert.ok(result.state); return proofreadSnapshot(result.state);
 }
 async function edit(documentId: string, value: DocumentCommand): Promise<WorkspaceResult> {
   return ui.webContents.executeJavaScript(`haeWorkspace.edit(${JSON.stringify(documentId)},${JSON.stringify(value)})`);
@@ -114,7 +115,7 @@ async function run(): Promise<void> {
   try {
     await ui.loadURL(EDITOR_URL);
     assert.equal((await read()).current, null); assert.equal(runtime.connected, true);
-    assert.deepEqual(await ui.webContents.executeJavaScript('Object.keys(haeWorkspace).sort()'), ['edit', 'listBackups', 'listRecovery', 'onState', 'open', 'openDirectory', 'read', 'readDiff', 'restore', 'restoreBackup', 'retryPersistence', 'save', 'switchEntry']);
+    assert.deepEqual(await ui.webContents.executeJavaScript('Object.keys(haeWorkspace).sort()'), ['edit', 'listBackups', 'listRecovery', 'onState', 'open', 'openDirectory', 'read', 'readDiff', 'restore', 'restoreBackup', 'retryPersistence', 'save', 'switchEntry', 'switchMode']);
     assert.deepEqual(await ui.webContents.executeJavaScript('[typeof require,typeof process,typeof ipcRenderer,typeof Buffer]'), Array(4).fill('undefined'));
     assert.equal((await open()).outcome, 'cancelled'); assert.equal(runtime.workspace.current, null);
     assert.equal(await ui.webContents.executeJavaScript('haeWorkspace.open(NaN).then(r=>r.code)'), 'INVALID_WORKSPACE_REQUEST');
@@ -123,7 +124,7 @@ async function run(): Promise<void> {
     await peer.loadURL(EDITOR_URL);
     assert.equal(await peer.webContents.executeJavaScript('haeWorkspace.read().then(r=>r.code)'), 'EDITOR_DISCONNECTED');
     peer.destroy();
-    pass('one selected trusted window exposes thirteen bounded workspace methods; empty/cancelled open has no document and same-session peer cannot call the scoped handler');
+    pass('one selected trusted window exposes fourteen bounded workspace methods; empty/cancelled open has no document and same-session peer cannot call the scoped handler');
 
     choose = async () => entry;
     assert.equal((await open()).outcome, 'opened');
@@ -193,7 +194,7 @@ async function run(): Promise<void> {
     choose = async () => entry;
     void open().catch(() => {}); const crashRequest = await crashStarted.promise;
     ui.webContents.forcefullyCrashRenderer();
-    await until(() => !runtime.connected && runtime.workspace.snapshot().phase === 'idle', 'crashed renderer cancels review');
+    await until(() => !runtime.connected && proofreadSnapshot(runtime.workspace.snapshot()).phase === 'idle', 'crashed renderer cancels review');
     assert.equal(runtime.workspace.current, reopened); assert.equal(runtime.host.current, reopened.preview.view);
     assert.deepEqual(reopened.input.snapshot(), savedState); assert.equal(reopened.draft.candidate.resultHash, candidateHash);
     assert.equal(reopened.preview.isActive(), true);
@@ -273,7 +274,7 @@ async function run(): Promise<void> {
     await select('h1'); await change('视图失败前输入');
     const damaged = activeDocument();
     failBounds = true; ui.setSize(980, 660);
-    await until(() => runtime.workspace.snapshot().cleanupPending, 'native resize invalidates activation');
+    await until(() => proofreadSnapshot(runtime.workspace.snapshot()).cleanupPending, 'native resize invalidates activation');
     assert.equal(runtime.host.available, false); assert.equal(runtime.workspace.current, damaged);
     await change('视图失败后迟到输入');
     const damagedInput = (await read()).current!.input;

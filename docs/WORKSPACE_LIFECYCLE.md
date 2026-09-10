@@ -1,6 +1,6 @@
 # 文档与窗口生命周期
 
-日期：2026-09-09；HAE-005 第四/五阶段。当前是 Main 服务和原生窗口的自动实验；第五阶段已连接 [统一窗口会话](WORKSPACE_SESSION.md) 的文档身份、可信 IPC、挂载与关闭。正常应用入口仍只读，Kimi 产品前端尚未接入。
+日期：2026-09-09；HAE-005 第四/五阶段的 Main 生命周期合同。第五阶段已连接 [统一窗口会话](WORKSPACE_SESSION.md) 的文档身份、可信 IPC、挂载与关闭。2026-09-10 HAE-009 已接入正常产品入口，HAE-008 的产品入口与模式切换沿用本合同；早期实验的人工未测边界继续保留。
 
 ## 打开与替换
 
@@ -38,7 +38,7 @@ dispose 是 Main 生命周期清理；持久化窗口在批准关闭后也通过
 
 纯类型与确认 schema 在 [workspace.ts](../src/contracts/workspace.ts)。Main 使用 open(expectedRevision, chooser)、requestClose(expectedRevision)、snapshot/onState；路径和选择器函数均留在 Main，不进入纯状态。review 与 chooseCopy 回调由后续应用层实现，真实 UI 仍须先同步未应用输入、结束 IME，并按当前 revision 作出决定。
 
-该阶段仅协调静态校稿文档的打开/关闭；第五阶段已验证 Main 重建失效 UI bridge 和视图挂载回滚。HAE-008 已加入 [目录授权、入口切换和诊断状态](PROJECT_RESOURCES.md)，复用相同准备/确认/激活规则；JS 模式切换、资源诊断面板与产品操作入口仍待实现。不得直接用只读 PreviewController 替换正在编辑的文档；其预览成功即销毁旧页的语义不足以保护后续映射初始化。
+该早期阶段仅协调静态校稿文档的打开/关闭；第五阶段已验证 Main 重建失效 UI bridge 和视图挂载回滚。HAE-008 已加入 [目录授权、入口切换和诊断状态](PROJECT_RESOURCES.md)，后续产品接线及 [模式切换](MODE_SWITCH.md) 复用相同离开屏障。只读文档是没有输入/草稿/映射/writer 的独立类型，返回静态校稿时重新准备完整源码证明。不得直接用只读 PreviewController 替换正在编辑的文档；其预览成功即销毁旧页的语义不足以保护后续映射初始化。
 
 ## 验证范围
 

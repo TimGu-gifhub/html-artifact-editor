@@ -1,3 +1,4 @@
+import { proofreadSnapshot } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -63,7 +64,7 @@ export async function checkDeparture({ use, until, barrier, pass, original, expe
     assert.equal((await f.checkpoints.catalog()).groups[0]!.status, 'dirty');
     f.control.copyPath = join(f.project, 'pages', '离开副本.html');
     const copied = await open(f); assert.equal(copied.ok, true); assert.equal(copied.outcome, 'opened');
-    assert.notEqual(f.current().id, old.id); assert.equal(copied.state!.lastDeparture!.status, 'retired');
+    assert.notEqual(f.current().id, old.id); assert.equal(proofreadSnapshot(copied.state!).lastDeparture!.status, 'retired');
     const group = (await f.checkpoints.catalog()).groups[0]!; assert.equal(group.retirement, 'copied'); assert.equal(group.draftRevision, 3);
     assert.deepEqual(await readFile(f.control.copyPath), Buffer.from(original.toString().replace('A &amp; 😀', '确认期间的新输入')));
     await unchanged(f);
@@ -103,13 +104,13 @@ export async function checkDeparture({ use, until, barrier, pass, original, expe
       void open(f).catch(() => null);
       await until(() => old.input.snapshot().phase === 'leaving' && waiting, 'departure before renderer revocation');
       f.ui.webContents.forcefullyCrashRenderer(); await until(() => !f.runtime.connected, 'revoked departure renderer'); hold.release();
-      await until(() => f.runtime.workspace.snapshot().phase === 'idle', 'Main departure settlement');
+      await until(() => proofreadSnapshot(f.runtime.workspace.snapshot()).phase === 'idle', 'Main departure settlement');
       const catalog = await f.checkpoints.catalog();
       if (stage === 'baseline-synced') {
         assert.equal(f.current(), old); assert.equal(old.input.snapshot().phase, 'idle'); assert.equal(catalog.groups[0]!.status, 'dirty');
       } else {
         assert.notEqual(f.current().id, old.id); assert.equal(catalog.groups[0]!.status, 'retired');
-        assert.equal(f.runtime.workspace.snapshot().lastDeparture!.requiresReview, false);
+        assert.equal(proofreadSnapshot(f.runtime.workspace.snapshot()).lastDeparture!.requiresReview, false);
       }
       await f.runtime.reloadUI(); assert.equal((await f.read()).current!.id, f.current().id); await unchanged(f);
       assert.equal(f.current().mapping.status, 'ready');
@@ -145,7 +146,7 @@ export async function checkDeparture({ use, until, barrier, pass, original, expe
     f.control.review = async value => ({ reviewId: value.reviewId, decision: 'discard' });
     f.control.draftStep = async step => { if (step === 'release-lock') throw new Error('retirement cleanup failed'); };
     const result = await open(f); assert.equal(result.ok, true); assert.equal(result.outcome, 'opened'); assert.notEqual(f.current().id, old.id);
-    assert.equal(result.state!.lastDeparture!.status, 'retired'); assert.equal(result.state!.lastDeparture!.cleanupPending, true);
+    assert.equal(proofreadSnapshot(result.state!).lastDeparture!.status, 'retired'); assert.equal(proofreadSnapshot(result.state!).lastDeparture!.cleanupPending, true);
     assert.equal((await f.checkpoints.catalog()).locked, true); assert.equal((await open(f)).code, 'DOCUMENT_RECOVERY_REQUIRED'); await unchanged(f);
     pass('confirmed retirement with failed lock cleanup still completes the document change and reports the cleanup warning while retaining all evidence');
   }, true);

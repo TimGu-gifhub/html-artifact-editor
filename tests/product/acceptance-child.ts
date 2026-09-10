@@ -1,3 +1,4 @@
+import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -59,7 +60,7 @@ async function run(): Promise<void> {
   const { window, runtime: session, desktop } = product;
   // Visible, unfocused test windows keep Chromium frames current for capture.
   window.showInactive();
-  const state = () => session.workspace.snapshot();
+  const state = () => proofreadSnapshot(session.workspace.snapshot());
   const ui = (script: string) => window.webContents.executeJavaScript(script);
   const errors: string[] = [];
   window.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
@@ -75,7 +76,7 @@ async function run(): Promise<void> {
   };
   const edit = async (selector: string, value: string): Promise<void> => {
     await until(() => session.host.current!.getBounds().width > 0, 'native Preview visible');
-    const preview = session.workspace.current!.preview.contents;
+    const preview = proofreadDocument(session.workspace.current!).preview.contents;
     const before = await preview.executeJavaScript('document.querySelector(' + JSON.stringify(selector) + ').textContent');
     await select(preview, selector);
     await until(async () => state().current?.input.input?.appliedText === before
@@ -124,12 +125,12 @@ async function run(): Promise<void> {
     for (const [selector, value] of mode === 'seed' ? edits : edits.slice(0, 1)) await edit(selector, value);
     assert.deepEqual(await readFile(entry), Buffer.from(source));
     assert.deepEqual(await readFile(join(project, 'keep.css')), Buffer.from(css));
-    assert.equal(await session.workspace.current!.preview.contents.executeJavaScript('document.documentElement.dataset.scriptRan'), undefined);
-    assert.deepEqual(await session.workspace.current!.preview.contents.executeJavaScript('({require:typeof require,workspace:typeof haeWorkspace})'), {require:'undefined',workspace:'undefined'});
+    assert.equal(await proofreadDocument(session.workspace.current!).preview.contents.executeJavaScript('document.documentElement.dataset.scriptRan'), undefined);
+    assert.deepEqual(await proofreadDocument(session.workspace.current!).preview.contents.executeJavaScript('({require:typeof require,workspace:typeof haeWorkspace})'), {require:'undefined',workspace:'undefined'});
     if (mode === 'seed') {
       assert.equal(state().current!.input.changes.length, 5);
       assert.equal((await session.workspace.listRecovery()).locked, false);
-      receipt({ event: 'seeded', sessionId: session.workspace.current!.checkpointSessionId, revision: state().current!.input.draftRevision,
+      receipt({ event: 'seeded', sessionId: proofreadDocument(session.workspace.current!).checkpointSessionId, revision: state().current!.input.draftRevision,
         candidateHash: state().current!.input.candidateHash, history: state().current!.input.history, pid: process.pid });
       await new Promise<void>(() => {}); throw Error('Seed must be terminated by the parent after durability proof');
     }
@@ -168,20 +169,20 @@ async function run(): Promise<void> {
     await until(() => ui('!document.querySelector("[role=dialog]")'), 'recovery UI acknowledgement');
     await settled();
     if (mode === 'restore-save') {
-      assert.equal(session.workspace.current!.checkpointSessionId, requestedSession);
+      assert.equal(proofreadDocument(session.workspace.current!).checkpointSessionId, requestedSession);
       assert.equal(state().current!.input.changes.length, 5);
       assert.notEqual(state().current!.id, requestedSession);
-      for (const [selector, value] of edits) assert.equal(await session.workspace.current!.preview.contents.executeJavaScript('document.querySelector(' + JSON.stringify(selector) + ').textContent'), value);
+      for (const [selector, value] of edits) assert.equal(await proofreadDocument(session.workspace.current!).preview.contents.executeJavaScript('document.querySelector(' + JSON.stringify(selector) + ').textContent'), value);
       assert.deepEqual(await readFile(entry), Buffer.from(source));
       await until(() => ui('document.querySelector(".doc-name")?.textContent === "报告.html" && document.querySelectorAll(".changes-list .change-item").length === 5'), 'five restored changes rendered in the product UI');
       await delay(200); // Allow Chromium to composite the acknowledged React state.
       await writeFile(join(project, '../acceptance-recovered-ui.png'), await captureReady(window.webContents));
-      await writeFile(join(project, '../acceptance-recovered-preview.png'), await captureReady(session.workspace.current!.preview.contents));
+      await writeFile(join(project, '../acceptance-recovered-preview.png'), await captureReady(proofreadDocument(session.workspace.current!).preview.contents));
       await review(); await click(window, '[role=dialog] .dlg-actions button', '取消');
       await until(() => ui('!document.querySelector("[role=dialog]")'), 'cancel Diff preserves restored draft');
       assert.equal(state().current!.input.changes.length, 5); assert.deepEqual(await readFile(entry), Buffer.from(source));
       await save();
-      receipt({ event: 'saved', sessionId: session.workspace.current!.checkpointSessionId,
+      receipt({ event: 'saved', sessionId: proofreadDocument(session.workspace.current!).checkpointSessionId,
         revision: state().current!.input.draftRevision, history: state().current!.input.history });
     } else {
       const saved = await readFile(entry);

@@ -1,6 +1,6 @@
 # 技术架构
 
-状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；HAE-008 增加目录授权、入口切换和资源诊断；HAE-010 增加显式覆盖保存与新基线接线。HAE-011 已接通 Main 历史和持久化恢复，HAE-009 已接通 Windows 产品入口、工作台控件和独立浮窗/PDF；故障处置和目标平台人工验收仍待完成。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md)、[HAE-005](docs/implementation/HAE-005.md)、[HAE-008](docs/implementation/HAE-008.md) 与 [HAE-010](docs/implementation/HAE-010.md)。
+状态：产品架构设计基线；HAE-001 至 HAE-004 已验证工具链、隔离预览、静态树与纯字节候选。HAE-005 自动实验已组成统一 Main 窗口会话，连接草稿、输入、可信 IPC、另存、文档/视图及关闭；HAE-008 增加目录授权、入口与模式切换和资源诊断；HAE-010 增加显式覆盖保存与新基线接线。HAE-011 已接通 Main 历史和持久化恢复，HAE-009 已接通 Windows 产品入口、工作台控件和独立浮窗/PDF；故障处置和目标平台人工验收仍待完成。版本、执行范围和未测项见 [开发说明](docs/DEVELOPMENT.md)、[HAE-005](docs/implementation/HAE-005.md)、[HAE-008](docs/implementation/HAE-008.md) 与 [HAE-010](docs/implementation/HAE-010.md)。
 
 ## 1. 技术选型
 
@@ -188,6 +188,10 @@ Main 的 bindWorkspaceQuit 同步拦截 before-quit/will-quit，并接管最后�
 Main DirectoryGrant 固定实际目录身份与私有路径排除；ProjectGrant 加入根内相对 HTML 入口。两步原生选择器产生 Main 授权，switchEntry 复用原根身份并重新核验路径链，不能因目录被替换而重新授权。该根只扩大允许的预览资源范围，另存 writer 仍限入口所在文件夹的新 HTML。Workspace 在完整准备后处理离开确认、视图提交和旧会话撤销，迟到目录答复不能创建新操作。
 
 有界资源诊断汇合协议、webRequest 及现有安全 CDP 连接的 Network/Audits 事件；CSP 拒绝的 fetch 即使没有 Network 请求事件仍可记录。只收集失败目标/类型/原因，URL 去除凭据/查询/fragment、本机路径隐藏，超限标记截断。诊断通过 current.project 和生产可信 IPC 传输，没有新增 Preview bridge、bypassCSP 或联网例外。事件观察失败即拒绝本次预览，升级 Electron 时需重新验证实验性 Audits 接口。八组真实目录实验已执行；产品诊断面板及人工对话框仍待验收，见 [目录资源合同](docs/PROJECT_RESOURCES.md)。
+
+### HAE-008 后续：产品内模式切换
+
+HAE-008 的产品模式切换在上述统一会话中使用显式 `ProofreadDocument | InteractiveDocument`。只读文档没有映射、草稿、输入控制器或写入端口；快照以 mode 和可空 input/persistence 表达能力。Main 在运行本地脚本前完成旧草稿决定，同根准备新视图，试挂载前后核验文件版本。干净历史只在 Main 私有保留，返回时重新解析并证明全部来源，包含已保存的空 Text；初始 revision=1 不写空检查点。未知退役或清理保留原有屏障，动态 DOM 不进入候选。严格 IPC 与执行证据见 [模式合同](docs/MODE_SWITCH.md) 和 [HAE-008](docs/implementation/HAE-008.md)。
 
 ### HAE-010：Windows 保存事务与会话接线
 

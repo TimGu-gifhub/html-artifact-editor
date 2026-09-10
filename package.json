@@ -45,6 +45,7 @@
     "test:ui": "node --test tests/product/ui-*.mjs",
     "test:product": "node tools/build.mjs native parser-worker draft-worker history-worker diff-worker preload-preview preload-ui ui product && node tools/run-electron.mjs --product",
     "test:product-entry": "node tools/build.mjs native parser-worker draft-worker history-worker diff-worker preload-preview preload-ui ui product-entry && node tools/run-electron.mjs --product-entry",
+    "test:product-mode": "node tools/build.mjs native parser-worker draft-worker history-worker diff-worker preload-preview preload-ui ui product-mode && node tools/run-electron.mjs --product-mode",
     "test:product-acceptance": "node tools/build.mjs native parser-worker draft-worker history-worker diff-worker preload-preview preload-ui ui product-acceptance-child && node --test tests/product/acceptance.test.mjs",
     "preview": "npm run build && node tools/run-electron.mjs --preview",
     "preview:interactive": "npm run build && node tools/run-electron.mjs --preview --interactive",
@@ -52,7 +53,7 @@
     "preview:directory:interactive": "npm run build && node tools/run-electron.mjs --preview --directory --interactive",
     "licenses": "node tools/licenses.mjs",
     "licenses:check": "node tools/licenses.mjs --check",
-    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run test:ui && npm run build && npm run test:smoke && npm run test:security && npm run test:mapping && npm run test:patch && npm run test:draft && npm run test:editor && npm run test:workspace && npm run test:session && npm run test:project && npm run test:storage && npm run test:save-session && npm run test:startup && npm run test:quit && npm run test:recovery && npm run test:source-diff && npm run test:history && npm run test:product && npm run test:product-entry && npm run test:product-acceptance && npm run licenses:check"
+    "check": "npm run typecheck && npm run check:boundaries && npm test && npm run test:ui && npm run build && npm run test:smoke && npm run test:security && npm run test:mapping && npm run test:patch && npm run test:draft && npm run test:editor && npm run test:workspace && npm run test:session && npm run test:project && npm run test:storage && npm run test:save-session && npm run test:startup && npm run test:quit && npm run test:recovery && npm run test:source-diff && npm run test:history && npm run test:product && npm run test:product-entry && npm run test:product-mode && npm run test:product-acceptance && npm run licenses:check"
   },
   "dependencies": {
     "parse5": "8.0.1",

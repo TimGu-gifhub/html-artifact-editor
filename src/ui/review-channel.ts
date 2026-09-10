@@ -46,9 +46,11 @@ export class ReviewChannel {
     return this.desired ? [...this.desired] : serverReviewed;
   }
 
-  /** Forget local intent when the document or candidate changes. */
+  /** Forget local intent when the document or candidate changes. An
+   *  interactive (readonly) document has a null input and therefore no
+   *  binding: no intent may be collected or delivered for it. */
   private bindingOf(current: NonNullable<WorkspaceSnapshot['current']> | null): string | null {
-    return current ? `${current.id}:${current.input.draftRevision}:${current.input.candidateHash}` : null;
+    return current?.input ? `${current.id}:${current.input.draftRevision}:${current.input.candidateHash}` : null;
   }
 
   sync(): void {
@@ -65,7 +67,7 @@ export class ReviewChannel {
     // 采集意图前同步当前绑定：旧文档/旧候选的待发意图不得带进新绑定。
     this.sync();
     const state = this.getState();
-    if (!state?.current) return;
+    if (!state?.current?.input) return;
     const base = this.desired ?? new Set(state.desktop?.reviewed ?? []);
     if (checked) base.add(nodeId);
     else base.delete(nodeId);
@@ -77,7 +79,7 @@ export class ReviewChannel {
   toggleAll(checked: boolean): void {
     this.sync();
     const current = this.getState()?.current;
-    if (!current) return;
+    if (!current?.input) return;
     this.desired = new Set(checked ? current.input.changes.map(change => change.nodeId) : []);
     this.desiredKey = this.candidateKey;
     void this.drive();
@@ -101,7 +103,8 @@ export class ReviewChannel {
       while (this.desired) {
         const state = this.getState();
         const current = state?.current;
-        if (!state || !current) { this.desired = null; this.desiredKey = null; break; }
+        const input = current?.input ?? null;
+        if (!state || !current || !input) { this.desired = null; this.desiredKey = null; break; }
         const binding = this.bindingOf(current);
         if (this.desiredKey !== binding) {
           // 意图采集自旧文档/旧候选：丢弃而不是投递给当前绑定。
@@ -109,7 +112,7 @@ export class ReviewChannel {
           this.desiredKey = null;
           break;
         }
-        const valid = new Set(current.input.changes.map(change => change.nodeId));
+        const valid = new Set(input.changes.map(change => change.nodeId));
         const nodeIds = [...this.desired].filter(id => valid.has(id)).sort();
         const key = `${binding}:${nodeIds.join(',')}`;
         if (key === this.sentKey) { this.desired = null; this.desiredKey = null; break; }
@@ -117,7 +120,7 @@ export class ReviewChannel {
         try {
           result = await this.request({
             kind: 'review', documentId: current.id,
-            draftRevision: current.input.draftRevision, candidateHash: current.input.candidateHash,
+            draftRevision: input.draftRevision, candidateHash: input.candidateHash,
             nodeIds,
           });
         } catch { result = null; }

@@ -9,6 +9,7 @@ import type { WorkspaceBackupCatalog } from './backup.ts';
 import type { RestoreReference } from './save-record.ts';
 import { isDesktopCommand } from './desktop.ts';
 import type { DesktopCommand } from './desktop.ts';
+import type { PreviewMode } from './preview.ts';
 
 export const WORKSPACE_CONNECT = 'hae:workspace-connect';
 export const WORKSPACE_COMMAND = 'hae:workspace-command';
@@ -19,6 +20,7 @@ export type WorkspaceCommand = Readonly<{ kind: 'read' | 'recovery-list' }>
   | Readonly<{ kind: 'open' | 'open-directory'; stateRevision: number }>
   | Readonly<{ kind: 'restore'; stateRevision: number; recoverySessionId: string; sourceMode: 'file' | 'directory' }>
   | Readonly<{ kind: 'switch-entry'; stateRevision: number; documentId: string }>
+  | Readonly<{ kind: 'switch-mode'; stateRevision: number; documentId: string; mode: PreviewMode }>
   | Readonly<{ kind: 'save'; stateRevision: number; documentId: string; review?: DiffReview }>
   | Readonly<{ kind: 'backup-list'; documentId: string }>
   | Readonly<{ kind: 'backup-restore'; stateRevision: number; documentId: string; reference: RestoreReference }>
@@ -42,6 +44,7 @@ export type WorkspaceAPI = Readonly<{
   open: (stateRevision: number) => Promise<WorkspaceResult>;
   openDirectory: (stateRevision: number) => Promise<WorkspaceResult>;
   switchEntry: (documentId: string, stateRevision: number) => Promise<WorkspaceResult>;
+  switchMode: (documentId: string, stateRevision: number, mode: PreviewMode) => Promise<WorkspaceResult>;
   readDiff: (documentId: string, draftRevision: number, candidateHash: string) => Promise<WorkspaceResult>;
   save: (documentId: string, stateRevision: number, review?: DiffReview) => Promise<WorkspaceResult>;
   listBackups: (documentId: string) => Promise<WorkspaceResult>;
@@ -73,6 +76,9 @@ export function isWorkspaceCommand(value: unknown): value is WorkspaceCommand {
       && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
     case 'switch-entry': return count === 3 && identity(value.documentId)
       && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
+    case 'switch-mode': return count === 4 && identity(value.documentId)
+      && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0
+      && (value.mode === 'proofread' || value.mode === 'interactive');
     case 'retry-persistence': return count === 3 && identity(value.documentId)
       && Number.isSafeInteger(value.draftRevision) && (value.draftRevision as number) > 0;
     case 'edit': return count === 3 && identity(value.documentId) && isEditorCommand(value.value) && value.value.kind !== 'read';

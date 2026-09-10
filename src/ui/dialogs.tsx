@@ -63,6 +63,8 @@ export function SaveDiffDialog(props: SaveDiffDialogProps) {
 type PdfDialogProps = Readonly<{
   pdf: PdfPreview | null;
   pdfBusy: boolean;
+  /** 脚本只读预览：不能从草稿生成新 PDF；已有快照的查看/导出不写回 HTML。 */
+  readonly?: boolean;
   /** Same document but a newer draft exists. */
   stale: boolean;
   /** False when the frozen PDF's documentId differs from the current document:
@@ -85,7 +87,9 @@ export function PdfDialog(props: PdfDialogProps) {
     <Dialog title="PDF 打印预览" onClose={props.onClose}
       footer={<>
         <button type="button" className="btn" onClick={props.onClose}>关闭</button>
-        <button type="button" className="btn primary" data-autofocus disabled={props.pdfBusy} onClick={props.onCreate}>
+        <button type="button" className="btn primary" data-autofocus disabled={props.pdfBusy || props.readonly}
+          title={props.readonly ? '脚本只读预览不能生成草稿 PDF；返回静态校稿后再生成。' : undefined}
+          onClick={props.onCreate}>
           {props.pdfBusy ? '正在生成…' : pdf ? '重新生成' : '生成预览'}
         </button>
       </>}>
@@ -104,6 +108,7 @@ export function PdfDialog(props: PdfDialogProps) {
           onChange={event => props.onOptions({ ...options, background: event.target.checked })} /> 打印背景</label>
       </fieldset>
       <p className="hint">PDF 从当前已确认的草稿生成；打印与导出都不会写回 HTML 文件。若原页面定义了 @page 打印规则，纸张与方向可能以页面规则为准。</p>
+      {props.readonly && <p className="hint">脚本只读预览不能生成草稿 PDF；返回静态校稿后再生成。</p>}
       {props.error && <div className="panel-error" role="alert"><p>{props.error}</p></div>}
       {pdf && <div className="pdf-current">
         <p><strong>{pdf.name}</strong>（{formatBytes(pdf.size)}）</p>
@@ -164,6 +169,8 @@ type BackupsDialogProps = Readonly<{
   catalog: WorkspaceBackupCatalog | null;
   loading: boolean;
   busy: boolean;
+  /** 脚本只读预览：仍可列出备份，但整份替换须返回静态校稿后进行。 */
+  readonly?: boolean;
   error: string | null;
   onRestore: (backup: BackupSummary) => void;
   onClose: () => void;
@@ -175,6 +182,7 @@ export function BackupsDialog(props: BackupsDialogProps) {
     <Dialog title="备份与恢复" onClose={props.onClose}
       footer={<button type="button" className="btn" data-autofocus onClick={props.onClose}>关闭</button>}>
       <p className="hint">恢复备份会先备份当前文件，并替换整个 HTML；需要在系统对话框中确认。</p>
+      {props.readonly && <p className="hint">脚本只读预览下不能恢复备份；返回静态校稿后再恢复。</p>}
       {props.loading && <p>正在读取备份…</p>}
       {props.error && <div className="panel-error" role="alert"><p>{props.error}</p></div>}
       {catalog && catalog.entries.length === 0 && <p>此文档还没有备份。</p>}
@@ -185,7 +193,9 @@ export function BackupsDialog(props: BackupsDialogProps) {
               <span className="record-name">{formatTime(backup.createdAt)}</span>
               <span className="hint">{formatBytes(backup.size)}</span>
             </div>
-            <button type="button" className="btn sm" disabled={props.busy} onClick={() => props.onRestore(backup)}>
+            <button type="button" className="btn sm" disabled={props.busy || props.readonly}
+              title={props.readonly ? '返回静态校稿后再恢复备份。' : undefined}
+              onClick={() => props.onRestore(backup)}>
               恢复此备份…
             </button>
           </div>

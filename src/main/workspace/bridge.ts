@@ -23,7 +23,7 @@ const publicErrors = new Set(['WORKSPACE_BUSY', 'STALE_WORKSPACE', 'DOCUMENT_BUS
   'DRAFT_SAVED_HISTORY_SUPERSEDED', 'DRAFT_SAVED_HISTORY_UNCONFIRMED',
   'DRAFT_RESTORE_UNAVAILABLE', 'DRAFT_RESTORE_REJECTED', 'DRAFT_RESTORE_OUTCOME_UNKNOWN',
   'STALE_SOURCE_DIFF', 'SOURCE_DIFF_CANCELLED', 'SOURCE_DIFF_FAILED', 'SOURCE_DIFF_TIMEOUT', 'SOURCE_DIFF_STOP_FAILED', 'DRAFT_UNAVAILABLE',
-  'RESOURCE_BLOCKED',
+  'RESOURCE_BLOCKED', 'READ_ONLY_MODE', 'PREVIEW_MODE_UNAVAILABLE',
   'COPY_FAILED', 'COPY_OUTCOME_UNKNOWN', 'INPUT_MAPPING_LOST', 'INVALID_TEXT_NUL', 'INVALID_UNICODE', 'TEXT_SIZE_LIMIT']);
 
 export type WorkspaceBridgeExtension = Readonly<{
@@ -86,6 +86,9 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
             const result = await workspace.open(command.stateRevision, (operationSignal) =>
               chooseProjectEntry(current.preview.grant, projectChoices.chooseEntry, operationSignal));
             outcome = result.status === 'opened' ? 'opened' : 'cancelled';
+          } else if (command.kind === 'switch-mode') {
+            const result = await workspace.switchMode(command.stateRevision, command.documentId, command.mode);
+            outcome = result.status === 'opened' ? 'opened' : 'cancelled';
           } else if (command.kind === 'save') {
             const result = await workspace.save(command.stateRevision, command.documentId, command.review);
             const report = result.state.lastSave;
@@ -98,6 +101,7 @@ export function createWorkspaceBridge(contents: WebContents, workspace: Workspac
           } else if (command.kind === 'edit') {
             const current = workspace.current;
             if (!current || current.id !== command.documentId) throw new Error('STALE_DOCUMENT');
+            if (current.mode !== 'proofread') throw new Error('READ_ONLY_MODE');
             if (workspace.snapshot().lastDeparture?.requiresReview) throw new Error('DOCUMENT_RECOVERY_REQUIRED');
             if (workspace.snapshot().phase === 'committing') throw new Error('WORKSPACE_BUSY');
             if (workspace.snapshot().cleanupPending && command.value.kind !== 'change') throw new Error('DOCUMENT_CLEANUP_REQUIRED');

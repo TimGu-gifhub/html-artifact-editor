@@ -1,3 +1,4 @@
+import { proofreadDocument, proofreadSnapshot } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -36,10 +37,10 @@ async function until(check: () => boolean, label: string): Promise<void> {
   while (!check()) { if (Date.now() > deadline) throw new Error(`TIMEOUT: ${label}`); await delay(10); }
 }
 async function call(expression: string): Promise<WorkspaceResult> { return ui.webContents.executeJavaScript(expression); }
-async function read(): Promise<WorkspaceSnapshot> {
-  const result = await call('haeWorkspace.read()'); assert.equal(result.ok, true); assert.ok(result.state); return result.state;
+async function read(): Promise<ReturnType<typeof proofreadSnapshot>> {
+  const result = await call('haeWorkspace.read()'); assert.equal(result.ok, true); assert.ok(result.state); return proofreadSnapshot(result.state);
 }
-const currentDocument = () => runtime.workspace.current!;
+const currentDocument = () => proofreadDocument(runtime.workspace.current!);
 async function openDirectory(): Promise<WorkspaceResult> { return call(`haeWorkspace.openDirectory(${(await read()).stateRevision})`); }
 async function switchEntry(): Promise<WorkspaceResult> {
   const state = await read(); return call(`haeWorkspace.switchEntry(${JSON.stringify(state.current!.id)},${state.stateRevision})`);
@@ -129,7 +130,7 @@ async function run(): Promise<void> {
     })()`);
     const absent = await first.preview.session.fetch(resourceURL(first.preview.identity.sessionId, 'assets/later-missing.css'));
     assert.equal(absent.status, 403); assert.equal(await absent.text(), '');
-    await until(() => runtime.workspace.snapshot().stateRevision > rev, 'diagnostic state notification');
+    await until(() => proofreadSnapshot(runtime.workspace.snapshot()).stateRevision > rev, 'diagnostic state notification');
     const notification: WorkspaceSnapshot = await ui.webContents.executeJavaScript(`Promise.race([resourceNotice,
       new Promise((_, reject) => setTimeout(() => reject(new Error('RESOURCE_NOTIFICATION_TIMEOUT')), 2500))])`);
     assert.equal(notification.current!.id, first.id); assert.ok(notification.stateRevision > rev);
@@ -193,7 +194,7 @@ async function run(): Promise<void> {
     const beforeLateEntry = entryCalls;
     void openDirectory().catch(() => {}); await rootStarted;
     await ui.loadURL(EDITOR_URL);
-    await until(() => runtime.workspace.snapshot().phase === 'idle' && !runtime.connected, 'revoked root chooser');
+    await until(() => proofreadSnapshot(runtime.workspace.snapshot()).phase === 'idle' && !runtime.connected, 'revoked root chooser');
     finishRoot(root); await delay(20); assert.equal(entryCalls, beforeLateEntry);
     assert.equal(runtime.workspace.current, copy); assert.equal(copy.preview.isActive(), true);
     await runtime.reloadUI(); await read();

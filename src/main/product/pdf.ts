@@ -57,6 +57,7 @@ export function createPdfController(parent: BrowserWindow, workspace: () => Work
       active: () => boolean, signal: AbortSignal): Promise<void> {
       if (disposed || busy) throw new Error('PDF_BUSY');
       const owner = workspace(); const document = owner.current;
+      if (document?.mode === 'interactive') throw new Error('READ_ONLY_MODE');
       const before = document?.input.snapshot();
       if (!document || document.id !== documentId || before?.draftRevision !== draftRevision || before.candidateHash !== candidateHash) throw new Error('STALE_SOURCE_DIFF');
       if (owner.snapshot().phase !== 'idle' || before.hasUnappliedInput || before.input?.composing || document.mapping.status !== 'ready') throw new Error('INPUT_FLUSH_REQUIRED');

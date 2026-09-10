@@ -14,7 +14,7 @@ function source(name) {
     candidateHash: 'a'.repeat(64), input: null, hasUnappliedInput: false, changes: [] };
   const calls = { closed: 0, apply: 0, write: 0 };
   const update = (fields) => { state = { ...state, ...fields, stateRevision: state.stateRevision + 1 }; for (const fn of listeners) fn(); };
-  const doc = { id: randomUUID(), name, writer: {}, calls, update,
+  const doc = { id: randomUUID(), mode: 'proofread', name, writer: {}, calls, update,
     project: () => ({ name: 'fixture', entry: name, resources: { items: [], truncated: false } }),
     onState: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
     failApply: false, failCleanup: false, copyStatus: 'created',

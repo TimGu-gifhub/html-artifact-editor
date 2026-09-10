@@ -1,10 +1,12 @@
 import { useId } from 'react';
 import type { InputSnapshot } from '../contracts/input.ts';
+import type { PreviewMode } from '../contracts/preview.ts';
 import type { LiveInputController, LiveInputView } from './live-input.ts';
 import { useLiveInput } from './live-input.ts';
 
 type EditorPanelProps = Readonly<{
   hasDocument: boolean;
+  mode: PreviewMode;
   input: InputSnapshot | null;
   controller: LiveInputController;
   onRetryBegin: () => void;
@@ -24,7 +26,8 @@ function statusBadge(view: LiveInputView, input: InputSnapshot | null) {
 /** External transactions and mapping states under which the textarea is quiesced. */
 function quiesced(input: InputSnapshot | null, view: LiveInputView): boolean {
   if (view.flushing || view.resolving) return true;
-  if (!input) return false;
+  // 没有输入会话（只读预览或映射尚未建立）时绝不允许输入：null input 不是写入授权。
+  if (!input) return true;
   if (input.mappingStatus !== 'ready') return true;
   return input.phase === 'saving' || input.phase === 'leaving' || input.phase === 'closed'
     || input.phase === 'history' || input.phase === 'resolving' || input.phase === 'beginning';
@@ -59,6 +62,13 @@ export function EditorPanel(props: EditorPanelProps) {
   if (!props.hasDocument) {
     body = <div className="editor-empty">
       <p>打开 HTML 文件或目录后，在预览中点击一段文字即可开始校对。</p>
+    </div>;
+  } else if (props.mode === 'interactive') {
+    // 脚本只读预览：校稿栏保留面板归属，但不提供任何输入或写入入口。
+    body = <div className="editor-empty">
+      <p>脚本只读预览：页面本地脚本正在离线运行，这里显示源文件的当前效果。</p>
+      <p className="hint">脚本动态生成的文字不能编辑，也不会写回 HTML。在主窗口“返回静态校稿”会重新加载页面并停止脚本；切换前如有未保存修改，会先提供取消、放弃或另存草稿的选择。</p>
+      {preservedInput(view)}
     </div>;
   } else if (input?.mappingStatus === 'binding') {
     body = <div className="editor-empty"><p>正在准备页面映射…</p></div>;

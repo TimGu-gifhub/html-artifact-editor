@@ -8,6 +8,7 @@ import type { WorkspaceBridgeExtension } from './bridge.ts';
 import { createWorkspace } from './controller.ts';
 import type { Workspace, WorkspaceDecisions } from './controller.ts';
 import { prepareDocument } from './document.ts';
+import { prepareInteractiveDocument } from './interactive-document.ts';
 import { bindWorkspaceWindow } from './window.ts';
 import type { WindowCloseOptions } from './window.ts';
 import type { ProjectChoices } from './project-choice.ts';
@@ -40,7 +41,7 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
   workspace = createWorkspace(outputRoot, ports, prepareDocument, (next, previous) => {
     if (host.current !== (previous?.preview.view ?? null)) throw new Error('DOCUMENT_ACTIVATION_UNKNOWN');
     return host.swap(next?.preview.view ?? null);
-  }, ports.saveOriginal, ports.checkpoints, ports.backups);
+  }, ports.saveOriginal, ports.checkpoints, ports.backups, prepareInteractiveDocument);
   let bridge: ReturnType<typeof createWorkspaceBridge>;
   const bridges = new Set<ReturnType<typeof createWorkspaceBridge>>();
   const connect = (contents = window.webContents) => {

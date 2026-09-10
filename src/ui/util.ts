@@ -18,6 +18,10 @@ export function describeCode(code: string | null): string {
     case 'INVALID_WORKSPACE_REQUEST':
     case 'INVALID_EDITOR_REQUEST': return '请求无效。';
     case 'REVIEW_REQUIRED': return '保存需要先勾选全部复核条目。';
+    case 'READ_ONLY_MODE': return '脚本只读预览下不能编辑、保存或恢复；请先返回静态校稿。';
+    case 'PREVIEW_MODE_UNAVAILABLE': return '当前平台不支持脚本只读预览。';
+    case 'INPUT_COMPOSING': return '正在组词，请先完成当前输入。';
+    case 'UNAPPLIED_INPUT': return '有尚未预览的输入，请先完成当前输入。';
     default: return `操作未完成（代码：${code}）。`;
   }
 }

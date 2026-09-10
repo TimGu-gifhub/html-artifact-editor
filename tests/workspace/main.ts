@@ -1,3 +1,4 @@
+import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -30,6 +31,7 @@ async function until(check: () => boolean, label: string): Promise<void> {
   while (!check()) { if (Date.now() > deadline) throw new Error(`TIMEOUT: ${label}`); await delay(10); }
 }
 async function selectTitle(value: OpenDocument): Promise<void> {
+  assert.ok(value.mode === 'proofread');
   window.contentView.addChildView(value.preview.view); value.preview.view.setBounds({ x: 0, y: 0, width: 960, height: 640 });
   window.showInactive();
   const point = await value.preview.contents.executeJavaScript(`(() => {
@@ -43,6 +45,7 @@ async function selectTitle(value: OpenDocument): Promise<void> {
   await value.input.begin({ selection: value.mapping.selection, draftRevision: value.draft.revision });
 }
 function pendingText(value: OpenDocument, text: string, composing = false): void {
+  assert.ok(value.mode === 'proofread');
   const input = value.input.snapshot().input!;
   value.input.change({ editToken: input.editToken, inputRevision: input.revision + 1, newText: text, composing });
 }
@@ -69,15 +72,15 @@ async function run(): Promise<void> {
   workspace = createWorkspace(outputRoot, {
     review: async (value) => { reviewCalls++; return review(value); }, chooseCopy: () => chooseCopy(),
   }, async (...args) => Object.freeze({ ...await prepareDocument(...args), writer: injectedWriter }));
-  const open = (path: string | undefined) => workspace.open(workspace.snapshot().stateRevision, async () => { chooseCalls++; return path; });
-  const close = () => workspace.requestClose(workspace.snapshot().stateRevision);
+  const open = (path: string | undefined) => workspace.open(proofreadSnapshot(workspace.snapshot()).stateRevision, async () => { chooseCalls++; return path; });
+  const close = () => workspace.requestClose(proofreadSnapshot(workspace.snapshot()).stateRevision);
   const errors: string[] = [];
   window = new BaseWindow({ show: false, width: 960, height: 640 });
   const guard = bindWorkspaceWindow(window, workspace, (code) => errors.push(code));
   try {
     assert.equal((await open(undefined)).status, 'cancelled'); assert.equal(workspace.current, null);
     const firstOpen = await open(firstPath); assert.equal(firstOpen.status, 'opened'); assert.equal(firstOpen.state.phase, 'idle');
-    const first = workspace.current!;
+    const first = proofreadDocument(workspace.current!);
     assert.equal(first.name, '第一份 报告 🧪.html'); assert.equal(first.mapping.status, 'ready');
     await selectTitle(first); pendingText(first, '未应用的标题 <&> 😀');
     const retainedInput = first.input.snapshot().input;
@@ -150,24 +153,24 @@ async function run(): Promise<void> {
     await until(() => disposed.snapshot().phase === 'disposed', 'closed window disposes coordinator');
     workspace = createWorkspace(outputRoot, { review: async (value) => ({ reviewId: value.reviewId, decision: 'discard' }),
       chooseCopy: async () => undefined }, prepareDocument);
-    await workspace.open(workspace.snapshot().stateRevision, async () => copyPath);
-    assert.equal(workspace.current!.mapping.status, 'ready');
-    assert.equal(await workspace.current!.preview.contents.executeJavaScript('document.querySelector("h1").textContent'), '确认期间的新文字 & 😀');
-    const reopened = workspace.current!;
-    await workspace.open(workspace.snapshot().stateRevision, async () => secondPath);
-    assert.equal(reopened.preview.contents.isDestroyed(), true); assert.equal(workspace.current!.name, 'second.html');
-    assert.ok(workspace.current!.preview.identity.generation > reopened.preview.identity.generation);
+    await workspace.open(proofreadSnapshot(workspace.snapshot()).stateRevision, async () => copyPath);
+    assert.equal(proofreadDocument(workspace.current!).mapping.status, 'ready');
+    assert.equal(await proofreadDocument(workspace.current!).preview.contents.executeJavaScript('document.querySelector("h1").textContent'), '确认期间的新文字 & 😀');
+    const reopened = proofreadDocument(workspace.current!);
+    await workspace.open(proofreadSnapshot(workspace.snapshot()).stateRevision, async () => secondPath);
+    assert.equal(reopened.preview.contents.isDestroyed(), true); assert.equal(proofreadDocument(workspace.current!).name, 'second.html');
+    assert.ok(proofreadDocument(workspace.current!).preview.identity.generation > reopened.preview.identity.generation);
     await workspace.dispose();
     pass('the saved copy reopens with correct text and a fresh verified mapping; a clean replacement revokes the old view and advances generation');
 
     workspace = createWorkspace(outputRoot, { review: async (value) => ({ reviewId: value.reviewId, decision: 'save-copy' }),
       chooseCopy: async () => join(directory, 'unknown-copy.html') },
     async (...args) => Object.freeze({ ...await prepareDocument(...args), writer: injectedWriter }));
-    await workspace.open(workspace.snapshot().stateRevision, async () => firstPath);
+    await workspace.open(proofreadSnapshot(workspace.snapshot()).stateRevision, async () => firstPath);
     window = new BaseWindow({ show: false, width: 960, height: 640 });
     const unknownErrors: string[] = [];
     const unknownGuard = bindWorkspaceWindow(window, workspace, (code) => unknownErrors.push(code));
-    const unknownDoc = workspace.current!;
+    const unknownDoc = proofreadDocument(workspace.current!);
     await selectTitle(unknownDoc); pendingText(unknownDoc, '需要保留的草稿'); failAfterCreate = true;
     window.close();
     await until(() => unknownErrors.at(-1) === 'COPY_OUTCOME_UNKNOWN' && !unknownGuard.closing, 'unknown copy blocks native close');
@@ -176,7 +179,7 @@ async function run(): Promise<void> {
     assert.equal(unknownDoc.input.snapshot().draftPhase, 'uncertain');
     assert.equal(unknownDoc.draft.candidate.patches[0]!.newText, '需要保留的草稿');
     let forbiddenChooser = 0;
-    await assert.rejects(workspace.open(workspace.snapshot().stateRevision, async () => { forbiddenChooser++; return secondPath; }), /DOCUMENT_RECOVERY_REQUIRED/);
+    await assert.rejects(workspace.open(proofreadSnapshot(workspace.snapshot()).stateRevision, async () => { forbiddenChooser++; return secondPath; }), /DOCUMENT_RECOVERY_REQUIRED/);
     assert.equal(forbiddenChooser, 0); assert.equal((await readFile(join(directory, 'unknown-copy.html'))).length, 0);
     for (const [path, before] of Object.entries(originals)) assert.deepEqual(await readFile(path), before, path);
     pass('real failure after exclusive file creation preserves the partial file and current draft, blocks leaving/reopening until recovery, and leaves all original HTML/CSS bytes identical');

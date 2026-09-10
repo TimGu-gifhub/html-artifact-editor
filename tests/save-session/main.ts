@@ -1,3 +1,4 @@
+import { proofreadDocument, proofreadSnapshot } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -68,8 +69,8 @@ async function fixture(persistDrafts = false) {
     ...(persistDrafts ? { checkpoints } : {}),
   });
   const call = (expression: string): Promise<WorkspaceResult> => ui.webContents.executeJavaScript(expression);
-  const read = async () => { const value = await call('haeWorkspace.read()'); assert.ok(value.ok); assert.ok(value.state); return value.state; };
-  const current = () => runtime.workspace.current!;
+  const read = async () => { const value = await call('haeWorkspace.read()'); assert.ok(value.ok); assert.ok(value.state); return proofreadSnapshot(value.state); };
+  const current = () => proofreadDocument(runtime.workspace.current!);
   const edit = (id: string, command: DocumentCommand) => call(`haeWorkspace.edit(${JSON.stringify(id)},${JSON.stringify(command)})`);
   const save = async () => { const state = await read(); return call(`haeWorkspace.save(${JSON.stringify(state.current!.id)},${state.stateRevision})`); };
   const select = async (selector: string) => {
@@ -217,11 +218,11 @@ async function run(): Promise<void> {
     assert.deepEqual(await f.ui.webContents.executeJavaScript('[typeof require,typeof process,typeof ipcRenderer]'), ['undefined', 'undefined', 'undefined']);
     await f.dirty(); const old = f.current(); const oldInput = old.input.snapshot(); assert.equal((await f.read()).canSave, true);
     const reports: string[] = [];
-    const stopReports = f.runtime.workspace.onState(() => { const value = f.runtime.workspace.snapshot().lastSave; if (value) reports.push(value.status); });
+    const stopReports = f.runtime.workspace.onState(() => { const value = proofreadSnapshot(f.runtime.workspace.snapshot()).lastSave; if (value) reports.push(value.status); });
     const saved = await f.save(); stopReports(); assert.ok(saved.ok, saved.code ?? 'save failed'); assert.equal(saved.outcome, 'saved');
     assert.equal(reports.includes('rebase-required'), false, 'normal rebuilding must not publish a transient recovery error');
-    assert.equal(saved.documentId, old.id); assert.equal(saved.state!.phase, 'idle'); assert.notEqual(f.current().id, old.id);
-    assert.equal(saved.state!.lastSave!.status, 'saved'); assert.equal(saved.state!.canSave, false);
+    assert.equal(saved.documentId, old.id); assert.equal(proofreadSnapshot(saved.state!).phase, 'idle'); assert.notEqual(f.current().id, old.id);
+    assert.equal(proofreadSnapshot(saved.state!).lastSave!.status, 'saved'); assert.equal(proofreadSnapshot(saved.state!).canSave, false);
     assert.equal(f.current().draft.candidate.patches.length, 0); assert.equal(f.current().draft.candidate.baseHash, hash(expected));
     assert.equal(f.current().preview.grant.root, old.preview.grant.root); assert.equal(f.runtime.host.current, f.current().preview.view);
     assert.deepEqual(await readFile(f.entry), expected); assert.deepEqual(await readFile(join(f.project, 'keep.css')), css);
@@ -272,8 +273,8 @@ async function run(): Promise<void> {
     // Observe the surviving Main operation, not that vanished renderer's promise.
     void f.save().catch(() => null); await until(() => waiting, stage);
     f.ui.webContents.forcefullyCrashRenderer(); await until(() => !f.runtime.connected, 'renderer revoked'); stop.release();
-    await until(() => f.runtime.workspace.snapshot().phase === 'idle', 'Main save reconciliation');
-    assert.equal(f.runtime.workspace.snapshot().lastSave!.status, stage === 'prepared-synced' ? 'cancelled' : 'saved');
+    await until(() => proofreadSnapshot(f.runtime.workspace.snapshot()).phase === 'idle', 'Main save reconciliation');
+    assert.equal(proofreadSnapshot(f.runtime.workspace.snapshot()).lastSave!.status, stage === 'prepared-synced' ? 'cancelled' : 'saved');
     assert.deepEqual(await readFile(f.entry), stage === 'prepared-synced' ? original : expected);
     assert.equal((await f.store.scan()).locked, false); await f.runtime.reloadUI();
     if (stage === 'prepared-synced') { assert.equal(f.current(), before); assert.equal((await f.read()).current!.input.changes.length, 1); }
@@ -282,7 +283,7 @@ async function run(): Promise<void> {
   });
   await use(async f => {
     await f.dirty(); const before = f.current(); f.control.step = async stage => { if (stage === 'native-replaced') throw new Error('SAVE_TEST_FAILURE'); };
-    const result = await f.save(); assert.equal(result.ok, false); assert.equal(result.state!.lastSave!.status, 'unknown');
+    const result = await f.save(); assert.equal(result.ok, false); assert.equal(proofreadSnapshot(result.state!).lastSave!.status, 'unknown');
     assert.equal(f.current(), before); assert.equal(before.draft.phase, 'uncertain'); assert.deepEqual(Buffer.from(before.draft.candidate.bytes), expected);
     assert.deepEqual(await readFile(f.entry), expected); assert.equal((await f.store.scan()).locked, true);
     assert.equal((await f.save()).code, 'DOCUMENT_RECOVERY_REQUIRED'); assert.equal((await f.read()).canSave, false);
@@ -308,8 +309,8 @@ async function run(): Promise<void> {
     await f.dirty(); const before = f.current();
     f.control.step = async stage => { if (stage === 'release-lock') throw new Error('SAVE_LOCK_CLEANUP_TEST'); };
     const result = await f.save(); assert.equal(result.ok, true); assert.equal(result.outcome, 'saved'); assert.equal(result.code, null);
-    assert.notEqual(f.current().id, before.id); assert.equal(result.state!.lastSave!.cleanupPending, true);
-    assert.equal(result.state!.lastSave!.code, 'SAVE_CLEANUP_PENDING'); assert.equal(result.state!.canSave, false);
+    assert.notEqual(f.current().id, before.id); assert.equal(proofreadSnapshot(result.state!).lastSave!.cleanupPending, true);
+    assert.equal(proofreadSnapshot(result.state!).lastSave!.code, 'SAVE_CLEANUP_PENDING'); assert.equal(proofreadSnapshot(result.state!).canSave, false);
     assert.equal((await f.save()).code, 'DOCUMENT_RECOVERY_REQUIRED'); assert.deepEqual(await readFile(f.entry), expected);
     assert.equal((await f.store.scan()).locked, true);
     pass('verified file and baseline with failed lock cleanup still report successful Save plus a cleanup warning, while a new overwrite waits for recovery');

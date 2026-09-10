@@ -1,3 +1,4 @@
+import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -52,8 +53,8 @@ async function fixture(outputRoot: string, results: string) {
       ...(process.platform === 'win32' ? { saveOriginal: createOriginalSaver(saves) } : {}),
     });
     const call = (expression: string): Promise<WorkspaceResult> => ui.webContents.executeJavaScript(expression);
-    const read = async () => { const result = await call('haeWorkspace.read()'); assert.ok(result.ok, result.code ?? 'read'); return result.state!; };
-    const current = () => runtime.workspace.current!;
+    const read = async () => { const result = await call('haeWorkspace.read()'); assert.ok(result.ok, result.code ?? 'read'); return proofreadSnapshot(result.state!); };
+    const current = () => proofreadDocument(runtime.workspace.current!);
     const edit = (value: DocumentCommand, id = current().id) => call(`haeWorkspace.edit(${JSON.stringify(id)},${JSON.stringify(value)})`);
     const click = async (selector: string) => {
       const preview = current().preview;
