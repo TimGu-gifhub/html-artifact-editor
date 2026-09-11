@@ -132,17 +132,23 @@ body { overflow: hidden; }
   min-height: 48px; padding: 0 12px;
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
-.tb-group { display: inline-flex; align-items: center; gap: 6px; }
+.tb-group { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; min-width: 0; }
 .tb-group + .tb-group { padding-left: 8px; border-left: 1px solid var(--border); }
-.tb-doc { border-left: none; padding-left: 0; }
-.tb-spacer { flex: 1; }
-.doc-name { font-weight: 600; font-size: 13px; white-space: nowrap; }
+/* 文档组是工具栏唯一可收缩项：长文件名缩略为省略号，右端状态与操作按钮不越界 */
+.tb-doc { border-left: none; padding-left: 0; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.tb-spacer { flex: 1 1 auto; min-width: 0; }
+.doc-name {
+  font-weight: 600; font-size: 13px; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
 .doc-flag {
+  flex: 0 0 auto;
   font-size: 11px; color: var(--warn);
   background: var(--warn-bg); border: 1px solid var(--warn-border);
   border-radius: 9px; padding: 1px 8px; white-space: nowrap;
 }
 .mode-badge {
+  flex: 0 0 auto;
   font-size: 11px; color: var(--text-2);
   background: var(--surface-3); border: 1px solid var(--border);
   border-radius: 9px; padding: 1px 8px; white-space: nowrap;
@@ -154,7 +160,7 @@ body { overflow: hidden; }
 
 .btn {
   font: inherit; color: var(--text);
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
   height: 28px; padding: 0 10px;
   background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: var(--radius); cursor: pointer; white-space: nowrap;
@@ -168,9 +174,21 @@ body { overflow: hidden; }
 .btn.sm { height: 24px; padding: 0 8px; font-size: 12px; }
 .btn.icon.sm { width: 24px; padding: 0; }
 
+/* 浏览/编辑文字分段切换：当前状态高亮并带 aria-current，另一段是切换动作 */
+.mode-switch {
+  display: inline-flex; align-items: stretch; flex: 0 0 auto;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  overflow: hidden;
+}
+.mode-switch .btn { border: none; border-radius: 0; height: 26px; }
+.mode-switch .btn + .btn { border-left: 1px solid var(--border); }
+.mode-switch .btn.current {
+  background: var(--accent-soft); color: var(--accent-strong); font-weight: 600;
+}
+.mode-switch .btn.current:disabled { opacity: 1; cursor: default; }
+
 /* “更多”菜单 */
-.menu-wrap { display: inline-flex; }
-.menu {
+.menu-wrap { display: inline-flex; }.menu {
   position: fixed; top: 44px; right: 8px; z-index: 40;
   min-width: 220px; padding: 4px;
   background: var(--surface); border: 1px solid var(--border);
@@ -345,6 +363,75 @@ body { overflow: hidden; }
   flex: 0 1 42%; min-height: 120px; border-left: none; border-top: 1px solid var(--border);
 }
 .editor-app .statusbar { flex: 0 0 auto; }
+
+/* 就地小编辑窗（contextual，默认 400×420）：紧凑布局，无复核列表 */
+.editor-app.contextual .toolbar { min-height: 40px; padding: 0 8px; gap: 6px; }
+.editor-app.contextual .panel-head { padding: 7px 10px 5px; }
+.editor-app.contextual .editor-body { padding: 8px 10px 12px; gap: 10px; }
+.editor-app.contextual .editor-empty { padding: 12px 10px; }
+.editor-app.contextual .draft-input { min-height: 64px; }
+.editor-app.contextual .field-foot { flex-direction: column; align-items: flex-start; gap: 4px; }
+.orig-fold {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.orig-fold > summary {
+  cursor: pointer; padding: 6px 10px;
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+}
+.orig-fold > .orig-text { border: none; background: none; padding: 0 10px 8px; }
+
+/* 文字装饰层（独立透明原生窗）：只画矩形边框，背景全透明，不拦截事件。
+   编辑器页面 CSP 为 style-src 'self'，矩形边框画在全窗 canvas 上，不用内联样式。 */
+html.decoration, html.decoration body { background: transparent; }
+.decoration-canvas {
+  position: fixed; inset: 0; width: 100vw; height: 100vh;
+  pointer-events: none;
+}
+
+/* 原位输入窗（inline role）：透明、无标题栏的原生子窗口，直接覆盖所选 Text。
+   Main 的原生 bounds 为 rect.x/y-2、宽/高 ceil+5，因此文字必须从窗口内 x=2,y=2
+   开始；textarea 是 replaced element，left/right 不保证覆盖原生宽度，必须显式
+   width/height；输入框无 border/padding，选中提示用 outline（不占文字内边距）。
+   字体、颜色、背景等外观由 CSSOM 逐项按 placement.style 赋值（CSP style-src
+   'self'，不用内联样式文本），这里没有默认 padding、工具栏或状态栏。 */
+html.inline-window, html.inline-window body { background: transparent; }
+.inline-app { position: fixed; inset: 0; background: transparent; }
+.inline-text-input {
+  position: absolute; left: 2px; top: 2px;
+  width: calc(100% - 4px); height: calc(100% - 4px);
+  box-sizing: border-box;
+  margin: 0; padding: 0; border: none; border-radius: 0;
+  resize: none; overflow: auto;
+  background: transparent; color: var(--text);
+  font: inherit;
+  outline: none;
+  display: block;
+}
+.inline-text-input:focus { outline: 1px solid var(--accent); outline-offset: 0; }
+.inline-text-input:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; border-radius: 0; }
+.inline-text-input:disabled { opacity: 0.7; }
+
+/* detached：源 Text 离开视区时 Main 把原生窗变为最多 440×180 的临时输入面板，
+   同一 textarea 上移出标签位，改用可读的 14px 正常颜色背景（不再套源样式）。 */
+.inline-tag {
+  position: absolute; left: 2px; top: 2px; height: 20px;
+  display: flex; align-items: center;
+  max-width: calc(100% - 4px); padding: 0 8px;
+  font-size: 11px; line-height: 1; white-space: nowrap; overflow: hidden;
+  color: var(--warn); background: var(--warn-bg);
+  border: 1px solid var(--warn-border); border-radius: 4px;
+  box-sizing: border-box;
+}
+.inline-app.detached { background: var(--surface); }
+.inline-app.detached .inline-text-input {
+  top: 24px; height: calc(100% - 26px); width: calc(100% - 4px);
+  font-family: var(--font); font-size: 14px; font-weight: 400; font-style: normal;
+  line-height: 1.6; letter-spacing: normal; text-indent: 0; text-align: left;
+  color: var(--text); background: var(--surface-2);
+  padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius);
+}
+.inline-app.detached .inline-text-input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 
 /* ================= 对话框 ================= */
 .scrim {

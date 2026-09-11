@@ -10,7 +10,10 @@ AI 生成报告、仪表盘或展示页后，人可以直接校对标题、日�
 
 **已具备：**
 
-- 点击支持的静态文字，在可信校稿栏输入，短暂停顿后自动更新预览；HTML 仍须明确复核保存。
+- 点击支持的静态文字，在原位置直接输入，短暂停顿后自动更新预览；HTML 仍须明确复核保存。
+- “显示隐藏内容”可临时展开预先存在的隐藏正文，用于校稿标签页后续内容；保存保留原始显隐和标签脚本。当前支持范围与页面样式限制见 [隐藏静态内容校稿](docs/HIDDEN_CONTENT.md)。
+- “浏览”切到目标标签后，返回“编辑文字”可保留经核验的预置正文与位置，直接点击原文修改；工具栏可打开复核并全选保存，保存后仍保留当前面板。侧栏和浮窗为可选载体。范围见 [浏览后就地校稿](docs/CONTEXTUAL_EDIT.md)。
+- 浏览中已显现的渐显正文、已展开问答和本地提交后显示的预置提示，可经完整源码核验后继续原位校稿。显示只作用于当前屏幕；脚本生成/改写的正文仍只读，范围与后续计划见 [当前显示补充](docs/CURRENT_VIEW.md)。
 - 查看真实原文/新文，逐条或全选确认；再次修改某条会取消该条的复核标记，保存前核对最新源码 Diff。
 - 隐藏校稿栏扩展预览；拆卸为原生独立窗口，收回时保留同一文档与输入。
 - 从当前草稿生成 A4/Letter PDF，选择横向和背景；查看器与导出使用同一份字节，导出不保存 HTML。首版仅创建新 PDF，不覆盖已有文件。
@@ -108,7 +111,7 @@ git diff --check
 本项目在需求梳理、架构设计、代码实现、测试和文档编写过程中，使用了 **ChatGPT / Codex** 与 **Kimi / Kimi Code** 辅助开发。感谢以下公司及其研究、产品与工程团队提供的模型和工具：
 
 - **[OpenAI](https://openai.com/)**：感谢 **ChatGPT、Codex 和 GPT 系列模型（含本阶段实际使用的 GPT-6）**，为项目规划、核心实现、代码审查与文档完善提供帮助；本阶段 Codex（GPT-6）参与 Main 历史、持久化、启动与退出协调、提交后的恢复协调、检查点清理及其中断恢复、保存锁审查与原生占用保护，以及产品 Main 装配、浮窗/PDF 隔离、文件导出、独立集成测试，以及目录恢复的代码复核/进程中断/原生保存/Edge 回归与合同更新。
-- **[月之暗面（Moonshot AI）](https://www.moonshot.ai/)**：感谢 **Kimi、Kimi Code 和 [Kimi K3 模型](https://www.kimi.com/news/kimi-k3)**，支持了[前端视觉候选的设计、实现与修正](docs/implementation/HAE-007.md)，并通过 Kimi Code CLI **0.42.0** 实际完成[方案 B 产品 UI、实时输入和交互修正](docs/implementation/HAE-009.md)、[目录内入口切换、模式切换、只读交互状态与菜单修正](docs/implementation/HAE-008.md)，以及[目录恢复选项与异步交互保护](docs/implementation/HAE-011.md)；完整别名为 `kimi-code/k3`，实际配置模型为 `k3`。
+- **[月之暗面（Moonshot AI）](https://www.moonshot.ai/)**：感谢 **Kimi、Kimi Code 和 [Kimi K3 模型](https://www.kimi.com/news/kimi-k3)**，支持了[前端视觉候选的设计、实现与修正](docs/implementation/HAE-007.md)，并通过 Kimi Code CLI **0.42.0** 实际完成[方案 B 产品 UI、原位输入、实时预览和交互修正](docs/implementation/HAE-009.md)、[目录内入口切换、模式切换、只读交互状态与菜单修正](docs/implementation/HAE-008.md)，以及[目录恢复选项与异步交互保护](docs/implementation/HAE-011.md)；完整别名为 `kimi-code/k3`，实际配置模型为 `k3`。
 
 AI 用于开发辅助，应用本身保持本地离线，不依赖云端模型或 AI API。开发分工、实际调用记录与人工复核要求见 [AI 开发流程](docs/AI_WORKFLOW.md)。
 
@@ -117,6 +120,12 @@ AI 用于开发辅助，应用本身保持本地离线，不依赖云端模型�
 本地记录清理继续由 Kimi Code CLI 0.42.0 / Kimi K3（`kimi-code/k3` / `k3`）实际完成方案 B 菜单、流程状态和原生确认文案；Codex（GPT-6）实现私有清单、精确删除、Main 生命周期及独立文件/进程验证。感谢月之暗面与 OpenAI 的这些工具和模型，执行范围见 [HAE-011 第十六阶段](docs/implementation/HAE-011.md)。
 
 准备阶段中断的后续扩展由 Codex（GPT-6）完成 Main 验证、版本化证据、备份分类及独立故障/产品测试，界面沿用此前 Kimi K3 的实现。感谢 OpenAI 与月之暗面及上述模型对这些阶段的实际帮助，详见 [HAE-010 第八阶段](docs/implementation/HAE-010.md)。
+
+隐藏静态内容校稿由 Kimi Code CLI 0.42.0 / Kimi K3（`kimi-code/k3` / `k3`）实际完成方案 B 控件、异步输入保护、状态文案及长文件名布局修正；Codex（GPT-6）实现有限展示规则、Main 校验、样式撤回及独立产品/字节验证。感谢月之暗面、OpenAI 及上述工具和模型，详见 [HAE-009 后续交付](docs/implementation/HAE-009.md)。
+
+浏览后就地校稿由 Kimi Code CLI 0.42.0 / Kimi K3 实际完成浏览/编辑控件、精确边框 Canvas、小窗与一次性聚焦；Codex（GPT-6）负责源子树证明、Main 展示交接、隔离与窗口集成、字节及真实产品验证。感谢月之暗面、OpenAI 及上述工具和模型，交付范围见 [HAE-009](docs/implementation/HAE-009.md)。
+
+原位输入与当前显示补充继续由 Kimi Code CLI 0.42.0 / Kimi K3（`kimi-code/k3` / `k3`）实际完成输入 UI、复核入口及渐显/问答/部分保留提示；Codex（GPT-6）完成 Main 源码证明、屏幕样式、隔离本地提交、文件保护及独立原生验证。感谢月之暗面与 OpenAI 的上述模型和工具。具体调用、验证与人工边界见 [HAE-009 第四、五阶段](docs/implementation/HAE-009.md)。
 
 ## License
 

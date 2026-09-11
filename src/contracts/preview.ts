@@ -1,4 +1,5 @@
 export const PREVIEW_READY_CHANNEL = 'hae:preview-ready';
+export const PRESENTATION_INTERACTION = 'hae:presentation-interaction';
 export const PREVIEW_ARGUMENT = '--hae-preview=';
 export type PreviewMode = 'proofread' | 'interactive';
 

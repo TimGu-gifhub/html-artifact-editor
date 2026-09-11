@@ -7,6 +7,7 @@ import { createWorkspaceBridge } from './bridge.ts';
 import type { WorkspaceBridgeExtension } from './bridge.ts';
 import { createWorkspace } from './controller.ts';
 import type { Workspace, WorkspaceDecisions } from './controller.ts';
+import type { TransferPresentation } from './controller.ts';
 import { prepareDocument } from './document.ts';
 import { prepareInteractiveDocument } from './interactive-document.ts';
 import { bindWorkspaceWindow } from './window.ts';
@@ -27,6 +28,7 @@ export type SessionPorts = WorkspaceDecisions & WindowCloseOptions & Readonly<{
   backups?: BackupRestorer;
   bridgeExtension?: (contents: WebContents) => WorkspaceBridgeExtension;
   disposeAuxiliary?: () => Promise<void>;
+  transferPresentation?: TransferPresentation;
 }>;
 
 // Install before loading the trusted UI. A single workspace owns the current
@@ -41,7 +43,7 @@ export function createWorkspaceSession(window: BrowserWindow, outputRoot: string
   workspace = createWorkspace(outputRoot, ports, prepareDocument, (next, previous) => {
     if (host.current !== (previous?.preview.view ?? null)) throw new Error('DOCUMENT_ACTIVATION_UNKNOWN');
     return host.swap(next?.preview.view ?? null);
-  }, ports.saveOriginal, ports.checkpoints, ports.backups, prepareInteractiveDocument);
+  }, ports.saveOriginal, ports.checkpoints, ports.backups, prepareInteractiveDocument, ports.transferPresentation);
   let bridge: ReturnType<typeof createWorkspaceBridge>;
   const bridges = new Set<ReturnType<typeof createWorkspaceBridge>>();
   const connect = (contents = window.webContents) => {

@@ -1,8 +1,9 @@
-import { useId } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import type { InputSnapshot } from '../contracts/input.ts';
 import type { PreviewMode } from '../contracts/preview.ts';
 import type { LiveInputController, LiveInputView } from './live-input.ts';
 import { useLiveInput } from './live-input.ts';
+import { CompactFocusTracker } from './contextual-panel.ts';
 
 type EditorPanelProps = Readonly<{
   hasDocument: boolean;
@@ -10,6 +11,8 @@ type EditorPanelProps = Readonly<{
   input: InputSnapshot | null;
   controller: LiveInputController;
   onRetryBegin: () => void;
+  /** 就地小窗：紧凑布局，原文默认折叠，含“取消待预览”；复核与保存仍在主窗口。 */
+  compact?: boolean;
 }>;
 
 function statusBadge(view: LiveInputView, input: InputSnapshot | null) {
@@ -57,6 +60,27 @@ export function EditorPanel(props: EditorPanelProps) {
   const view = useLiveInput(props.controller);
   const inputId = useId();
   const { input } = props;
+  const compact = props.compact ?? false;
+
+  // 就地小窗：新的输入绑定（Main 会话 editToken）就绪后聚焦草稿框一次，让用户
+  // 点击原文后能立即输入。组词/冻结时推迟而非丢弃；离开 compact、只读或失去
+  // 绑定时重置；同一绑定的后续输入/预览/状态更新不再抢焦点。docked/floating
+  // 的既有焦点行为不变。聚焦不更改文字与选区，也不触发 apply/save。
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusTrackerRef = useRef<CompactFocusTracker | null>(null);
+  focusTrackerRef.current ??= new CompactFocusTracker();
+  const focusBinding = view.phase === 'active' && view.nodeId !== null && input?.input
+    ? input.input.editToken : null;
+  useEffect(() => {
+    const target = focusTrackerRef.current!.evaluate({
+      compact,
+      readonly: props.mode === 'interactive',
+      binding: focusBinding,
+      frozen: quiesced(input, view),
+      composing: view.composing,
+    });
+    if (target !== null) draftRef.current?.focus();
+  });
 
   let body;
   if (!props.hasDocument) {
@@ -104,14 +128,22 @@ export function EditorPanel(props: EditorPanelProps) {
   } else {
     const frozen = quiesced(input, view);
     body = <div className="editor-body">
-      <div className="field">
-        <span className="field-label">文件原文</span>
-        <div className="orig-text">{view.beginText}</div>
-      </div>
+      {compact ? (
+        <details className="orig-fold">
+          <summary>文件原文</summary>
+          <div className="orig-text">{view.beginText}</div>
+        </details>
+      ) : (
+        <div className="field">
+          <span className="field-label">文件原文</span>
+          <div className="orig-text">{view.beginText}</div>
+        </div>
+      )}
       <div className="field">
         <label className="field-label" htmlFor={inputId}>草稿文字</label>
         <textarea
           id={inputId}
+          ref={draftRef}
           className="draft-input"
           value={view.localText}
           disabled={frozen}
@@ -146,6 +178,14 @@ export function EditorPanel(props: EditorPanelProps) {
           onClick={() => props.controller.restoreParagraph()}>
           还原为文件原文
         </button>
+        {compact && (
+          <button type="button" className="btn"
+            disabled={frozen || view.busy || view.composing || !view.dirty}
+            title="取消尚未预览的输入；已预览内容用“还原为文件原文”或撤销恢复。"
+            onClick={() => props.controller.escape()}>
+            取消待预览
+          </button>
+        )}
         <span className="hint">还原本段为文件原文会形成一条可撤销的草稿记录，不会写回原文件。</span>
       </div>
     </div>;
@@ -153,7 +193,7 @@ export function EditorPanel(props: EditorPanelProps) {
 
   return (
     <div className="editor-inner">
-      <div className="panel-head"><h2>校稿</h2></div>
+      <div className="panel-head"><h2>{compact ? '就地校稿' : '校稿'}</h2></div>
       {body}
     </div>
   );

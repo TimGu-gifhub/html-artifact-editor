@@ -108,7 +108,10 @@ async function browserReopen(value, expectedTexts) {
   for (const candidate of candidates) { try { await access(candidate); edge = candidate; break; } catch {} }
   assert.ok(edge, 'An installed independent Edge browser is required for this Windows acceptance test.');
   const browserProfile = await mkdtemp(join(value.base, 'edge-'));
+  // Edge's Windows compatibility relaunch can lose inherited stdout/stderr.
+  // Use Playwright's upstream launch workaround; keep the browser sandbox on.
   const { stdout } = await execute(edge, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--edge-skip-compat-layer-relaunch',
     '--user-data-dir=' + browserProfile, '--virtual-time-budget=1000', '--dump-dom', pathToFileURL(value.entry).href],
     { cwd: root, timeout: 30000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
   const document = parse(stdout);

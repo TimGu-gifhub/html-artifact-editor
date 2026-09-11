@@ -13,7 +13,7 @@ const focus = (): void => {
 };
 app.on('second-instance', focus); app.on('activate', focus);
 void app.whenReady().then(async () => {
-  const product = await createProductApplication(resolve(__dirname, '..'));
+  const product = await createProductApplication(resolve(__dirname, '..'), { initialPanel: 'inline' });
   mainWindow = product.window;
   console.log('HTML Artifact Editor: product workspace ready.');
 }).catch((error: unknown) => {

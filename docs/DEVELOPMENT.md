@@ -54,6 +54,9 @@ Windows 构建需要 SystemRoot 下的 .NET Framework 64 位 C# 编译器；缺�
 | `npm run test:product` | 真实产品 React/UI preload/Main/Preview 的输入、复核、Windows Save、浮窗、窄窗、PDF 同字节导出与关闭；原生选择/确认由 Main 回调驱动 |
 | `npm run test:product-entry` | Windows 产品目录打开/入口切换、取消/越界/另存保护、浮窗输入排空、窄窗键盘及菜单/原生视图不重叠与滚动保留；原生选择/确认由 Main 回调驱动 |
 | `npm run test:product-mode` | 真实产品模式往返、只读拒写、同根离线脚本、浮窗/组合态/取消、独占复制、干净历史与已保存空 Text 的 Undo/Redo、源冲突和关闭；原生决定由 Main 回调驱动 |
+| `npm run test:product-hidden` | 真实产品隐藏静态内容展开/撤回、实时文字与复核、精确 Windows Save、打印媒体、模式往返、窄窗/长文件名和样式阻挡后的撤回；Main 选择回调和合成组合事件，不代替人工验收 |
+| `npm run test:product-contextual` | 浏览后预置面板与滚动延续、精确 Text 原生装饰、就地输入归属/自动聚焦/组词保护、缩放/滚动、打印原规则及精确 Windows Save；人工鼠标穿透、拖动、IME 与多屏 DPI 单独验收 |
+| `npm run test:product-view` | 渐显/问答/预置提交提示的源码核验和显示延续、原位 Unicode 输入、保存前零写入、全选复核与精确保存、原打印规则、重开交互及脚本改字拒绝；Main 测试选择回调，非人工验收 |
 | `npm run test:product-acceptance` | 五处校稿、实际 Main 强杀/产品恢复、复核保存、独立 Edge 重开、撤销后再次保存、整份备份恢复和外部冲突另存；Windows 须有已安装 Edge，其他 OS 明确标记 unavailable |
 | `npm run test:product-interruption` | 完整保存/检查点清理中断的产品检查、原生决定、强杀后继续、零写入拒绝、未知/警告保留、关闭与 renderer 丢失后等待；自制文件、真实 Windows/Electron、Main 测试选择回调，非人工对话框验收 |
 | `npm run test:product-cleanup` | 全部私有记录清理、取消/无效决定、精确强杀恢复、profile/文档互斥、关闭/renderer 生命周期、20 项额度满后另存退出与清理后再次保存；真实 Electron/Windows 和独立字节断言，非人工确认验收 |
@@ -170,3 +173,9 @@ Windows 开发请从独立终端进入仓库并运行上述命令。2026-09-10 �
 同一构建随后从已有 Explorer 桌面会话启动，实际输出 `product workspace ready`，工作台窗口可见且响应，固定 userData/workspace-records 的身份检查通过。此验证只证明正常入口启动，不替代打开/保存对话框或真实输入法人工验收。测试入口使用独立临时 profile，所以其通过不能覆盖宿主的路径虚拟化。
 
 当前不支持上述重定向启动环境；保留逻辑路径与真实目录一致的校验，不自动迁移、清空或改用另一个 profile 来逃避证据。遇到该错误时先退出未打开文档的失败启动，从独立 Windows 终端重试；若仍报错，保留目录并检查路径、链接及权限，不删除恢复记录。
+
+### 原位输入定向检查
+
+`npm run test:product-inline` 分别执行 hidden 属性和无 ARIA 的 CSS 类标签样例，覆盖正常入口使用的 inline 面板、直接选字输入、组合输入保护、几何回退、全选复核和保留当前面板的 Windows 保存。该命令已纳入本地 `npm run check`，不使用 GitHub CI。Main 工厂的其他实验保留 docked 默认选项，不能用侧栏检查替代原位输入验收。详细合同见 [浏览与原位校稿](CONTEXTUAL_EDIT.md)。
+
+`test:product-acceptance` 的独立 Edge 启动使用 `--edge-skip-compat-layer-relaunch`，避免 Windows 兼容层重启丢失 `--dump-dom` 的 stdout；它不禁用浏览器 sandbox。若仍无法取得页面，保留失败记录并诊断安装/启动环境，不能只凭退出码 0 或源文件存在宣称重开成功。当前显示与渐显/问答的独立验证另见 [HAE-009 第五阶段](implementation/HAE-009.md)。

@@ -206,7 +206,7 @@ async function run() {
     await writeFile(join(results, 'product-preview.png'), await captureReady(proofreadDocument(runtime.workspace.current!).preview.contents));
     window.setContentSize(960, 640); await delay(200);
     assert.equal(await window.webContents.executeJavaScript('document.documentElement.scrollWidth <= innerWidth'), true);
-    await click(window, '.toolbar button.narrow-only', '变更');
+    await click(window, '.toolbar button', '复核变更');
     await until(() => runtime.host.current!.getBounds().width === 0, 'narrow review drawer hides Preview');
     await click(window, '[role=dialog] button[aria-label="关闭"]');
     await until(() => runtime.host.current!.getBounds().width > 0, 'narrow drawer closes');

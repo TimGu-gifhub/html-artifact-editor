@@ -7,17 +7,20 @@ import type { MappingRestore, MappingRestoreResult } from '../contracts/mapping-
 import { isMappingRestore } from '../contracts/mapping-restore.ts';
 import { isMappingHistory } from '../contracts/mapping-history.ts';
 import type { MappingHistory, MappingHistoryResult } from '../contracts/mapping-history.ts';
+import type { TextGeometry } from '../contracts/text-geometry.ts';
+import { createTextGeometry } from './text-geometry.ts';
 
 // Called only from the isolated preload. There is no page-world bridge or marker.
 export function createNodeRegistry(root: Document, identity: MappingIdentity, expected: SourceTree,
   emit: (event: MappingEvent) => void, emitIntent: (intent: MappingEditIntent) => void = () => {},
-  emptyTextIndices: readonly number[] = []) {
+  emptyTextIndices: readonly number[] = [], emitGeometry?: (value: TextGeometry) => void) {
   let revision = 0;
   let active = true;
   let selected: string | null = null;
   let editToken: string | null = null;
   let intentSequence = 0;
   let intent: MappingEditIntent | null = null;
+  let geometry: ReturnType<typeof createTextGeometry> | undefined;
   const byObject = new WeakMap<Text, string>();
   const byId = new Map<string, Text>();
   const valueById = new Map<string, string>();
@@ -28,6 +31,7 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
     selected = null;
     editToken = null; intent = null;
     observer.disconnect();
+    geometry?.close();
     byId.clear(); valueById.clear();
     root.removeEventListener('click', onClick, true);
     root.removeEventListener('selectionchange', onSelectionChange);
@@ -48,6 +52,7 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
     }
     selected = value;
     emit({ identity, kind: 'selection', revision: ++revision, nodeId: value });
+    geometry?.schedule();
   };
   const crossesText = (): boolean => {
     const selection = root.getSelection();
@@ -65,24 +70,27 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
     return false;
   };
   const hasGeneratedContent = (text: Node): boolean => hasGeneratedAncestor(text.parentElement);
-  const onClick = (event: MouseEvent): void => {
-    if (!event.isTrusted || !drain() || event.button !== 0) return;
-    if (crossesText()) { select(null); return; }
+  const hitText = (event: MouseEvent): string | null => {
+    if (!drain() || crossesText()) return null;
     const caret = root.caretRangeFromPoint(event.clientX, event.clientY);
     const text = caret?.startContainer;
-    if (!text || text.nodeType !== Node.TEXT_NODE) { select(null); return; }
+    if (!text || text.nodeType !== Node.TEXT_NODE) return null;
     const nodeId = byObject.get(text as Text);
-    if (!nodeId || text.getRootNode() !== root || !(event.composedPath().includes(text.parentNode!))) { select(null); return; }
+    if (!nodeId || text.getRootNode() !== root || !(event.composedPath().includes(text.parentNode!))) return null;
     // Overlapping pseudo content cannot be proven to identify the source Text.
     // Conservatively leave all text beneath that pseudo-bearing ancestor unselectable.
-    if (hasGeneratedContent(text)) { select(null); return; }
+    if (hasGeneratedContent(text)) return null;
     const range = root.createRange();
     range.selectNodeContents(text);
     // A caret may snap to a nearby node when clicking generated CSS text or blank space.
     if (![...range.getClientRects()].some((rect) => Number.isFinite(rect.x) && Number.isFinite(rect.y)
       && rect.width > 0 && rect.height > 0 && event.clientX >= rect.left && event.clientX <= rect.right
-      && event.clientY >= rect.top && event.clientY <= rect.bottom)) { select(null); return; }
-    select(nodeId);
+      && event.clientY >= rect.top && event.clientY <= rect.bottom)) return null;
+    return nodeId;
+  };
+  const onClick = (event: MouseEvent): void => {
+    if (!event.isTrusted || !drain() || event.button !== 0) return;
+    select(hitText(event));
   };
   observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
   const matchTree = (omitted: ReadonlySet<number>): Map<number, Node> => {
@@ -171,6 +179,8 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
       root.addEventListener('click', onClick, true);
       root.addEventListener('selectionchange', onSelectionChange);
       emit({ identity, kind: 'ready', revision: ++revision, editableCount: byId.size });
+      if (emitGeometry) geometry = createTextGeometry(root, identity, () => ({ active: drain(), revision, selected }), hitText,
+        id => { const node = byId.get(id); return node && node.data === valueById.get(id) && !hasGeneratedContent(node) ? node : undefined; }, emitGeometry);
     }
   } catch { invalidate('UNSUPPORTED_DOM'); }
   const check = (request: MappingCheck): boolean => {
@@ -208,7 +218,7 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
           }
           valueById.set(change.nodeId, change.newText);
         }
-        ++revision; return result('applied');
+        ++revision; geometry?.schedule(); return result('applied');
       } catch { invalidate('DOM_MUTATED'); return result('unknown'); }
     },
     history(request: MappingHistory): MappingHistoryResult {
@@ -227,7 +237,7 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
           || node.data !== request.newText || !node.isConnected || node.getRootNode() !== root) {
           invalidate('DOM_MUTATED'); return result('unknown');
         }
-        valueById.set(request.nodeId, request.newText); selected = null; ++revision;
+        valueById.set(request.nodeId, request.newText); selected = null; ++revision; geometry?.schedule();
         return result('applied');
       } catch { invalidate('DOM_MUTATED'); return result('unknown'); }
     },
@@ -253,7 +263,7 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
         }
         selected = intent.nodeId;
       }
-      editToken = null; intent = null; ++revision;
+      editToken = null; intent = null; ++revision; geometry?.schedule();
       return result(true);
     },
     apply(request: MappingApply): MappingApplyResult {
@@ -276,6 +286,7 @@ export function createNodeRegistry(root: Document, identity: MappingIdentity, ex
           valueById.set(request.nodeId, request.newText);
         }
         ++revision; // Even a no-op retires the request's selection revision.
+        geometry?.schedule();
         return result('applied');
       } catch { invalidate('DOM_MUTATED'); return result('unknown'); }
     },

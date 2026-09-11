@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { BrowserWindow, dialog, session } from 'electron';
 import { EDITOR_URL } from '../../contracts/editor.ts';
+import type { PanelMode } from '../../contracts/desktop.ts';
 import type { BackupReview } from '../../contracts/backup.ts';
 import type { LeaveReview } from '../../contracts/workspace.ts';
 import type { InterruptionSummary } from '../../contracts/interruption.ts';
@@ -31,7 +32,7 @@ export type ProductChoices = Readonly<{
   cleanupReview?: (value: CleanupSummary) => Promise<unknown>;
 }>;
 export async function createProductApplication(outputRoot: string,
-  options: Readonly<{ visible?: boolean; bindQuit?: boolean; choices?: ProductChoices;
+  options: Readonly<{ visible?: boolean; bindQuit?: boolean; choices?: ProductChoices; initialPanel?: PanelMode;
     onStorageStep?: PersistentSessionPorts['onStorageStep']; onInterruptionStep?: InterruptionPorts['onStep']; onRecordCleanupStep?: RecordCleanupPorts['onStep'] }> = {}) {
   const uiSession = session.fromPartition(`hae-product-${randomUUID()}`, { cache: false });
   await registerBundledContent(uiSession, 'editor', 'app', resolve(outputRoot, 'ui'));
@@ -73,7 +74,7 @@ export async function createProductApplication(outputRoot: string,
       return { reviewId: value.reviewId, decision: selected.response === 1 ? 'clear-records' : 'cancel' };
     }),
     ...(options.onRecordCleanupStep ? { onStep: options.onRecordCleanupStep } : {}),
-  });
+  }, options.initialPanel);
   const reportError = (code: string): void => {
     desktop.report(code);
     if (!runtime?.connected || runtime.workspace.snapshot().phase === 'disposed') {
@@ -101,11 +102,12 @@ export async function createProductApplication(outputRoot: string,
           buttons: ['取消', '确认恢复备份'], defaultId: 0, cancelId: 0, noLink: true });
         return { reviewId: value.reviewId, decision: selected.response === 1 ? 'restore' : 'cancel' };
       }),
-      bounds: desktop.bounds, reportError, bridgeExtension: desktop.extension,
+      bounds: desktop.bounds, reportError, bridgeExtension: desktop.extension, transferPresentation: desktop.transferPresentation,
       ...(options.onStorageStep ? { onStorageStep: options.onStorageStep } : {}),
       beforeRequestClose: desktop.beforeClose, disposeAuxiliary: desktop.dispose,
     });
     desktop.watch();
+    if (options.initialPanel === 'inline') await desktop.prepareInline();
     const quit = options.bindQuit === false ? null : bindWorkspaceQuit(window, runtime, reportError, desktop.ownedWindows);
     window.once('closed', () => { uiSession.protocol.unhandle('editor'); });
     await window.loadURL(EDITOR_URL);

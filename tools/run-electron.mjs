@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const kind = process.argv.includes('--product-mode') ? 'product-mode' : process.argv.includes('--product-entry') ? 'product-entry' : process.argv.includes('--product') ? 'product' : process.argv.includes('--smoke') ? 'smoke'
+const kind = process.argv.includes('--product-view') ? 'product-view' : process.argv.includes('--product-inline') ? 'product-inline' : process.argv.includes('--product-contextual') ? 'product-contextual' : process.argv.includes('--product-hidden') ? 'product-hidden' : process.argv.includes('--product-mode') ? 'product-mode' : process.argv.includes('--product-entry') ? 'product-entry' : process.argv.includes('--product') ? 'product' : process.argv.includes('--smoke') ? 'smoke'
   : process.argv.includes('--security') ? 'security'
     : process.argv.includes('--mapping') ? 'mapping'
       : process.argv.includes('--patch') ? 'patch'
@@ -22,10 +22,11 @@ const kind = process.argv.includes('--product-mode') ? 'product-mode' : process.
                           : process.argv.includes('--source-diff') ? 'source-diff'
                             : process.argv.includes('--history') ? 'history'
     : process.argv.includes('--preview') ? 'preview-tool' : 'main';
-const smoke = ['product-mode', 'product-entry', 'product', 'smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project', 'save-session', 'startup', 'quit', 'recovery', 'source-diff', 'history'].includes(kind);
+const smoke = ['product-view', 'product-inline', 'product-contextual', 'product-hidden', 'product-mode', 'product-entry', 'product', 'smoke', 'security', 'mapping', 'patch', 'draft', 'editor', 'workspace', 'session', 'project', 'save-session', 'startup', 'quit', 'recovery', 'source-diff', 'history'].includes(kind);
 const entry = resolve(root, `out/${kind}/index.cjs`);
 if (!existsSync(entry)) throw new Error('Build output missing. Run npm run build first.');
-const reportPath = resolve(root, `test-results/${kind}.json`);
+const cssTabs = kind === 'product-inline' && process.argv.includes('--css-tabs');
+const reportPath = resolve(root, `test-results/${cssTabs ? 'product-inline-css' : kind}.json`);
 if (smoke) {
   await mkdir(resolve(root, 'test-results'), { recursive: true });
   await writeFile(reportPath, '{"status":"running"}\n');
@@ -34,13 +35,14 @@ const env = { ...process.env };
 // Embedded terminals may inherit this flag from their own Electron host.
 delete env.ELECTRON_RUN_AS_NODE;
 const args = [kind === 'main' ? root : entry];
+if (cssTabs) args.push('--css-tabs');
 if (kind === 'preview-tool' && process.argv.includes('--interactive')) args.push('--interactive');
 if (kind === 'preview-tool' && process.argv.includes('--directory')) args.push('--directory');
 const child = spawn(electron, args, { cwd: root, env, stdio: 'inherit', windowsHide: smoke });
 // History has 31 native/worker flows, including 24 durable edits, compaction
 // and Save-lock process restarts. Give that aggregate I/O work a bounded two
 // minutes; individual workers, native calls and IPC keep their existing limits.
-const timeoutMs = kind === 'history' ? 120_000 : ['product', 'product-entry', 'product-mode'].includes(kind) ? 180_000
+const timeoutMs = kind === 'history' ? 120_000 : ['product', 'product-entry', 'product-mode', 'product-hidden', 'product-contextual', 'product-inline', 'product-view'].includes(kind) ? 180_000
   : ['save-session', 'quit', 'recovery'].includes(kind) ? 90_000 : 45_000;
 const timeout = smoke ? setTimeout(() => {
   console.error(`Electron ${kind} exceeded ${timeoutMs / 1000} seconds.`);

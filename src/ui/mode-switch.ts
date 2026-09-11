@@ -72,14 +72,18 @@ function describeModeSwitchError(code: string | null): string {
  * input snapshot: there is simply nothing to drain. Main's native keep/discard/
  * copy review and picker cancellations stay quiet; Main and transport errors
  * are surfaced without rewriting any state.
+ *
+ * 返回 true 仅当 Main 接受了切换且不是原生复核取消（outcome !== 'cancelled'）；
+ * 调用方只有在 true 时才可衔接后续动作（如转入原位输入面板），取消/错误一律
+ * 返回 false，绝不切面板。
  */
-export async function runModeSwitch(deps: ModeSwitchDeps): Promise<void> {
+export async function runModeSwitch(deps: ModeSwitchDeps): Promise<boolean> {
   const start = deps.getState();
-  if (!start?.current) return;
+  if (!start?.current) return false;
   const startBlocker = modeSwitchBlocker(start, { busy: false, composing: deps.isComposing() });
   if (startBlocker) {
     deps.showToast(`无法切换模式：${modeSwitchBlockerText(startBlocker)}`, 'error');
-    return;
+    return false;
   }
   const documentId = start.current.id;
   const startMode = start.current.mode === 'interactive' ? 'interactive' : 'proofread';
@@ -89,34 +93,35 @@ export async function runModeSwitch(deps: ModeSwitchDeps): Promise<void> {
     flushed = await deps.flush();
   } catch {
     deps.showToast('切换模式前需要先完成当前输入；可能正在组词或投递失败，请检查校稿栏。', 'error');
-    return;
+    return false;
   }
-  if (!flushed) return; // the flush path already explained the failure
+  if (!flushed) return false; // the flush path already explained the failure
   const latest = deps.getState();
   if (!latest?.current || latest.current.id !== documentId) {
     deps.showToast('文档已变化，本次切换模式已取消。');
-    return;
+    return false;
   }
   const latestMode = latest.current.mode === 'interactive' ? 'interactive' : 'proofread';
   if (latestMode !== startMode) {
     // 排空期间模式已被其他路径改变：不得把旧目标投递给新状态。
     deps.showToast('模式已变化，本次切换已取消。');
-    return;
+    return false;
   }
   const lateBlocker = modeSwitchBlocker(latest, { busy: false, composing: deps.isComposing() });
   if (lateBlocker) {
     deps.showToast(`无法切换模式：${modeSwitchBlockerText(lateBlocker)}`, 'error');
-    return;
+    return false;
   }
   let result: WorkspaceResult;
   try {
     result = await deps.switchMode(documentId, latest.stateRevision, target);
   } catch {
     deps.showToast(describeCode('EDITOR_DISCONNECTED'), 'error');
-    return;
+    return false;
   }
   // Opened arrives through onState; a cancelled Main review is not a failure
   // and never a write: both stay quiet and keep the current document/review.
-  if (result.ok) return;
+  if (result.ok) return result.outcome !== 'cancelled';
   deps.showToast(describeModeSwitchError(result.code), 'error');
+  return false;
 }

@@ -23,13 +23,14 @@ export type WorkspaceDecisions = Readonly<{
   reviewBackup?: (value: BackupReview) => Promise<unknown>;
 }>;
 export type ActivateDocument = (next: OpenDocument | null, previous: OpenDocument | null) => () => void;
+export type TransferPresentation = (previous: OpenDocument, next: OpenDocument, signal: AbortSignal) => Promise<void>;
 type DepartureProof = Readonly<{ input: InputSnapshot | null; reason: 'discarded' | 'copied' | null }>;
 // Private Main coordinator. It has no renderer/path IPC or implicit HTML Save.
 // The synchronous activation port must restore its prior state before throwing.
 // A successful activation returns a rollback for a failed final authority check.
 export function createWorkspace(outputRoot: string, decisions: WorkspaceDecisions, prepare: typeof prepareDocument,
   activate: ActivateDocument = () => () => {}, saveOriginal?: OriginalSaver, checkpoints?: DraftStore, backups?: BackupRestorer,
-  prepareInteractive?: typeof prepareInteractiveDocument) {
+  prepareInteractive?: typeof prepareInteractiveDocument, transferPresentation?: TransferPresentation) {
   let current: OpenDocument | null = null;
   let phase: WorkspacePhase = 'idle';
   let revision = 1;
@@ -439,6 +440,9 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
             if (!result.verifySaved || !await result.verifySaved(savedSource)) throw new Error('SAVE_REBASE_REQUIRED');
             const history = await leaving.history?.savedCheckpoint(savedSource.bytes);
             next = await prepare(outputRoot, leaving.preview.grant, ++generation, rebuilding.signal, checkpoints, undefined, history);
+            // Screen state is optional and never part of a SaveCommit. Failure
+            // to carry a tab/scroll must not turn a verified write into a retry.
+            try { await transferPresentation?.(leaving, next, rebuilding.signal); } catch { /* Product reports partial presentation. */ }
             if (!result.verifySaved || !await result.verifySaved(next.saveSource)) throw new Error('SAVE_REBASE_REQUIRED');
             const previous = install(next, () => {
               if (disposed || activationUncertain || pending !== operation || current !== leaving || rebuilding?.signal.aborted
@@ -487,6 +491,9 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
             }
             live(operation);
             const prepared = candidate;
+            // Optional product-only presentation handoff. Fresh mapping already
+            // exists; dynamic DOM never enters Text, history or save authority.
+            await transferPresentation?.(leaving, prepared, operation.signal); live(operation);
             const verifyActivation = async (): Promise<void> => {
               await leaving.saveSource.verify(); await prepared.saveSource.verify();
               if (prepared.saveSource.baseHash !== leaving.saveSource.baseHash) throw new Error('FILE_CHANGED');

@@ -9,14 +9,17 @@ import { useWorkspaceState, workspaceStore } from './store.ts';
 import { LiveInputController, useLiveInput } from './live-input.ts';
 import { ensureInputFlushed } from './flush.ts';
 import type { FlushDeps } from './flush.ts';
+import { panelOwner, runPanelChange, runReviewOpen } from './contextual-panel.ts';
 import { BusyGuard, entrySwitchBlocker, entrySwitchBlockerText, runEntrySwitch } from './entry-switch.ts';
-import { modeSwitchBlockerText, modeSwitchTarget, runModeSwitch } from './mode-switch.ts';
+import { modeSwitchBlockerText, runModeSwitch } from './mode-switch.ts';
+import { hiddenContentBlocker, hiddenContentBlockerText, hiddenContentForCurrent, runHiddenContentToggle } from './hidden-content-flow.ts';
 import { loadRecoveryCatalog, RecoveryDialogLifecycle, runRecoveryRestore } from './recovery-flow.ts';
 import type { RecoverySourceMode } from './recovery-flow.ts';
 import { InterruptionDialogLifecycle, interruptionBlocker, interruptionGate, interruptionGateText, runInterruptionCheck } from './interruption-flow.ts';
 import { CleanupDialogLifecycle, cleanupBlocker, cleanupGate, cleanupGateText, runCleanupCheck } from './cleanup-flow.ts';
 import { classifySaveResult } from './save-result.ts';
 import { EditorPanel } from './editor-panel.tsx';
+import { InlineWindow } from './inline-editor.tsx';
 import { ReviewPanel } from './review-panel.tsx';
 import { reviewChannel, useReviewStatus } from './review-channel.ts';
 import { BackupsDialog, PdfDialog, RecoveryDialog, ResourcesDialog, SaveDiffDialog } from './dialogs.tsx';
@@ -24,8 +27,8 @@ import { InterruptionDialog } from './interruption-dialog.tsx';
 import { CleanupDialog } from './cleanup-dialog.tsx';
 import { Dialog } from './dialog.tsx';
 import type { SaveError } from './dialogs.tsx';
-import { describeCode } from './util.ts';
-import { IconDock, IconFloat, IconFolder, IconMenu, IconMode, IconOpen, IconPanelHide, IconPanelShow, IconPdf, IconRedo, IconSave, IconUndo } from './icons.tsx';
+import { describeCode, presentationForCurrent, presentationStatusText } from './util.ts';
+import { IconDock, IconFloat, IconFolder, IconMenu, IconOpen, IconPanelHide, IconPanelShow, IconPdf, IconRedo, IconSave, IconUndo } from './icons.tsx';
 
 const desktopApi = () => window.haeDesktop ?? null;
 const workspaceApi = () => window.haeWorkspace ?? null;
@@ -50,11 +53,12 @@ export function App() {
     return <div className="boot" role="status">正在连接工作区…</div>;
   }
   const role = state.desktop?.role ?? 'main';
-  return role === 'editor' ? <EditorWindow state={state} /> : <MainWindow state={state} />;
+  return role === 'editor' ? <EditorWindow state={state} />
+    : role === 'inline' ? <InlineWindow state={state} /> : <MainWindow state={state} />;
 }
 
 /** One controller per window; only the owner window's controller sends input commands. */
-function useController(state: WorkspaceSnapshot, owner: boolean): LiveInputController {
+export function useController(state: WorkspaceSnapshot, owner: boolean): LiveInputController {
   const controller = useMemo(() => new LiveInputController(
     (documentId, value) => {
       const api = workspaceApi();
@@ -75,7 +79,7 @@ function useController(state: WorkspaceSnapshot, owner: boolean): LiveInputContr
 }
 
 /** Observe Main's single-shot flush requests; each id is answered exactly once. */
-function useFlushRequests(state: WorkspaceSnapshot, owner: boolean, controller: LiveInputController): void {
+export function useFlushRequests(state: WorkspaceSnapshot, owner: boolean, controller: LiveInputController): void {
   const handled = useRef(new Set<string>());
   useEffect(() => {
     const flush = state.desktop?.flush ?? null;
@@ -158,7 +162,7 @@ function useToast(): [Toast | null, (text: string, kind?: 'info' | 'error') => v
   return [toast, show];
 }
 
-type DialogKind = 'diff' | 'pdf' | 'recovery' | 'backups' | 'resources' | 'interruption' | 'cleanup';
+type DialogKind = 'diff' | 'pdf' | 'recovery' | 'backups' | 'resources' | 'interruption' | 'cleanup' | 'review';
 
 function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const { state } = props;
@@ -167,7 +171,9 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   // 脚本只读预览：Main 提供 mode=interactive、input=null、persistence=null。
   const readonly = current?.mode === 'interactive';
   const panel: PanelMode = state.desktop?.panel ?? 'docked';
-  const owner = panel !== 'floating';
+  // 输入 owner：主窗口仅 docked/hidden；就地小窗与独立浮窗属 editor 窗口，
+  // 原位输入（inline）属独立的原位输入窗（role=inline）。
+  const owner = panelOwner('main', panel);
   const controlVisible = panel === 'docked';
   const controller = useController(state, owner);
   const inputView = useLiveInput(controller);
@@ -289,6 +295,12 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     return gate !== null;
   }, [maintenanceGate, showToast]);
 
+  /** 当前文档身份绑定（documentId:mode）；异步排空前后核对，动作不得落到新文档。 */
+  const documentPin = useCallback((): string | null => {
+    const doc = workspaceStore.getState()?.current;
+    return doc ? `${doc.id}:${doc.mode}` : null;
+  }, []);
+
   const [switching, setSwitching] = useState(false);
   const onSwitchEntry = useCallback(() => {
     if (blockedByMaintenance()) return;
@@ -332,6 +344,109 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     } finally { setSwitchingMode(false); }
   });
   }, [runBusy, guardFlush, controller, showToast, blockedByMaintenance]);
+
+  // “编辑文字”入口：只读预览先经 Main 模式切换回到静态校稿——只有真实切换
+  // 成功（取消/错误一律不切面板）且静态文档就绪后才请求原位输入；已在静态
+  // 校稿时直接切到 inline；已是 inline 时不再请求。侧栏/浮窗仍在更多操作中可用。
+  const onEditText = useCallback(() => {
+    if (blockedByMaintenance()) return;
+    void runBusy(async () => {
+      const start = workspaceStore.getState();
+      if (!start?.current) return;
+      if (start.current.mode === 'interactive') {
+        setSwitchingMode(true);
+        try {
+          const switched = await runModeSwitch({
+            getState: () => workspaceStore.getState(),
+            isComposing: () => controller.isComposing(),
+            flush: () => guardFlush('切换模式'),
+            switchMode: (documentId, stateRevision, mode) => {
+              const api = workspaceApi();
+              if (!api) return Promise.resolve({ ok: false, code: 'MISSING_WORKSPACE_API', state: null, documentId, copy: null, outcome: null });
+              return api.switchMode(documentId, stateRevision, mode);
+            },
+            showToast,
+          });
+          if (!switched) return;
+          const settled = await workspaceStore.waitFor(
+            snap => snap.current?.mode === 'proofread' && snap.phase === 'idle', 15000);
+          if (!settled) return;
+        } finally { setSwitchingMode(false); }
+      }
+      if (workspaceStore.getState()?.desktop?.panel === 'inline') return;
+      // pin 在 runPanelChange 内于排空前取值、排空后复查：取消/失败/文档已变化
+      // 都不转移 panel。
+      await runPanelChange({
+        maintenanceGate,
+        pin: documentPin,
+        flush: () => flushWith(flushDeps),
+        request: next => {
+          const api = desktopApi();
+          if (!api) return Promise.resolve({ ok: false, code: 'MISSING_DESKTOP_API', state: null, documentId: null, copy: null, outcome: null });
+          return api.request({ kind: 'panel', mode: next });
+        },
+        showToast,
+      }, 'inline');
+    });
+  }, [runBusy, guardFlush, controller, showToast, blockedByMaintenance, maintenanceGate, documentPin, flushDeps]);
+
+  // 复核无需收回侧栏：所有宽度都有明显入口，打开前先排空实际输入 owner；
+  // 窄窗使用抽屉，其余宽度使用复核 Dialog。排空前后核对 documentId:mode 绑定，
+  // 复核界面不得开到已更换的文档上。
+  const onOpenReview = useCallback(() => {
+    if (blockedByMaintenance()) return;
+    void runBusy(async () => {
+      await runReviewOpen({
+        maintenanceGate,
+        pin: documentPin,
+        flush: () => flushWith(flushDeps),
+        open: () => { if (narrow) setDrawerOpen(true); else setDialog('review'); },
+        showToast,
+      });
+    });
+  }, [runBusy, blockedByMaintenance, maintenanceGate, documentPin, flushDeps, narrow, showToast]);
+
+  // inline 原位输入时，打开任何会隐藏原生预览的覆盖层（更多菜单/各对话框）前
+  // 先排空实际输入 owner（原位窗）；组词或失败拒绝打开并保留 textarea。异步排空
+  // 后复查原 documentId/mode，已变化则不打开。其它面板模式的既有合同不变。
+  const openOverlay = useCallback((action: string, open: () => void) => {
+    const start = workspaceStore.getState();
+    const doc = start?.current ?? null;
+    if (!doc || start?.desktop?.panel !== 'inline') {
+      open();
+      return;
+    }
+    if (blockedByMaintenance()) return;
+    void runBusy(async () => {
+      const pin = `${doc.id}:${doc.mode}`;
+      if (!(await flushWith(flushDeps))) {
+        showToast(`${action}前需要先完成当前输入；可能正在组词或投递失败，请检查输入区域。`, 'error');
+        return;
+      }
+      if (documentPin() !== pin) return; // 排空期间文档/模式已变化：不开到已更换的文档
+      open();
+    });
+  }, [blockedByMaintenance, runBusy, flushDeps, documentPin, showToast]);
+
+  // 显示隐藏内容：固定当前文档/模式/目标 enabled 后先排空实际输入窗口，
+  // 再用最新 stateRevision 请求 Main；不做乐观更新，显隐以 Main 快照为准。
+  const onToggleHidden = useCallback(() => {
+    if (blockedByMaintenance()) return;
+    void runBusy(async () => {
+      await runHiddenContentToggle({
+        getState: () => workspaceStore.getState(),
+        isComposing: () => controller.isComposing(),
+        maintenanceGate,
+        flush: () => guardFlush('显示隐藏内容'),
+        request: (documentId, stateRevision, enabled) => {
+          const api = desktopApi();
+          if (!api) return Promise.resolve({ ok: false, code: 'MISSING_DESKTOP_API', state: null, documentId, copy: null, outcome: null });
+          return api.request({ kind: 'hidden-content', documentId, stateRevision, enabled });
+        },
+        showToast,
+      });
+    });
+  }, [runBusy, guardFlush, controller, showToast, blockedByMaintenance, maintenanceGate]);
 
   const onOpen = useCallback((directory: boolean) => void runBusy(async () => {
     if (blockedByMaintenance()) return;
@@ -378,10 +493,17 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   }), [runBusy, guardFlush, showToast, blockedByMaintenance]);
 
   const onPanel = useCallback((mode: PanelMode) => void runBusy(async () => {
-    if (blockedByMaintenance()) return;
-    if (!(await guardFlush(mode === 'hidden' ? '隐藏校稿栏' : mode === 'floating' ? '拆卸校稿栏' : '停靠校稿栏'))) return;
-    await desktopApi()?.request({ kind: 'panel', mode });
-  }), [runBusy, guardFlush, blockedByMaintenance]);
+    await runPanelChange({
+      maintenanceGate,
+      flush: () => flushWith(flushDeps),
+      request: next => {
+        const api = desktopApi();
+        if (!api) return Promise.resolve({ ok: false, code: 'MISSING_DESKTOP_API', state: null, documentId: null, copy: null, outcome: null });
+        return api.request({ kind: 'panel', mode: next });
+      },
+      showToast,
+    }, mode);
+  }), [runBusy, flushDeps, maintenanceGate, showToast]);
 
   const handleSaveResult = useCallback((result: WorkspaceResult, documentId: string): boolean => {
     const verdict = classifySaveResult(result, documentId);
@@ -446,8 +568,10 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     }
     const reviewed = new Set(reviewChannel.currentReviewed(latest.desktop?.reviewed ?? []));
     if (!changes.every(change => reviewed.has(change.nodeId))) {
-      showToast('还有未复核的修改：请在校稿栏下方的复核列表勾选全部条目。', 'error');
+      // 直接打开复核界面（不仅 Toast）；已勾选项被再次修改时 Main 已自动取消其复核。
+      showToast('还有未复核的修改：请在复核列表勾选全部条目后再保存。', 'error');
       if (narrow) setDrawerOpen(true);
+      else setDialog('review');
       return;
     }
     const { draftRevision, candidateHash } = cur.input;
@@ -744,6 +868,8 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const changes = input?.changes ?? [];
   const reviewedCount = state.desktop?.reviewed.length ?? 0;
   const allReviewed = changes.length > 0 && changes.every(change => (state.desktop?.reviewed ?? []).includes(change.nodeId));
+  // 复核按钮状态用含本地待发意图的有效集合；已勾选项被再次修改时由 Main 自动失效。
+  const effectiveAllReviewed = changes.length > 0 && changes.every(change => effectiveReviewed.includes(change.nodeId));
   const dirtyDocument = changes.length > 0 || (input?.hasUnappliedInput ?? false);
   const history = input?.history ?? null;
   const phaseBusy = state.phase === 'choosing' || state.phase === 'opening' || state.phase === 'saving' || state.phase === 'committing';
@@ -756,13 +882,50 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const switchTitle = (fallback: (blocker: NonNullable<typeof switchBlocker>) => string): string | undefined =>
     !switchBlocker ? undefined : maintenance && !busy ? maintenance : fallback(switchBlocker);
 
+  // 隐藏内容：只显示属于当前文档的 Main 快照；缺失字段/异文档一律视为不可用。
+  const hiddenForCurrent = hiddenContentForCurrent(state);
+  // 当前显示保留：同样只认当前静态校稿文档的 Main 快照，不做乐观推断。
+  const presentation = presentationForCurrent(state);
+  const presentationText = presentation ? presentationStatusText(presentation) : null;
+  const hiddenEntry = !!hiddenForCurrent && hiddenForCurrent.count > 0;
+  const hiddenBlocker = hiddenContentBlocker(state, { busy: busy || maintenanceOn, composing: inputView.composing });
+  const hiddenTitle = (): string | undefined =>
+    !hiddenBlocker ? undefined : maintenance && !busy ? maintenance : hiddenContentBlockerText(hiddenBlocker);
+  // 展开提示以 Main 快照的 false→true 转变为准，仅提示一次；收起不提示。
+  const hiddenExpandRef = useRef<{ id: string | null; enabled: boolean }>({ id: null, enabled: false });
+  useEffect(() => {
+    const hidden = hiddenContentForCurrent(state);
+    const enabled = !!hidden?.enabled && !hidden.uncertain;
+    const previous = hiddenExpandRef.current;
+    if (enabled && hidden && !(previous.id === hidden.documentId && previous.enabled)) {
+      showToast(`已临时展开 ${hidden.count} 处隐藏内容用于校稿；原文件与 PDF 打印的显隐规则不变。`);
+    }
+    hiddenExpandRef.current = { id: state.current?.id ?? null, enabled };
+  }, [state, showToast]);
+
+  // 原位输入降级提示：已选中可映射文字但 Main 未给出几何（位置/背景复杂等）时，
+  // 主窗口提供简短可见的校稿栏入口。该文字仍可正常编辑与保存，绝不宣称不可编辑。
+  // 几何上报有正常延迟（约百毫秒），短暂等待避免闪烁。
+  const inlineSelectionMissing = panel === 'inline' && !!current && !readonly
+    && !!input?.selection && input?.mappingStatus === 'ready' && !state.desktop?.inline;
+  const [inlineMissing, setInlineMissing] = useState(false);
+  useEffect(() => {
+    if (!inlineSelectionMissing) {
+      setInlineMissing(false);
+      return;
+    }
+    const timer = setTimeout(() => setInlineMissing(true), 600);
+    return () => clearTimeout(timer);
+  }, [inlineSelectionMissing]);
+
   const docked = panel === 'docked' && !!current;
   return (
     <div className={docked ? 'app' : 'app no-panel'}>
       <header className="toolbar">
         <div className="tb-group tb-doc">
-          <span className="doc-name">{current?.name ?? '未打开文档'}</span>
+          <span className="doc-name" title={current?.name ?? undefined}>{current?.name ?? '未打开文档'}</span>
           {current && <span className={readonly ? 'mode-badge readonly' : 'mode-badge'}>{readonly ? '只读预览' : '静态校稿'}</span>}
+          {hiddenForCurrent?.enabled && !hiddenForCurrent.uncertain && <span className="mode-badge">隐藏内容已展开</span>}
           {dirtyDocument && <span className="doc-flag">未保存</span>}
         </div>
         <div className="tb-group collapsible">
@@ -787,16 +950,45 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         </div>
         <div className="tb-spacer" />
         <div className="tb-group">
-          <button type="button" className="btn collapsible" disabled={switchBlocker !== null}
-            title={switchTitle(modeSwitchBlockerText) ?? (readonly
-              ? '停止页面脚本并重新加载为静态校稿；有未保存修改时会先提供取消、放弃或另存草稿的选择。'
-              : '离线运行页面本地脚本查看效果；动态文字不能编辑，也不会写回 HTML。')}
-            onClick={onSwitchMode}>
-            <IconMode />{switchingMode ? '正在切换…' : modeSwitchTarget(current?.mode) === 'interactive' ? '只读预览' : '返回静态校稿'}
-          </button>
-          <button type="button" className="btn narrow-only" disabled={!changes.length} onClick={() => setDrawerOpen(true)}>
-            变更 <span className={changes.length ? 'count has' : 'count'}>{changes.length}</span>
-          </button>
+          <div className="mode-switch collapsible" role="group" aria-label="浏览与编辑切换">
+            <button type="button" className={readonly ? 'btn sm' : 'btn sm current'}
+              aria-pressed={!readonly} aria-current={!readonly ? 'true' : undefined}
+              disabled={(!readonly && panel === 'inline') || switchingMode || switchBlocker !== null}
+              title={readonly
+                ? switchTitle(modeSwitchBlockerText) ?? '返回编辑文字：停止页面脚本并重新加载为静态校稿，成功后直接点击页面文字原位修改。'
+                : panel === 'inline'
+                  ? '当前：编辑文字（原位输入），点击页面中的文字直接修改；侧栏与浮窗在“更多操作”中可用。'
+                  : switchTitle(modeSwitchBlockerText) ?? '切换为原位输入：点击页面中的文字直接修改；侧栏与浮窗在“更多操作”中可用。'}
+              onClick={onEditText}>
+              {switchingMode && readonly ? '正在切换…' : readonly ? '编辑文字（返回静态校稿）' : '编辑文字'}
+            </button>
+            <button type="button" className={readonly ? 'btn sm current' : 'btn sm'}
+              aria-pressed={readonly} aria-current={readonly ? 'true' : undefined}
+              disabled={readonly || switchingMode || switchBlocker !== null}
+              title={readonly
+                ? '当前：浏览（脚本只读预览），页面脚本离线运行，动态文字不能编辑。'
+                : switchTitle(modeSwitchBlockerText) ?? '切换到浏览：离线运行页面本地脚本查看效果；动态文字不能编辑，也不会写回 HTML。有未保存修改时会先提供取消、放弃或另存草稿的选择。'}
+              onClick={onSwitchMode}>
+              {switchingMode && !readonly ? '正在切换…' : readonly ? '浏览' : '浏览（只读预览）'}
+            </button>
+          </div>
+          {hiddenEntry && (
+            <button type="button" className="btn collapsible" disabled={hiddenBlocker !== null}
+              aria-pressed={hiddenForCurrent!.enabled && !hiddenForCurrent!.uncertain}
+              title={hiddenTitle() ?? (hiddenForCurrent!.enabled
+                ? '恢复页面原本的显隐；已展开的修改与复核保持不变。'
+                : '临时展开页面中预先隐藏的内容用于校稿；不修改原文件，PDF 打印仍按原页面规则；仅样式隐藏或脚本生成的内容不在范围内。')}
+              onClick={onToggleHidden}>
+              {hiddenForCurrent!.busy ? '正在更改显隐…' : hiddenForCurrent!.enabled ? '恢复原显示' : `显示隐藏内容（${hiddenForCurrent!.count}）`}
+            </button>
+          )}
+          {(narrow || panel !== 'docked') && current && (
+            <button type="button" className="btn" disabled={busy || maintenanceOn}
+              title="逐条或全选复核当前修改并继续保存；打开前会先完成当前输入。"
+              onClick={onOpenReview}>
+              复核变更 <span className={changes.length ? 'count has' : 'count'}>{changes.length}</span>
+            </button>
+          )}
           <button type="button" className="btn primary" disabled={busy || phaseBusy || maintenanceOn || !current || readonly || !state.canSave}
             title={readonly ? '脚本只读预览不能保存；返回静态校稿后再保存。' : undefined}
             onClick={onSave}>
@@ -804,7 +996,7 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           </button>
           <button type="button" className="btn collapsible" disabled={busy || maintenanceOn || !current || readonly || state.desktop?.pdfBusy}
             title={readonly ? '脚本只读预览不能生成草稿 PDF；返回静态校稿后再生成。' : undefined}
-            onClick={() => { setPdfError(null); setDialog('pdf'); }}>
+            onClick={() => openOverlay('打开 PDF', () => { setPdfError(null); setDialog('pdf'); })}>
             <IconPdf />PDF
           </button>
           {panel === 'docked' && <>
@@ -814,20 +1006,39 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
             <button type="button" className="btn icon" aria-label="在独立窗口中校稿" disabled={busy || maintenanceOn} onClick={() => onPanel('floating')}>
               <IconFloat />
             </button>
+            <button type="button" className="btn" disabled={busy || maintenanceOn || readonly || !current}
+              title={readonly
+                ? '脚本只读预览不能使用就地编辑；返回静态校稿后再操作。'
+                : '在选中文字旁打开小型就地编辑窗；长文本可收回侧栏或改用独立浮窗。'}
+              onClick={() => onPanel('contextual')}>
+              就地编辑
+            </button>
           </>}
           {panel === 'hidden' && (
             <button type="button" className="btn" disabled={busy || maintenanceOn} onClick={() => onPanel('docked')}>
               <IconPanelShow />恢复校稿栏
             </button>
           )}
-          {panel === 'floating' && (
+          {(panel === 'floating' || panel === 'contextual') && (
             <button type="button" className="btn" disabled={busy || maintenanceOn} onClick={() => onPanel('docked')}>
               <IconDock />收回校稿栏
             </button>
           )}
+          {panel === 'inline' && (
+            <button type="button" className="btn collapsible" disabled={busy || maintenanceOn}
+              title="收回原位输入，改用右侧校稿栏编辑与复核；当前输入会先完成预览。"
+              onClick={() => onPanel('docked')}>
+              <IconPanelShow />校稿栏
+            </button>
+          )}
           <div className="menu-wrap" ref={menuWrapRef}>
             <button type="button" className="btn icon" aria-label="更多操作" aria-haspopup="menu"
-              aria-expanded={menuOpen} ref={menuButtonRef} onClick={() => setMenuOpen(value => !value)}>
+              aria-expanded={menuOpen} ref={menuButtonRef}
+              onClick={() => {
+                if (menuOpen) { setMenuOpen(false); return; }
+                // inline 时打开菜单会隐藏原生预览：先排空原位输入，组词/失败拒绝打开。
+                openOverlay('打开菜单', () => setMenuOpen(true));
+              }}>
               <IconMenu />
             </button>
             {menuOpen && <div className="menu" role="menu">
@@ -847,8 +1058,34 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
                   ? '停止页面脚本并重新加载为静态校稿；动态文字仍不能写回。'
                   : '离线运行页面本地脚本查看效果；动态文字不能编辑。有未保存修改时会先提供取消、放弃或另存草稿的选择。'}</span>
               </button>
+              <button type="button" role="menuitem" disabled={!current || readonly || maintenanceOn || panel === 'contextual'}
+                title={readonly
+                  ? '脚本只读预览不能使用就地编辑；返回静态校稿后再操作。'
+                  : panel === 'contextual' ? '就地编辑窗已打开；可在小窗或此处收回侧栏。' : undefined}
+                onClick={() => { setMenuOpen(false); menuButtonRef.current?.focus(); onPanel('contextual'); }}>
+                就地编辑…
+                <span className="menu-sub">在选中文字旁打开小型编辑窗；先完成当前输入。长文本可收回侧栏或使用独立浮窗。</span>
+              </button>
+              {panel === 'inline' && <>
+                <button type="button" role="menuitem" disabled={maintenanceOn}
+                  onClick={() => { setMenuOpen(false); menuButtonRef.current?.focus(); onPanel('docked'); }}>
+                  显示校稿栏…
+                  <span className="menu-sub">收回原位输入，改用右侧校稿栏编辑与复核；组词或未确认输入不会转移，会先完成当前输入。</span>
+                </button>
+                <button type="button" role="menuitem" disabled={maintenanceOn}
+                  onClick={() => { setMenuOpen(false); menuButtonRef.current?.focus(); onPanel('floating'); }}>
+                  独立浮窗校稿…
+                  <span className="menu-sub">在可拖动的独立浮窗中编辑并查看复核列表；组词或未确认输入不会转移，会先完成当前输入。</span>
+                </button>
+              </>}
               <button type="button" role="menuitem" className="narrow-only" disabled={!current || readonly || maintenanceOn}
                 onClick={() => { setMenuOpen(false); setPdfError(null); setDialog('pdf'); }}>PDF 打印预览…</button>
+              <button type="button" role="menuitem" disabled={!hiddenEntry || hiddenBlocker !== null}
+                title={hiddenTitle()}
+                onClick={() => { setMenuOpen(false); menuButtonRef.current?.focus(); onToggleHidden(); }}>
+                {hiddenForCurrent?.enabled ? '恢复原显示' : hiddenEntry ? `显示隐藏内容（${hiddenForCurrent!.count}）` : '显示隐藏内容'}
+                <span className="menu-sub">临时展开页面中预先隐藏的内容用于校稿；不修改原文件，PDF 打印仍按原页面规则；仅样式隐藏或脚本生成的内容不在范围内。</span>
+              </button>
               <button type="button" role="menuitem" disabled={!current || !input?.canSaveCopy || maintenanceOn}
                 onClick={() => { setMenuOpen(false); onSaveCopy(); }}>另存草稿…</button>
               <button type="button" role="menuitem" disabled={maintenanceOn}
@@ -887,6 +1124,14 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         {input?.mappingStatus === 'invalidated' && (
           <div className="banner readonly-banner" role="alert">
             页面映射已失效{input.mappingReason ? `（${input.mappingReason}）` : ''}，编辑已暂停；请重新打开文档。
+          </div>
+        )}
+        {inlineMissing && (
+          <div className="banner readonly-banner" role="status">
+            这段文字暂时不能在页面上原位显示（位置或背景较复杂）；它仍可正常编辑与保存，可在校稿栏中修改。
+            <span className="conflict-actions">
+              <button type="button" className="btn sm" disabled={busy || maintenanceOn} onClick={() => onPanel('docked')}>使用校稿栏</button>
+            </span>
           </div>
         )}
         {current && lastSave && lastSave.documentId === current.id && (lastSave.status === 'failed' || lastSave.status === 'unknown') && (
@@ -969,20 +1214,53 @@ function MainWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           {persistence.status === 'unknown' && '草稿记录状态未知'}
         </span>}
         {state.cleanupPending && <span className="st-item warn">有待清理的临时文件</span>}
+        {hiddenForCurrent?.uncertain && <span className="st-item warn" role="status">隐藏内容显示状态待确认</span>}
+        {hiddenForCurrent?.enabled && !hiddenForCurrent.uncertain && (
+          <span className="st-item" role="status">隐藏内容已展开（临时显示，不写入文件）</span>
+        )}
+        {presentation && presentationText && (
+          <span className={presentation.status === 'partial' ? 'st-item warn' : 'st-item'} role="status"
+            title="切换浏览/编辑时可保留经过核验的预置正文显隐、渐显效果和已展开问答；仅影响当前屏幕显示，不写入文件，也不改变打印规则；脚本生成或改写的正文暂不支持保留。">
+            {presentationText}
+          </span>
+        )}
         {maintenance && <span className="st-item warn" role="status">{maintenance}</span>}
         {current && current.project.resources.items.length > 0 && (
-          <button type="button" className="st-btn" onClick={() => setDialog('resources')}>
+          <button type="button" className="st-btn" onClick={() => openOverlay('打开资源诊断', () => setDialog('resources'))}>
             资源：{current.project.resources.items.length} 项被阻断
           </button>
         )}
-        {pdf && <button type="button" className="st-btn" disabled={maintenanceOn} onClick={() => { setPdfError(null); setDialog('pdf'); }}>
+        {pdf && <button type="button" className="st-btn" disabled={maintenanceOn} onClick={() => openOverlay('打开 PDF', () => { setPdfError(null); setDialog('pdf'); })}>
           PDF：{pdf.name}{!pdfBelongsToCurrent ? '（先前快照）' : pdfStale ? '（可能已过期）' : ''}
         </button>}
         <span className="st-spacer" />
         <span className="st-hint">{readonly ? '只读预览不写入 HTML 文件' : '实时预览不写入 HTML 文件'}</span>
       </footer>
       {drawerOpen && narrow && (
-        <Dialog title="复核变更" drawer onClose={() => setDrawerOpen(false)}>
+        <Dialog title="复核变更" drawer onClose={() => setDrawerOpen(false)}
+          footer={<>
+            <button type="button" className="btn" onClick={() => setDrawerOpen(false)}>继续校对</button>
+            <button type="button" className="btn primary"
+              disabled={readonly || busy || maintenanceOn || !state.canSave || !effectiveAllReviewed}
+              title={effectiveAllReviewed ? '全部条目已复核，继续检查源码 Diff 并保存。' : '还有未复核的修改：请勾选全部条目后再保存。'}
+              onClick={() => { setDrawerOpen(false); onSave(); }}>
+              复核并保存
+            </button>
+          </>}>
+          <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} readonly={readonly} />
+        </Dialog>
+      )}
+      {dialog === 'review' && (
+        <Dialog title="复核变更" wide onClose={() => setDialog(null)}
+          footer={<>
+            <button type="button" className="btn" onClick={() => setDialog(null)}>继续校对</button>
+            <button type="button" className="btn primary" data-autofocus
+              disabled={readonly || busy || maintenanceOn || !state.canSave || !effectiveAllReviewed}
+              title={effectiveAllReviewed ? '全部条目已复核，继续检查源码 Diff 并保存。' : '还有未复核的修改：请勾选全部条目后再保存。'}
+              onClick={() => { setDialog(null); onSave(); }}>
+              复核并保存
+            </button>
+          </>}>
           <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} readonly={readonly} />
         </Dialog>
       )}
@@ -1050,7 +1328,9 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const input = current?.input ?? null;
   const readonly = current?.mode === 'interactive';
   const panel = state.desktop?.panel ?? 'floating';
-  const owner = panel === 'floating';
+  // 就地小窗与独立浮窗同属本窗口；两者都是真实唯一输入 owner。
+  const owner = panelOwner('editor', panel);
+  const contextual = panel === 'contextual';
   const controller = useController(state, owner);
   const inputView = useLiveInput(controller);
   useFlushRequests(state, owner, controller);
@@ -1073,53 +1353,76 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     void controller.begin(key, reference, input.draftRevision);
   }, [owner, input, controller, beginNonce]);
 
-  const onDock = useCallback(() => {
-    if (busy) return;
-    // 中断检查/记录清理或待复核期间不停靠（Main 也会拒绝）；说明仍在主窗口查看。
-    const gate = maintenanceGateText(workspaceStore.getState());
-    if (gate) {
-      showToast(gate, 'error');
-      return;
-    }
+  // 停靠/就地/浮窗切换都先排空本窗口（当前输入 owner）；BusyGuard 同步排除
+  // 同帧重复点击，busy 只用于界面反馈，不充当输入已排空的依据。
+  const panelGuard = useMemo(() => new BusyGuard(), []);
+  const onPanelRequest = useCallback((mode: PanelMode) => {
+    if (!panelGuard.tryAcquire()) return;
     setBusy(true);
     void (async () => {
       try {
-        if (!(await controller.flush())) {
-          showToast('请先完成当前输入（可能在组词或投递失败），再停靠。', 'error');
-          return;
-        }
-        await desktopApi()?.request({ kind: 'panel', mode: 'docked' });
+        await runPanelChange({
+          maintenanceGate: () => maintenanceGateText(workspaceStore.getState()),
+          flush: () => controller.flush(),
+          request: next => {
+            const api = desktopApi();
+            if (!api) return Promise.resolve({ ok: false, code: 'MISSING_DESKTOP_API', state: null, documentId: null, copy: null, outcome: null });
+            return api.request({ kind: 'panel', mode: next });
+          },
+          showToast,
+        }, mode);
       } finally {
+        panelGuard.release();
         setBusy(false);
       }
     })();
-  }, [busy, controller, showToast]);
+  }, [panelGuard, controller, showToast]);
 
   const changes = input?.changes ?? [];
   const dirtyDocument = changes.length > 0 || (input?.hasUnappliedInput ?? false);
+  // 浮窗只同步显隐状态；“显示隐藏内容”命令只能在主窗口发起。
+  const hiddenForCurrent = hiddenContentForCurrent(state);
 
   return (
-    <div className="editor-app">
+    <div className={contextual ? 'editor-app contextual' : 'editor-app'}>
       <header className="toolbar">
         <div className="tb-group tb-doc">
-          <span className="doc-name">{current?.name ?? '校稿'}</span>
+          <span className="doc-name" title={current?.name ?? undefined}>{current?.name ?? '校稿'}</span>
           {current && <span className={readonly ? 'mode-badge readonly' : 'mode-badge'}>{readonly ? '只读预览' : '静态校稿'}</span>}
           {dirtyDocument && <span className="doc-flag">未保存</span>}
         </div>
         <div className="tb-spacer" />
         <div className="tb-group">
-          <button type="button" className="btn" disabled={busy || maintenanceGateText(state) !== null} onClick={onDock}>
-            <IconDock />停靠到主窗口
+          {contextual && (
+            <button type="button" className="btn sm" disabled={busy || maintenanceGateText(state) !== null}
+              title="改为完整独立浮窗，可查看复核列表；长文本更合适。"
+              onClick={() => onPanelRequest('floating')}>
+              完整浮窗
+            </button>
+          )}
+          {!contextual && (
+            <button type="button" className="btn sm" disabled={busy || readonly || maintenanceGateText(state) !== null}
+              title={readonly ? '脚本只读预览不能使用就地编辑；返回静态校稿后再操作。' : '改为在选中文字旁显示的就地小编辑窗。'}
+              onClick={() => onPanelRequest('contextual')}>
+              就地小窗
+            </button>
+          )}
+          <button type="button" className={contextual ? 'btn sm' : 'btn'} disabled={busy || maintenanceGateText(state) !== null}
+            onClick={() => onPanelRequest('docked')}>
+            <IconDock />{contextual ? '收回侧栏' : '停靠到主窗口'}
           </button>
         </div>
       </header>
-      <div className="editor-panel float">
+      <div className={contextual ? 'editor-panel float contextual' : 'editor-panel float'}>
         <EditorPanel hasDocument={!!current} mode={current?.mode ?? 'proofread'} input={input} controller={controller}
+          compact={contextual}
           onRetryBegin={() => { controller.retry(); setBeginNonce(value => value + 1); }} />
       </div>
-      <div className="changes-panel float">
-        <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} readonly={readonly} />
-      </div>
+      {!contextual && (
+        <div className="changes-panel float">
+          <ReviewPanel changes={changes} reviewed={effectiveReviewed} pending={reviewStatus.pending} readonly={readonly} />
+        </div>
+      )}
       <footer className="statusbar">
         <span className="st-item" role="status">
           {readonly && '脚本只读预览 · 不能编辑'}
@@ -1129,8 +1432,9 @@ function EditorWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
           {!readonly && !inputView.composing && !inputView.busy && !inputView.applying && !inputView.dirty
             && (changes.length ? `${changes.length} 条未保存修改` : '无未保存修改')}
         </span>
+        {hiddenForCurrent?.enabled && !hiddenForCurrent.uncertain && <span className="st-item" role="status">隐藏内容已展开（在主窗口恢复）</span>}
         <span className="st-spacer" />
-        <span className="st-hint">保存在主窗口进行</span>
+        <span className="st-hint">{contextual ? '复核与保存在主窗口进行' : '保存在主窗口进行'}</span>
       </footer>
       {toast && <div className={toast.kind === 'error' ? 'toast toast-error' : 'toast'} role="status">{toast.text}</div>}
     </div>
