@@ -1,18 +1,34 @@
 import { ipcRenderer } from 'electron';
 import { BOOTSTRAP_CHANNEL, CONTRACT_VERSION } from '../contracts/bootstrap.ts';
-import { isPreviewIdentity, PREVIEW_ARGUMENT, PREVIEW_READY_CHANNEL } from '../contracts/preview.ts';
+import { isPreviewIdentity, PREVIEW_ARGUMENT, PREVIEW_READY_CHANNEL, PRESENTATION_INTERACTION } from '../contracts/preview.ts';
 import { isMappingApply, isMappingCheck, isMappingIdentity, isMappingInstall, MAPPING_APPLY, MAPPING_APPLY_RESULT, MAPPING_CHECK, MAPPING_CHECK_RESULT, MAPPING_EVENT, MAPPING_INSTALL, MAPPING_REVOKE, sameMapping } from '../contracts/mapping.ts';
 import type { MappingIdentity, MappingInstall } from '../contracts/mapping.ts';
 import { createNodeRegistry } from '../preview/node-registry.ts';
 import { isMappingEditRequest, MAPPING_EDIT, MAPPING_EDIT_INTENT, MAPPING_EDIT_RESULT } from '../contracts/edit-guard.ts';
 import { isMappingRestore, MAPPING_RESTORE, MAPPING_RESTORE_RESULT } from '../contracts/mapping-restore.ts';
 import { isMappingHistory, MAPPING_HISTORY, MAPPING_HISTORY_RESULT } from '../contracts/mapping-history.ts';
+import { TEXT_GEOMETRY } from '../contracts/text-geometry.ts';
+import { installLocalSubmit } from '../preview/local-submit.ts';
 
 // Runs in the isolated world. Deliberately exposes nothing to the page world.
 const argument = process.argv.find((value) => value.startsWith(PREVIEW_ARGUMENT));
 if (argument) {
   const identity: unknown = JSON.parse(argument.slice(PREVIEW_ARGUMENT.length));
   if (!isPreviewIdentity(identity)) throw new Error('INVALID_PREVIEW_IDENTITY');
+  if (identity.mode === 'interactive' && process.isMainFrame) {
+    installLocalSubmit(document);
+    // Main accepts the first eligible real interaction once. A busy workspace
+    // may reject an event, so later real input remains eligible. No page API.
+    let lastSent = Number.NEGATIVE_INFINITY;
+    const interaction = (event: Event) => {
+      const now = performance.now();
+      if (!event.isTrusted || now - lastSent < 100) return;
+      lastSent = now; ipcRenderer.send(PRESENTATION_INTERACTION, identity);
+    };
+    document.addEventListener('pointerdown', interaction, true);
+    document.addEventListener('keydown', interaction, true);
+    document.addEventListener('wheel', interaction, { capture: true, passive: true });
+  }
   if (identity.mode === 'proofread') {
     let registry: ReturnType<typeof createNodeRegistry> | undefined;
     let mappingIdentity: MappingIdentity | undefined;
@@ -44,7 +60,8 @@ if (argument) {
         return;
       }
       registry = createNodeRegistry(document, message.identity, message.tree,
-        (event) => ipcRenderer.send(MAPPING_EVENT, event), (intent) => ipcRenderer.send(MAPPING_EDIT_INTENT, intent), message.emptyTextIndices);
+        (event) => ipcRenderer.send(MAPPING_EVENT, event), (intent) => ipcRenderer.send(MAPPING_EDIT_INTENT, intent), message.emptyTextIndices,
+        value => ipcRenderer.send(TEXT_GEOMETRY, value));
     });
     ipcRenderer.on(MAPPING_CHECK, (_event, request: unknown) => {
       if (!isMappingCheck(request)) return;

@@ -298,7 +298,14 @@ async function run(): Promise<void> {
     assert.equal(f.current(), before); assert.equal(before.draft.phase, 'uncertain'); assert.deepEqual(Buffer.from(before.draft.candidate.bytes), expected);
     assert.deepEqual(await readFile(f.entry), expected); assert.equal((await f.store.scan()).locked, true);
     assert.equal((await f.save()).code, 'DOCUMENT_RECOVERY_REQUIRED'); assert.equal((await f.read()).canSave, false);
-    pass('unknown native outcome keeps the original draft/source session and private evidence, and blocks a second overwrite');
+    const report = (await f.read()).lastSave; const retained = f.runtime.workspace.retainedSave;
+    f.control.copyPath = join(f.project, 'pages/保全副本.html');
+    const copied = await f.edit(before.id, { kind: 'save-copy', stateRevision: (await f.read()).current!.input.stateRevision });
+    assert.equal(copied.copy?.status, 'created'); assert.deepEqual(await readFile(f.control.copyPath), expected);
+    assert.deepEqual((await f.read()).lastSave, report); assert.equal(f.runtime.workspace.retainedSave, retained);
+    assert.equal(before.draft.phase, 'uncertain'); assert.equal((await f.store.scan()).locked, true);
+    assert.equal((await f.save()).code, 'DOCUMENT_RECOVERY_REQUIRED'); assert.equal((await f.read()).canSave, false);
+    pass('unknown native outcome permits a verified independent draft copy while retaining the original frozen session, save report, lock and evidence and blocking a second overwrite');
   });
   await use(async f => {
     await f.dirty(); const before = f.current(); f.control.hostFault = 'detached';
@@ -306,7 +313,11 @@ async function run(): Promise<void> {
     assert.equal(f.current(), before); assert.equal(f.runtime.host.current, before.preview.view); assert.equal(before.draft.phase, 'uncertain');
     assert.deepEqual(await readFile(f.entry), expected); assert.equal(f.runtime.workspace.retainedSave!.status, 'committed');
     assert.equal((await f.store.scan()).records[0]!.phase, 'committed'); assert.equal((await f.save()).code, 'DOCUMENT_RECOVERY_REQUIRED');
-    pass('a post-write native attachment failure rolls the view back, retains the old draft and explicitly distinguishes committed file bytes from an unrebuilt editing session');
+    f.control.copyPath = join(f.project, 'pages/重建故障副本.html');
+    const copied = await f.edit(before.id, { kind: 'save-copy', stateRevision: (await f.read()).current!.input.stateRevision });
+    assert.equal(copied.copy?.status, 'created'); assert.deepEqual(await readFile(f.control.copyPath), expected);
+    assert.equal((await f.read()).lastSave!.status, 'rebase-required'); assert.equal(before.draft.phase, 'uncertain');
+    pass('a post-write native attachment failure retains the old draft and allows a verified independent copy without confusing the committed file with a rebuilt or unlocked editing session');
   });
   await use(async f => {
     await f.dirty(); const before = f.current(); const outside = Buffer.from(original.toString().replace('A &amp; 😀', '外部应用的新结果'));

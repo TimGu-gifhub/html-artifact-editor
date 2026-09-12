@@ -235,6 +235,8 @@ PDF 从已确认的隔离 Preview 草稿经 Chromium printToPDF 生成，冻结�
 
 原生 Preview 不能被 React 的 CSS 遮盖；主窗口报告实际占位尺寸，模态/抽屉期间 Main 将其隐藏，收起后恢复。完整交互和未测项见 [工作台合同](docs/LIVE_WORKBENCH.md) 与 [HAE-009](docs/implementation/HAE-009.md)。
 
+后续原位输入由 Main 拥有的透明原生窗承载，Preview 只输出对象证明绑定的有限 Text 几何；同一时刻只有一个输入 owner。模式切换和保存后的显示延续使用新源码验证、只读隔离观察及可撤回屏幕 CSS，不迁移 DOM 或扩大写入权限。完整合同见 [原位校稿](docs/CONTEXTUAL_EDIT.md) 与 [当前显示补充](docs/CURRENT_VIEW.md)。交互模式的本地 submit 事件转发不放开表单导航、网络、CSP 或页面桥。
+
 ## 全部本地记录清理（HAE-011）
 
 Main 仅在无当前文档、当前 profile 及启动时私有目录身份均匹配时检查全部记录，原生单独确认后再封存 record-cleanup.json。完整清单是持续的恢复/写入门槛；精确删除固定文件及空 UUID 目录，退役锚点、处置凭证和本次清单分别在相应原记录消失后移除。重新启动只接受未变删除后缀并重新确认，不删除外来锁或部分证据。关闭及 renderer 丢失后的处理继续由同一 Main 计划协调；未知/收尾警告保留窗口与可用证据。项目文件无写入端口；额度满后的另存退出、清理及再次复核保存已有真实 Windows 产品证据，详见 [清理合同](docs/RECORD_CLEANUP.md)。

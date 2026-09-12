@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { BrowserWindow } from 'electron';
-import type { Rectangle, WebContents } from 'electron';
+import { BrowserWindow, screen, ipcMain } from 'electron';
+import type { Rectangle, WebContents, IpcMainEvent } from 'electron';
 import { EDITOR_URL } from '../../contracts/editor.ts';
 import type { DesktopCommand, DesktopState, PanelMode } from '../../contracts/desktop.ts';
 import type { WorkspaceCommand } from '../../contracts/workspace-editor.ts';
@@ -13,31 +13,86 @@ import { createInterruptionController } from './interruption.ts';
 import type { InterruptionPorts } from './interruption.ts';
 import { createRecordCleanupController } from './record-cleanup.ts';
 import type { RecordCleanupPorts } from './record-cleanup.ts';
+import { createHiddenContentController } from './hidden-content.ts';
+import { createPresentationController } from './presentation.ts';
+import { createTextTools } from './text-tools.ts';
+import { createInlineEditor } from './inline-editor.ts';
+import { isPreviewIdentity, PRESENTATION_INTERACTION } from '../../contracts/preview.ts';
+import { acceptsPreviewSender } from '../preview/authority.ts';
 
 // Application-owned layout and auxiliary windows. No renderer chooses a URL,
 // path, process, web preference, session, or replacement service.
 export function createDesktopController(window: BrowserWindow, outputRoot: string,
   runtime: () => PersistentWorkspaceSession, choosePdf: (name: string) => Promise<string | undefined>,
-  interruptionPorts: InterruptionPorts, cleanupPorts: RecordCleanupPorts) {
-  let revision = 1; let panel: PanelMode = 'docked'; let floating: BrowserWindow | null = null;
+  interruptionPorts: InterruptionPorts, cleanupPorts: RecordCleanupPorts, initialPanel: PanelMode = 'docked') {
+  let revision = 1; let panel: PanelMode = initialPanel; let floating: BrowserWindow | null = null;
   let layout: Rectangle = { x: 0, y: 0, width: 0, height: 0 }; let visible = false;
   let disposed = false; let error: string | null = null; let documentId: string | null = null;
+  let attached = false;
   const reviewed = new Map<string, Readonly<{ oldText: string; newText: string }>>();
   const listeners = new Set<() => void>();
   const notify = (): void => { ++revision; for (const listener of listeners) { try { listener(); } catch { /* Main retains state. */ } } };
   const report = (code: string): void => { error = code; notify(); };
   const interruption = createInterruptionController(outputRoot, runtime, interruptionPorts, notify);
   const cleanup = createRecordCleanupController(runtime, cleanupPorts, notify);
+  const presentation = createPresentationController(() => layout);
+  const released = new WeakSet<object>();
+  const releases = new WeakMap<object, Promise<void>>();
+  const pendingReleases = new Set<Promise<void>>();
+  const releasePresentation = (event: IpcMainEvent, value: unknown) => {
+    const current = attached ? runtime().workspace.current : null;
+    if (disposed || current?.mode !== 'interactive' || runtime().workspace.snapshot().phase !== 'idle'
+      || released.has(current) || !isPreviewIdentity(value) || value.mode !== 'interactive'
+      || value.sessionId !== current.preview.identity.sessionId || value.generation !== current.preview.identity.generation
+      || !acceptsPreviewSender(current.preview, event)) return;
+    released.add(current);
+    const work = presentation.releaseInteractive(current);
+    releases.set(current, work); pendingReleases.add(work);
+    void work.then(() => { pendingReleases.delete(work); notify(); }, () => report('PRESENTATION_UNAVAILABLE'));
+  };
+  ipcMain.on(PRESENTATION_INTERACTION, releasePresentation);
+  const hiddenContent = createHiddenContentController(() => attached ? runtime().workspace : null, notify, presentation.reset);
+  let anchorId: string | null = null, manuallyPlaced = false, anchorOrigin = '';
+  const placeEditor = (rect: Rectangle, nodeId: string) => {
+    if (panel !== 'contextual' || !floating || floating.isDestroyed() || runtime().workspace.current?.input?.snapshot().input?.composing) return;
+    const key = `${runtime().workspace.current?.id}:${nodeId}`;
+    const changed = key !== anchorId;
+    if (changed) { anchorId = key; manuallyPlaced = false; }
+    if (manuallyPlaced) return;
+    const origin = `${Math.round(rect.x)}:${Math.round(rect.y)}`;
+    if (!changed && origin === anchorOrigin) return;
+    anchorOrigin = origin;
+    const work = screen.getDisplayMatching(rect).workArea;
+    const size = floating.getBounds();
+    const right = rect.x + rect.width + 12;
+    const x = right + size.width <= work.x + work.width ? right : Math.max(work.x, rect.x - size.width - 12);
+    const y = Math.max(work.y, Math.min(rect.y + rect.height + 12, work.y + work.height - size.height));
+    floating.setPosition(Math.round(Math.min(x, work.x + work.width - size.width)), Math.round(y));
+    if (changed) { floating.show(); floating.focus(); }
+  };
+  const inline = createInlineEditor(window, outputRoot, {
+    workspace: () => attached ? runtime().workspace : null, enabled: () => panel === 'inline',
+    bounds: () => visible ? layout : { x: 0, y: 0, width: 0, height: 0 },
+    attach: contents => { runtime().attachEditor(contents); }, notify,
+    close: async () => { if (await flush('dock') && !disposed) await setPanel('docked'); },
+    fail: () => report('EDITOR_DISCONNECTED'),
+  });
+  const textTools = createTextTools(window, outputRoot, () => attached ? runtime().workspace : null,
+    () => visible ? layout : { x: 0, y: 0, width: 0, height: 0 }, placeEditor, inline.place);
   let pendingFlush: Readonly<{ id: string; action: 'close' | 'dock' | 'action'; owner: WebContents; promise: Promise<boolean>; finish: (ready: boolean) => void }> | null = null;
-  const owner = (): WebContents => panel === 'floating' && floating && !floating.isDestroyed() ? floating.webContents : window.webContents;
-  const cleanInput = (): boolean => {
+  const owner = (): WebContents => panel === 'inline' && inline.window && !inline.window.isDestroyed() ? inline.window.webContents
+    : (panel === 'floating' || panel === 'contextual') && floating && !floating.isDestroyed() ? floating.webContents : window.webContents;
+  const cleanInput = (allowRetainedCopy = false): boolean => {
     const state = runtime().workspace.snapshot(); const input = state.current?.input;
-    return state.phase === 'idle' && (!input || (input.phase === 'idle' && input.draftPhase === 'idle'
+    const retainedCopy = allowRetainedCopy && state.lastSave?.documentId === state.current?.id
+      && state.lastSave?.requiresReview === true && input?.draftPhase === 'uncertain' && input.canSaveCopy;
+    return state.phase === 'idle' && (!input || (input.phase === 'idle' && (input.draftPhase === 'idle' || retainedCopy)
       && !input.hasUnappliedInput && !input.input?.composing));
   };
   const flush = (action: 'close' | 'dock' | 'action'): Promise<boolean> => {
     if (disposed) return Promise.resolve(false);
-    if (pendingFlush) return pendingFlush.promise;
+    if (pendingFlush) return pendingFlush.action === action ? pendingFlush.promise : Promise.resolve(false);
+    const document = runtime().workspace.current;
     const contents = owner();
     if (contents.isDestroyed()) return Promise.resolve(false);
     const id = randomUUID(); let resolveFlush!: (value: boolean) => void;
@@ -46,7 +101,10 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
       if (pendingFlush?.id !== id) return;
       clearTimeout(timeout); contents.removeListener('destroyed', lost); contents.removeListener('render-process-gone', lost);
       pendingFlush = null;
-      const accepted = ready && !disposed && owner() === contents && cleanInput();
+      // An owner may acknowledge drained input before copying a frozen Save.
+      // This does not authorize close/dock, any draft mutation or another Save;
+      // their existing guards still require an editable, resolved document.
+      const accepted = ready && !disposed && runtime().workspace.current === document && owner() === contents && cleanInput(action === 'action');
       if (!accepted) error = runtime().workspace.current?.input?.snapshot().input?.composing ? 'INPUT_COMPOSING' : 'INPUT_FLUSH_REQUIRED';
       else if (error === 'INPUT_COMPOSING' || error === 'INPUT_FLUSH_REQUIRED') error = null;
       notify(); resolveFlush(accepted);
@@ -58,32 +116,44 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
     return promise;
   };
   const pdf = createPdfController(window, () => runtime().workspace, choosePdf, notify, report);
-  const role = (contents: WebContents): 'main' | 'editor' => {
+  const role = (contents: WebContents): DesktopState['role'] => {
     if (contents === window.webContents) return 'main';
+    if (contents === inline.window?.webContents) return 'inline';
     if (floating && !floating.isDestroyed() && contents === floating.webContents) return 'editor';
     throw new Error('DESKTOP_UNAVAILABLE');
   };
   const changePanel = async (mode: PanelMode): Promise<void> => {
     if (disposed || !cleanInput() || pendingFlush) throw new Error('INPUT_FLUSH_REQUIRED');
-    if (mode === panel) { if (mode === 'floating') floating?.show(); return; }
-    if (mode === 'floating' && (!floating || floating.isDestroyed())) {
+    if (mode === 'contextual' && runtime().workspace.current?.mode !== 'proofread') throw new Error('READ_ONLY_MODE');
+    if (mode === panel) { if (mode === 'floating' || mode === 'contextual') floating?.show(); return; }
+    if ((mode === 'floating' || mode === 'contextual') && (!floating || floating.isDestroyed())) {
       const child = new BrowserWindow({ parent: window, title: '校稿栏 · HTML Artifact Editor', width: 440, height: 720,
         minWidth: 360, minHeight: 480, show: false, webPreferences: { ...securePreferences,
           session: window.webContents.session, preload: resolve(outputRoot, 'preload/ui/index.cjs'), additionalArguments: ['--hae-product'] } });
       floating = child; child.setMenu(null); lockContents(child.webContents);
+      child.on('will-move', () => { manuallyPlaced = true; });
       const connection = runtime().attachEditor(child.webContents);
       child.on('close', event => {
         if (disposed) return;
         event.preventDefault();
         void flush('dock').then(async ready => { if (ready && !disposed) await setPanel('docked'); }).catch(() => report('INPUT_FLUSH_REQUIRED'));
       });
-      child.once('closed', () => { if (floating === child) { floating = null; if (!disposed && panel === 'floating') { panel = 'docked'; report('EDITOR_DISCONNECTED'); } } });
+      child.once('closed', () => { if (floating === child) { floating = null; if (!disposed && (panel === 'floating' || panel === 'contextual')) { panel = 'docked'; report('EDITOR_DISCONNECTED'); } } });
       try { await child.loadURL(EDITOR_URL); }
       catch { connection.close(); if (!child.isDestroyed()) child.destroy(); throw new Error('DESKTOP_UNAVAILABLE'); }
       if (disposed || !cleanInput() || pendingFlush) { child.hide(); throw new Error('INPUT_FLUSH_REQUIRED'); }
     }
-    panel = mode; error = null; notify();
-    if (mode === 'floating') { floating!.show(); floating!.focus(); }
+    if (mode === 'inline') {
+      await inline.create();
+      if (disposed || !cleanInput() || pendingFlush) throw new Error('INPUT_FLUSH_REQUIRED');
+    }
+    panel = mode; error = null; notify(); inline.refresh();
+    anchorId = null; manuallyPlaced = false;
+    if (mode === 'floating' || mode === 'contextual') {
+      floating!.setMinimumSize(mode === 'contextual' ? 320 : 360, mode === 'contextual' ? 280 : 480);
+      floating!.setSize(mode === 'contextual' ? 400 : 440, mode === 'contextual' ? 420 : 720);
+      floating!.show(); floating!.focus(); textTools.refresh();
+    }
     else floating?.hide();
   };
   let moving = false;
@@ -95,6 +165,15 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
   let offWorkspace = (): void => {};
   return Object.freeze({
     report,
+    transferPresentation: async (...args: Parameters<typeof presentation.transfer>) => {
+      await releases.get(args[0]);
+      const expanded = hiddenContent.snapshot();
+      // Bulk reveal is a separate, document-local inspection tool. Do not
+      // recapture its CSS as if it came from the page's browsing interaction.
+      if (expanded.documentId === args[0].id && (expanded.enabled || expanded.uncertain)) return;
+      return presentation.transfer(...args);
+    },
+    prepareInline: inline.create,
     bounds: (): Rectangle => visible ? layout : { x: 0, y: 0, width: 0, height: 0 },
     flush,
     async beforeClose(): Promise<boolean> {
@@ -102,11 +181,13 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
       if (!await cleanup.beforeClose()) { report('RECORD_CLEANUP_REVIEW_REQUIRED'); return false; }
       return flush('close');
     },
-    ownedWindows: (): readonly BrowserWindow[] => [floating, pdf.window].filter((value): value is BrowserWindow => !!value && !value.isDestroyed()),
+    ownedWindows: (): readonly BrowserWindow[] => [floating, pdf.window, textTools.window, inline.window].filter((value): value is BrowserWindow => !!value && !value.isDestroyed()),
     watch(): void {
+      attached = true;
       offWorkspace();
       offWorkspace = runtime().workspace.onState(() => {
         const current = runtime().workspace.snapshot().current;
+        textTools.refresh(); inline.refresh();
         const priorReview = [...reviewed.keys()].join(',');
         if (documentId !== (current?.id ?? null)) { documentId = current?.id ?? null; reviewed.clear(); }
         const changes = current?.input?.changes ?? [];
@@ -122,9 +203,10 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
     },
     extension(contents: WebContents): WorkspaceBridgeExtension {
       const surface = role(contents);
-      const snapshot = (): DesktopState => ({ revision, role: surface, panel, reviewed: [...reviewed.keys()],
+      const snapshot = (): DesktopState => ({ revision, role: surface, panel, inline: inline.snapshot(), reviewed: [...reviewed.keys()],
         flush: pendingFlush && pendingFlush.owner === contents ? { id: pendingFlush.id, action: pendingFlush.action } : null,
-        pdf: pdf.metadata, pdfBusy: pdf.busy, pdfExport: pdf.exported, interruption: interruption.snapshot(), cleanup: cleanup.snapshot(), error });
+        pdf: pdf.metadata, pdfBusy: pdf.busy, pdfExport: pdf.exported, interruption: interruption.snapshot(), cleanup: cleanup.snapshot(),
+        hiddenContent: hiddenContent.snapshot(), presentation: presentation.snapshot(attached ? runtime().workspace.current : null), error });
       return Object.freeze({ snapshot,
         onState: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
         authorize(command: WorkspaceCommand) {
@@ -132,6 +214,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
           // Geometry and an already accepted input-owner flush may finish;
           // no document, save, recovery or auxiliary action races maintenance.
           const passive = command.kind === 'desktop' && ['layout', 'flushed'].includes(command.value.kind);
+          if (!passive && hiddenContent.busy) throw new Error('HIDDEN_CONTENT_BUSY');
           if (!passive && interruption.requiresReview) throw new Error('INTERRUPTION_REVIEW_REQUIRED');
           if (!passive && interruption.busy) throw new Error('INTERRUPTION_BUSY');
           if (!passive && cleanup.requiresReview) throw new Error('RECORD_CLEANUP_REVIEW_REQUIRED');
@@ -147,6 +230,12 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
         },
         async execute(command: DesktopCommand, active: () => boolean, signal: AbortSignal): Promise<void> {
           switch (command.kind) {
+            case 'hidden-content': {
+              if (surface !== 'main') throw new Error('EDITOR_NOT_OWNER');
+              if (runtime().closing || pendingFlush) throw new Error('INPUT_FLUSH_REQUIRED');
+              await hiddenContent.set(command.documentId, command.stateRevision, command.enabled, active, signal);
+              error = null; notify(); break;
+            }
             case 'clear-records': {
               if (surface !== 'main') throw new Error('EDITOR_NOT_OWNER');
               if (runtime().closing) throw new Error('RECORD_CLEANUP_BUSY');
@@ -161,7 +250,7 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
               if (surface !== 'main') throw new Error('EDITOR_NOT_OWNER');
               const bounds = window.getContentBounds(); const x = Math.min(command.x, bounds.width); const y = Math.min(command.y, bounds.height);
               layout = { x, y, width: Math.min(command.width, bounds.width - x), height: Math.min(command.height, bounds.height - y) };
-              visible = command.visible; runtime().host.refresh(); break;
+              visible = command.visible; runtime().host.refresh(); textTools.refresh(); inline.refresh(); break;
             }
             case 'panel': await setPanel(command.mode); break;
             case 'flushed':
@@ -189,10 +278,15 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
     },
     async dispose(): Promise<void> {
       disposed = true; pendingFlush?.finish(false); offWorkspace();
+      ipcMain.removeListener(PRESENTATION_INTERACTION, releasePresentation);
+      await Promise.all(pendingReleases);
       // Persistent-session disposal must retain its ownership if the exact
       // accepted maintenance result or cleanup remains unconfirmed.
       await interruption.dispose();
       await cleanup.dispose();
+      await hiddenContent.dispose();
+      await textTools.dispose();
+      await inline.dispose();
       if (floating && !floating.isDestroyed()) floating.destroy();
       await pdf.dispose(); listeners.clear();
     },

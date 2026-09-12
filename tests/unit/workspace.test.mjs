@@ -105,6 +105,27 @@ test('saved bytes do not publish a new baseline when mapping is invalid before o
   }
 });
 
+test('optional screen-state failure after a commit cannot turn a verified Save into a retry; fresh source is still verified', async () => {
+  const previous=source('previous'),next=source('next'),bytes=Buffer.from('<!doctype html><p>saved</p>'),resultHash=digest(bytes);
+  await mkdir(resolve('test-results'),{recursive:true}); const folder=await mkdtemp(resolve('test-results/workspace-screen-save-'));
+  previous.entry=join(folder,'report.html'); await writeFile(previous.entry,bytes);
+  previous.preview={grant:'authorized'}; previous.saveSource={}; previous.mapping={status:'ready'};
+  previous.draft={candidate:{resultHash,bytes,patches:[{}]}}; next.saveSource={}; next.mapping={status:'ready'};
+  previous.input.saveOriginal=async(_revision,write)=>write(previous.draft.candidate);
+  let observed=0,verified=0;
+  const outcome={status:'committed',code:null,transactionId:randomUUID(),expectedHash:resultHash,cleanupPending:false,
+    requiresReview:false,verifySaved:async()=>{verified++;return true;}};
+  const w=createWorkspace('test-output',{review:async()=>assert.fail('no review'),chooseCopy:async()=>undefined},
+    async(_out,grant)=>grant==='first'?previous:next,undefined,async()=>outcome,undefined,undefined,undefined,
+    async(old,fresh)=>{assert.equal(old,previous);assert.equal(fresh,next);observed++;throw Error('PRESENTATION_UNAVAILABLE');});
+  try {
+    await w.open(w.snapshot().stateRevision,async()=>'first');
+    previous.update({changes:[{nodeId:'n1',oldText:'base',newText:'saved'}]});
+    assert.equal((await w.save(w.snapshot().stateRevision,previous.id)).status,'saved');
+    assert.equal(w.current,next);assert.equal(observed,1);assert.equal(verified,2);
+  } finally {await w.dispose();}
+});
+
 test('leave decision is exact, explicit and tied to a bounded review identity', () => {
   const reviewId = randomUUID();
   for (const decision of ['cancel', 'discard', 'save-copy']) assert.ok(isLeaveDecision({ reviewId, decision }));

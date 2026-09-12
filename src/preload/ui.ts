@@ -8,6 +8,23 @@ import { WORKSPACE_COMMAND, WORKSPACE_CONNECT, WORKSPACE_STATE, isWorkspaceComma
 import type { WorkspaceAPI, WorkspaceCommand, WorkspaceConnection, WorkspaceReply, WorkspaceResult } from '../contracts/workspace-editor.ts';
 import type { WorkspaceSnapshot } from '../contracts/workspace.ts';
 import type { DesktopAPI } from '../contracts/desktop.ts';
+import { isTextDecoration, TEXT_DECORATION } from '../contracts/text-geometry.ts';
+import type { DecorationAPI, TextDecoration } from '../contracts/text-geometry.ts';
+
+const decoration = process.argv.includes('--hae-decoration');
+if (decoration && process.isMainFrame && location.href === EDITOR_URL) {
+  let latest: TextDecoration = { hover: null, selected: null };
+  const listeners = new Set<(state: TextDecoration) => void>();
+  ipcRenderer.on(TEXT_DECORATION, (_event, state: unknown) => {
+    if (!isTextDecoration(state)) return;
+    latest = state; for (const listener of listeners) { try { listener(state); } catch { /* Read-only decoration. */ } }
+  });
+  const api: DecorationAPI = Object.freeze({ onState: listener => {
+    if (typeof listener !== 'function' || listeners.size >= 4) throw new Error('INVALID_EDITOR_LISTENER');
+    listeners.add(listener); listener(latest); return () => { listeners.delete(listener); };
+  } });
+  contextBridge.exposeInMainWorld('haeDecoration', api);
+}
 
 const bootstrap: EditorBootstrap = Object.freeze({
   contractVersion: CONTRACT_VERSION,
@@ -23,7 +40,7 @@ ipcRenderer.send(BOOTSTRAP_CHANNEL, {
 
 // Trusted UI page scripts get methods, never IPC objects, channels, sender
 // events, connection tokens, file paths or arbitrary invoke authority.
-if (process.isMainFrame && location.href === EDITOR_URL) {
+if (!decoration && process.isMainFrame && location.href === EDITOR_URL) {
   let connection: Promise<EditorConnection | null> | undefined;
   let sessionId: string | null = null;
   let sequence = 0;
@@ -78,7 +95,7 @@ if (process.isMainFrame && location.href === EDITOR_URL) {
 
 // Window-scoped API for the unified Main session. The single-document API above
 // remains only for earlier experiments; Main installs exactly one transport.
-if (process.isMainFrame && location.href === EDITOR_URL) {
+if (!decoration && process.isMainFrame && location.href === EDITOR_URL) {
   let connection: Promise<WorkspaceConnection | null> | undefined;
   let sessionId: string | null = null;
   let sequence = 0;

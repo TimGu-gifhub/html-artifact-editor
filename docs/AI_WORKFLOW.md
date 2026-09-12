@@ -49,7 +49,15 @@ Kimi 用于开发过程，应用仍采用既定 React/TypeScript 技术栈并保
 
 每次向 GitHub 推送代码或文档、提交 PR 或发布版本前，核对本次实际使用的 AI。若新增 AI 工具、模型（含新版本）或提供方，必须在同次提交中更新 [README 的 AI 辅助开发与致谢](../README.md#ai-辅助开发与致谢)，注明工具、能够核实的模型名称/版本、对应公司及实际参与范围，并致谢相应公司与模型。
 
+2026-09-11，就地校稿任务重新核对官方模型目录、本机 CLI/doctor/可用配置，固定 Kimi Code CLI 0.42.0、`kimi-code/k3` / `k3`、high / always_thinking。两次实际串行调用完成限定 UI、纯展示 CSS、装饰 Canvas、输入归属及聚焦修正，均退出 0。Codex（GPT-6）负责 Main/core/contracts/preload、集成与独立原生回归；不把配置或 Kimi 自评当作验收。详见 [HAE-009 第三阶段](implementation/HAE-009.md)。
+
+2026-09-11，后续原位输入任务再次核对上述官方目录、CLI/doctor 和可用配置，继续固定 Kimi Code **0.42.0**、**`kimi-code/k3` / `k3`**、high / always_thinking。Kimi 实际执行两次串行调用（均退出 0），负责限定的原位 UI、字体显示、复核入口、输入归属、几何回退和异步身份核对；最终 UI 行为检查 234 项通过。第二次调用如实报告其范围外的 Preview 类型错误，主代理修正显式类型后四套类型检查通过。Codex（GPT-6）负责 Main/契约/隔离 preload、原生窗口、显示核验、Windows 保存、独立测试和文档。一个源码写入者的边界保持生效，应用不接入 AI。详见 [HAE-009 第四阶段](implementation/HAE-009.md)。
+
+2026-09-11，当前显示补充再次核对 [官方模型目录](https://www.kimi.com/code/docs/kimi-code/models.html)、[K3 公告](https://www.kimi.com/news/kimi-k3)、本机 CLI/doctor 和可用配置。固定 **0.42.0 / `kimi-code/k3` / `k3` / high / always_thinking**；Kimi 实际串行执行两次限定调用并均退出 0：首次修改 `util.ts`、`app.tsx` 和现有 `ui-contextual.mjs`，实现问答/渐显计数、旧状态兼容和部分保留反馈；复核调用只修正 `app.tsx` 一处 tooltip，避免 partial 时暗示全部成功并移除内部术语。两次均实际通过 24 项定向 UI 检查及 UI 类型检查。Codex（GPT-6）实现整树源码证明、固定屏幕属性、本地合成 submit、隔离与保存保护、独立原生/字节验证及文档；源码写入串行，私人样例和调用日志不进入公开仓库。具体结果见 [HAE-009 第五阶段](implementation/HAE-009.md)。
+
 仅列出实际参与本项目的 AI；配置存在或计划使用不算实际使用。无法确认具体版本时如实记录已知工具或模型系列，不猜测版本。保留已有贡献的致谢，使用记录与证据按现有隐私规则脱敏；前端模型分工和应用离线边界继续适用。
+
+2026-09-12，保存故障副本保全重新核对 [官方模型目录](https://www.kimi.com/code/docs/kimi-code/models.html)、[K3 公告](https://www.kimi.com/news/kimi-k3)、本机 CLI/doctor 与可用配置，固定 **0.42.0 / `kimi-code/k3` / `k3` / thinking enabled、high / always_thinking**。Kimi 实际执行两次串行限定调用，均退出 0：09:00:19–09:08:11 UTC 完成输入冻结与 8 项初版 UI 检查；09:13:15–09:25:02 UTC 根据独立复核补齐 LiveInputController 的自动意图暂停、干净排空与准确文案，定向增至 15 项。第二次测试曾过早把命令发出视为会话结束，修正等待实际完成后通过；Git Bash 调 npm 的 PATH 问题通过直接执行等价 Node 命令处理。主代理随后独立执行全部 250 项 UI、四套类型和模块边界检查通过。允许路径只有输入 UI、控制器、共享状态函数及 UI 测试；Codex（GPT-6）负责 Main、文件保护、合同和独立集成。具体原生结果与待验边界见 [HAE-010 第九阶段](implementation/HAE-010.md)，没有并行源码写入、应用内 AI 或公开调用日志。
 
 ## 2. 每个任务的工作循环
 

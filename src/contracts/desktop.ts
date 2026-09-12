@@ -2,20 +2,29 @@ import { isDiffReview } from './source-diff.ts';
 import type { WorkspaceResult } from './workspace-editor.ts';
 import type { InterruptionState } from './interruption.ts';
 import type { CleanupState } from './record-cleanup.ts';
+import type { InlineTextPlacement } from './inline-text.ts';
 
-export type PanelMode = 'docked' | 'hidden' | 'floating';
+export type PanelMode = 'docked' | 'hidden' | 'floating' | 'contextual' | 'inline';
+export type PresentationState = Readonly<{ documentId: string; panels: number; status: 'restored' | 'partial'; elements?: number; details?: number }>;
 export type PdfOptions = Readonly<{ paper: 'A4' | 'Letter'; landscape: boolean; background: boolean }>;
 export type PdfPreview = Readonly<{
   id: string; name: string; documentId: string; draftRevision: number; candidateHash: string;
   size: number; dirty: boolean; options: PdfOptions;
 }>;
+export type HiddenContentState = Readonly<{
+  documentId: string | null; count: number; enabled: boolean; busy: boolean;
+  available: boolean; uncertain: boolean; limited: boolean;
+}>;
 export type DesktopState = Readonly<{
-  revision: number; role: 'main' | 'editor'; panel: PanelMode; reviewed: readonly string[];
+  revision: number; role: 'main' | 'editor' | 'inline'; panel: PanelMode; reviewed: readonly string[];
+  inline?: InlineTextPlacement | null;
   flush: Readonly<{ id: string; action: 'close' | 'dock' | 'action' }> | null;
   pdf: PdfPreview | null; pdfBusy: boolean; error: string | null;
   pdfExport: Readonly<{ status: 'created' | 'cancelled' | 'failed' | 'unknown'; name: string | null; code: string | null }> | null;
   interruption?: InterruptionState;
   cleanup?: CleanupState;
+  hiddenContent?: HiddenContentState;
+  presentation?: PresentationState | undefined;
 }>;
 export type DesktopCommand = Readonly<{ kind: 'layout'; x: number; y: number; width: number; height: number; visible: boolean }>
   | Readonly<{ kind: 'panel'; mode: PanelMode }>
@@ -24,6 +33,7 @@ export type DesktopCommand = Readonly<{ kind: 'layout'; x: number; y: number; wi
   | Readonly<{ kind: 'pdf-create'; documentId: string; draftRevision: number; candidateHash: string; options: PdfOptions }>
   | Readonly<{ kind: 'pdf-export' | 'pdf-show'; id: string }>
   | Readonly<{ kind: 'inspect-interruption' | 'clear-records'; stateRevision: number }>
+  | Readonly<{ kind: 'hidden-content'; documentId: string; stateRevision: number; enabled: boolean }>
   | Readonly<{ kind: 'pdf-close' | 'flush-input' }>;
 export type DesktopAPI = Readonly<{ request: (command: DesktopCommand) => Promise<WorkspaceResult> }>;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -38,7 +48,7 @@ export function isDesktopCommand(value: unknown): value is DesktopCommand {
   switch (value.kind) {
     case 'layout': return count === 6 && ['x', 'y', 'width', 'height'].every(key => Number.isSafeInteger(value[key])
       && (value[key] as number) >= 0 && (value[key] as number) <= 16384) && typeof value.visible === 'boolean';
-    case 'panel': return count === 2 && ['docked', 'hidden', 'floating'].includes(value.mode as string);
+    case 'panel': return count === 2 && ['docked', 'hidden', 'floating', 'contextual', 'inline'].includes(value.mode as string);
     case 'review': return count === 5 && uuid(value.documentId) && isDiffReview({ draftRevision: value.draftRevision, candidateHash: value.candidateHash })
       && Array.isArray(value.nodeIds) && value.nodeIds.length <= 10000 && new Set(value.nodeIds).size === value.nodeIds.length
       && value.nodeIds.every(id => typeof id === 'string' && /^n[0-9]{1,6}$/u.test(id));
@@ -47,6 +57,8 @@ export function isDesktopCommand(value: unknown): value is DesktopCommand {
     case 'pdf-export':
     case 'pdf-show': return count === 2 && uuid(value.id);
     case 'pdf-close': return count === 1;
+    case 'hidden-content': return count === 4 && uuid(value.documentId) && typeof value.enabled === 'boolean'
+      && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;
     case 'flush-input': return count === 1;
     case 'inspect-interruption':
     case 'clear-records': return count === 2 && Number.isSafeInteger(value.stateRevision) && (value.stateRevision as number) > 0;

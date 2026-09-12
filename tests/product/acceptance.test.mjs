@@ -108,7 +108,10 @@ async function browserReopen(value, expectedTexts) {
   for (const candidate of candidates) { try { await access(candidate); edge = candidate; break; } catch {} }
   assert.ok(edge, 'An installed independent Edge browser is required for this Windows acceptance test.');
   const browserProfile = await mkdtemp(join(value.base, 'edge-'));
+  // Edge's Windows compatibility relaunch can lose inherited stdout/stderr.
+  // Use Playwright's upstream launch workaround; keep the browser sandbox on.
   const { stdout } = await execute(edge, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--edge-skip-compat-layer-relaunch',
     '--user-data-dir=' + browserProfile, '--virtual-time-budget=1000', '--dump-dom', pathToFileURL(value.entry).href],
     { cwd: root, timeout: 30000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
   const document = parse(stdout);
@@ -205,6 +208,49 @@ test('M2 product recovery, reviewed Save, independent browser and conflict-copy 
     report.commit = (await execute('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim();
     report.dirty = !!(await execute('git',['status','--porcelain'],{cwd:root})).stdout.trim();
     evidence.originalHash = hash(Buffer.from(source)); evidence.cssHash = hash(Buffer.from(css));
+    await saveReport();
+    for (const value of passed) console.log('PASS: ' + value);
+  } catch (error) {
+    report.status = 'failed'; report.error = String(error); await saveReport(); throw error;
+  }
+});
+
+
+test('M2 product Save failure copy retains source and transaction evidence', { timeout: 150000 }, async t => {
+  await mkdir(results, { recursive: true });
+  const passed = []; const evidence = {};
+  const report = { status: 'running', passed, platform: { os: type(), release: release(), arch: arch() }, evidence,
+    pending: ['maintainer independent task', 'real Windows IME and native chooser interaction', 'Windows 10 / DPI / screen reader'] };
+  const saveReport = () => writeFile(join(results, 'product-save-failure.json'), JSON.stringify(report, null, 2));
+  await saveReport();
+  if (process.platform !== 'win32') {
+    report.status = 'unavailable'; await saveReport(); t.skip('Windows product acceptance requires Windows and an installed Edge browser.'); return;
+  }
+  try {
+    for (const mode of ['save-unknown', 'save-rebase']) {
+      const failedValue = await fixture();
+      const failed = launch(t, mode, failedValue);
+      const rescued = await failed.receipt('failure-copied');
+      assert.equal(rescued.status, mode === 'save-unknown' ? 'unknown' : 'rebase-required');
+      assert.equal(rescued.copyCalls, 3); assert.equal(rescued.changes, 1);
+      assert.equal(rescued.candidateHash, hash(expected(1)));
+      const disk = mode === 'save-unknown' ? expected(1) : Buffer.from(expected(1).toString().replace('原始备注', '提交后的外部修改'));
+      assert.equal(rescued.diskHash, hash(disk));
+      failed.child.kill('SIGKILL'); assert.notEqual((await failed.exited()).code, 0);
+      assert.deepEqual(await readFile(failedValue.entry), disk);
+      const copyPath = join(failedValue.project, '保存故障草稿.html');
+      assert.deepEqual(await readFile(copyPath), expected(1));
+      assert.deepEqual(await readFile(failedValue.cssPath), Buffer.from(css));
+      for (const [name, digest] of Object.entries(rescued.records)) {
+        assert.equal(hash(await readFile(join(failedValue.profile, 'workspace-records', name))), digest);
+      }
+      evidence[mode] = { ...rescued, case: failedValue.base,
+        browser: await browserReopen({ ...failedValue, entry: copyPath }, [edits[0]]) };
+      passed.push(mode + ': inline product editing and reviewed native Save failure retain the frozen candidate; cancel and existing-file refusal preserve evidence, a fresh copy reopens in Edge, repeat Save/owner transfer/close stay blocked');
+    }
+    report.status = 'passed';
+    report.commit = (await execute('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim();
+    report.dirty = !!(await execute('git',['status','--porcelain'],{cwd:root})).stdout.trim();
     await saveReport();
     for (const value of passed) console.log('PASS: ' + value);
   } catch (error) {

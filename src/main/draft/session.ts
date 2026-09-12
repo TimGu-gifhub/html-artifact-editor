@@ -21,6 +21,10 @@ export function createDraftSession(outputRoot: string, mapping: MappingPort, pre
   let current = freezeCandidate({ identity: source.identity, baseHash: source.baseHash, resultHash: source.baseHash,
     patches: [], bytes: source.bytes });
   let uncertain: PatchCandidate | null = null;
+  // Only an original Save may expose its already confirmed, frozen candidate
+  // for an independent copy. Unknown Preview/History application is different
+  // evidence and must not acquire this exception.
+  let retainedOriginal: PatchCandidate | null = null;
   let uncertainHistory: PreparedHistory | null = null;
   let restored = false;
   let copyOutcome: NewFileOutcome | null = null;
@@ -31,6 +35,8 @@ export function createDraftSession(outputRoot: string, mapping: MappingPort, pre
   const textFor = (nodeId: string, candidate = current): string | undefined =>
     candidate.patches.find((patch) => patch.nodeId === nodeId)?.newText
     ?? source.nodes.find((node) => node.nodeId === nodeId && node.editable)?.decodedText;
+  const canSaveCopy = (): boolean => !closed && copyOutcome?.status !== 'unknown'
+    && (phase === 'idle' || (phase === 'uncertain' && retainedOriginal === current));
   return Object.freeze({
     get candidate(): PatchCandidate { return current; },
     get uncertainCandidate(): PatchCandidate | null { return uncertain; },
@@ -39,6 +45,7 @@ export function createDraftSession(outputRoot: string, mapping: MappingPort, pre
     historySummary: () => history?.summary() ?? null,
     historyCheckpoint: () => history?.capture(),
     get lastCopy(): NewFileOutcome | null { return copyOutcome; },
+    get canSaveCopy(): boolean { return canSaveCopy(); },
     get revision() { return revision; },
     get phase(): Phase { return phase; },
     textFor,
@@ -125,17 +132,22 @@ export function createDraftSession(outputRoot: string, mapping: MappingPort, pre
       } finally { if (!uncertain) phase = closed ? 'closed' : 'idle'; }
     },
     async saveCopy(choose: () => Promise<string | undefined>, writer: NewFileWriter): Promise<NewFileOutcome | null> {
-      if (closed || phase !== 'idle') throw new Error('DRAFT_UNAVAILABLE');
+      if (!canSaveCopy()) throw new Error('DRAFT_UNAVAILABLE');
+      const candidate = retainedOriginal ?? current;
       phase = 'saving';
       try {
         const path = await choose();
         if (closed || !path) return null;
-        try { copyOutcome = await writer.write(path, current.bytes); }
-        catch { copyOutcome = Object.freeze({ status: 'unknown', path, expectedHash: current.resultHash, code: 'NEW_FILE_WRITE_FAILED' }); }
+        try { copyOutcome = await writer.write(path, candidate.bytes); }
+        catch { copyOutcome = Object.freeze({ status: 'unknown', path, expectedHash: candidate.resultHash, code: 'NEW_FILE_WRITE_FAILED' }); }
         if (copyOutcome.status === 'unknown') phase = 'uncertain';
         // A copy does not replace this session's original baseline or clear drafts.
         return copyOutcome;
-      } finally { if (copyOutcome?.status !== 'unknown') phase = closed ? 'closed' : 'idle'; }
+      } finally {
+        // Cancellation, failure and even a verified copy do not reconcile the
+        // original Save, release its freeze, or replace its retained evidence.
+        phase = uncertain || copyOutcome?.status === 'unknown' ? 'uncertain' : closed ? 'closed' : 'idle';
+      }
     },
     async saveOriginal(write: (candidate: PatchCandidate) => Promise<OriginalSaveResult>): Promise<OriginalSaveResult> {
       if (closed || phase !== 'idle' || mapping.status !== 'ready' || (history && !history.available)) throw new Error('DRAFT_UNAVAILABLE');
@@ -144,10 +156,12 @@ export function createDraftSession(outputRoot: string, mapping: MappingPort, pre
         const result = await write(current);
         // The old mapping cannot edit against an overwritten baseline. A fresh
         // verified document must replace this session; retain these bytes until then.
-        if (result.status === 'committed' || result.status === 'unknown' || result.requiresReview) uncertain = current;
+        if (result.status === 'committed' || result.status === 'unknown' || result.requiresReview) {
+          uncertain = current; retainedOriginal = current;
+        }
         return result;
       } catch {
-        uncertain = current;
+        uncertain = current; retainedOriginal = current;
         return Object.freeze({ status: 'unknown', code: 'SAVE_OUTCOME_UNKNOWN', transactionId: null,
           expectedHash: current.resultHash, cleanupPending: true, requiresReview: true, verifySaved: null });
       } finally { phase = uncertain ? 'uncertain' : closed ? 'closed' : 'idle'; }

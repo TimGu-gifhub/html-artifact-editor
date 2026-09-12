@@ -14,8 +14,9 @@ export type DesktopRequest = (command: DesktopCommand) => Promise<WorkspaceResul
  *   input cannot see a preserved local failure (controller.failed) or an
  *   in-flight begin, and flush() already settles both honestly.
  * - Non-owner side always asks Main to route a flush request to the owner
- *   window — the floating window's begin may be in flight before Main has
- *   any input at all.
+ *   window — the floating/contextual/inline window's begin may be in flight
+ *   before Main has any input at all. Owner 归属：主窗口仅 docked/hidden；
+ *   floating/contextual 为 editor 窗口；inline 为原位输入窗（role=inline）。
  *
  * Returns false without retry when composing or failed; the caller must abort
  * its own action.

@@ -1,12 +1,16 @@
 import { createRoot } from 'react-dom/client';
 import './shell.css';
-import { App } from './app.tsx';
+import { Decoration } from './decoration.tsx';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing UI root');
 
-if (window.haeDesktop && window.haeWorkspace) {
-  createRoot(root).render(<App />);
+if (window.haeDecoration) {
+  // 文字装饰层：透明、不可聚焦、鼠标穿透的独立原生窗口。只有边框绘制，没有
+  // haeWorkspace/haeDesktop；App/store/input 模块只在正常产品分支动态加载。
+  createRoot(root).render(<Decoration />);
+} else if (window.haeDesktop && window.haeWorkspace) {
+  void import('./app.tsx').then(({ App }) => createRoot(root).render(<App />));
 } else {
   // HAE-001 toolchain verification shell, kept for the legacy smoke tests.
   const ready = window.haeBootstrap?.contractVersion === 1

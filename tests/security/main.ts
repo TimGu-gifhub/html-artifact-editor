@@ -187,6 +187,45 @@ async function run(): Promise<void> {
         dataBlocked, popupBlocked, beaconBlocked, notificationDenied, mediaDenied};
     })()`, true);
     assert.deepEqual(attacks, Object.fromEntries(Object.keys(attacks).map((key) => [key, true])));
+    // Local demonstration handlers may run on a real button click, while the
+    // original response sandbox and form-action/network guards still prevent
+    // every actual POST, including an explicit submit() inside the handler.
+    await interactive.contents.executeJavaScript(`(() => {
+      globalThis.localSubmitEvents=[];
+      const form=document.createElement('form');form.id='local-submit-probe';form.action=${JSON.stringify(endpoint)};form.method='POST';
+      form.style.cssText='position:fixed;top:10px;left:10px;z-index:2147483647;background:white;padding:20px';
+      const button=document.createElement('button');button.type='submit';button.textContent='Local submit probe';form.append(button);
+      form.addEventListener('submit',event=>{localSubmitEvents.push({trusted:event.isTrusted,submitter:event.submitter===button});HTMLFormElement.prototype.submit.call(form)});
+      document.body.append(form);button.click();
+    })()`);
+    assert.deepEqual(await interactive.contents.executeJavaScript('localSubmitEvents'),[],'synthetic clicks are not forwarded');
+    window.contentView.addChildView(interactive.view);interactive.view.setBounds({x:0,y:0,width:960,height:640});
+    window.show();window.focus();interactive.contents.focus();
+    const clickSubmit = async () => {
+      const point=await interactive.contents.executeJavaScript(`(()=>{const r=document.querySelector('#local-submit-probe button').getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
+      interactive.contents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});
+      interactive.contents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});
+      await delay(100);
+    };
+    await clickSubmit();
+    for(let i=0;i<100&&await interactive.contents.executeJavaScript('localSubmitEvents.length')===0;i++)await delay(20);
+    assert.deepEqual(await interactive.contents.executeJavaScript('localSubmitEvents'),[{trusted:false,submitter:true}]);
+    await interactive.contents.executeJavaScript(`(()=>{const input=document.createElement('input');input.required=true;document.querySelector('#local-submit-probe').prepend(input)})()`);
+    await clickSubmit();
+    assert.equal(await interactive.contents.executeJavaScript('localSubmitEvents.length'),1,'invalid form does not emit submit');
+    await interactive.contents.executeJavaScript(`(()=>{const form=document.querySelector('#local-submit-probe');form.noValidate=true;form.querySelector('button').addEventListener('click',e=>e.preventDefault(),{once:true})})()`);
+    await clickSubmit();
+    assert.equal(await interactive.contents.executeJavaScript('localSubmitEvents.length'),1,'page-cancelled click is respected');
+    await interactive.contents.executeJavaScript(`document.querySelector('#local-submit-probe button').disabled=true`);
+    await clickSubmit();
+    assert.equal(await interactive.contents.executeJavaScript('localSubmitEvents.length'),1,'disabled submit button is inert');
+    await interactive.contents.executeJavaScript(`document.querySelector('#local-submit-probe button').disabled=false`);
+    await clickSubmit();
+    assert.equal(await interactive.contents.executeJavaScript('localSubmitEvents.length'),2,'explicit noValidate still invokes only a local synthetic event');
+    window.contentView.removeChildView(interactive.view);
+    const guardedResponse=await interactive.session.fetch(interactive.url);
+    assert.match(guardedResponse.headers.get('content-security-policy')??'',/form-action 'none'/);
+    assert.doesNotMatch(guardedResponse.headers.get('content-security-policy')??'',/allow-forms/);
     await delay(200);
     assert.equal(interactive.contents.getURL(), interactive.url);
     assert.equal(connections, 0, 'No loopback TCP connection, including resource hints');

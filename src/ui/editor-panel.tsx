@@ -1,8 +1,10 @@
-import { useId } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import type { InputSnapshot } from '../contracts/input.ts';
 import type { PreviewMode } from '../contracts/preview.ts';
 import type { LiveInputController, LiveInputView } from './live-input.ts';
 import { useLiveInput } from './live-input.ts';
+import { draftFrozen, frozenCopyAvailable, preservedText, quiesced } from './input-quiescence.ts';
+import { CompactFocusTracker } from './contextual-panel.ts';
 
 type EditorPanelProps = Readonly<{
   hasDocument: boolean;
@@ -10,6 +12,8 @@ type EditorPanelProps = Readonly<{
   input: InputSnapshot | null;
   controller: LiveInputController;
   onRetryBegin: () => void;
+  /** 就地小窗：紧凑布局，原文默认折叠，含“取消待预览”；复核与保存仍在主窗口。 */
+  compact?: boolean;
 }>;
 
 function statusBadge(view: LiveInputView, input: InputSnapshot | null) {
@@ -21,16 +25,6 @@ function statusBadge(view: LiveInputView, input: InputSnapshot | null) {
     if (changed) return <span className="badge-ok">草稿已预览</span>;
   }
   return null;
-}
-
-/** External transactions and mapping states under which the textarea is quiesced. */
-function quiesced(input: InputSnapshot | null, view: LiveInputView): boolean {
-  if (view.flushing || view.resolving) return true;
-  // 没有输入会话（只读预览或映射尚未建立）时绝不允许输入：null input 不是写入授权。
-  if (!input) return true;
-  if (input.mappingStatus !== 'ready') return true;
-  return input.phase === 'saving' || input.phase === 'leaving' || input.phase === 'closed'
-    || input.phase === 'history' || input.phase === 'resolving' || input.phase === 'beginning';
 }
 
 /** 映射不可用时仍展示 controller 已保留的输入：只读、可聚焦、可选择，不构成任何写入授权。 */
@@ -57,6 +51,27 @@ export function EditorPanel(props: EditorPanelProps) {
   const view = useLiveInput(props.controller);
   const inputId = useId();
   const { input } = props;
+  const compact = props.compact ?? false;
+
+  // 就地小窗：新的输入绑定（Main 会话 editToken）就绪后聚焦草稿框一次，让用户
+  // 点击原文后能立即输入。组词/冻结时推迟而非丢弃；离开 compact、只读或失去
+  // 绑定时重置；同一绑定的后续输入/预览/状态更新不再抢焦点。docked/floating
+  // 的既有焦点行为不变。聚焦不更改文字与选区，也不触发 apply/save。
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusTrackerRef = useRef<CompactFocusTracker | null>(null);
+  focusTrackerRef.current ??= new CompactFocusTracker();
+  const focusBinding = view.phase === 'active' && view.nodeId !== null && input?.input
+    ? input.input.editToken : null;
+  useEffect(() => {
+    const target = focusTrackerRef.current!.evaluate({
+      compact,
+      readonly: props.mode === 'interactive',
+      binding: focusBinding,
+      frozen: quiesced(input, view),
+      composing: view.composing,
+    });
+    if (target !== null) draftRef.current?.focus();
+  });
 
   let body;
   if (!props.hasDocument) {
@@ -91,30 +106,45 @@ export function EditorPanel(props: EditorPanelProps) {
   } else if (view.phase === 'idle' || view.phase === 'beginning') {
     body = <div className="editor-empty"><p>正在锁定所选文字…</p></div>;
   } else if (view.phase === 'failed' && view.nodeId === null) {
+    // 草稿冻结（保存故障 uncertain/关闭）期间禁止新的 begin 重试，也保留失败输入不丢弃。
+    const failedFrozen = draftFrozen(input);
     body = <div className="editor-empty">
       <div className="panel-error" role="alert">
         <p>{view.error?.message}</p>
         {view.error?.detail && <p className="hint">{view.error.detail}</p>}
         <div className="editor-actions">
-          <button type="button" className="btn sm" onClick={props.onRetryBegin}>重试</button>
-          <button type="button" className="btn sm" onClick={() => props.controller.discardFailed()}>放弃</button>
+          <button type="button" className="btn sm" disabled={failedFrozen} onClick={props.onRetryBegin}>重试</button>
+          <button type="button" className="btn sm" disabled={failedFrozen} onClick={() => props.controller.discardFailed()}>放弃</button>
         </div>
       </div>
     </div>;
   } else {
     const frozen = quiesced(input, view);
+    // 冻结且仍有保留内容时只读保留（同一 textarea、可聚焦/选择/复制），不禁用；
+    // 保存故障冻结本身即构成保留理由，即使本地输入已完全应用。
+    const preserved = preservedText(input, view);
+    const draftFailure = draftFrozen(input);
     body = <div className="editor-body">
-      <div className="field">
-        <span className="field-label">文件原文</span>
-        <div className="orig-text">{view.beginText}</div>
-      </div>
+      {compact ? (
+        <details className="orig-fold">
+          <summary>文件原文</summary>
+          <div className="orig-text">{view.beginText}</div>
+        </details>
+      ) : (
+        <div className="field">
+          <span className="field-label">文件原文</span>
+          <div className="orig-text">{view.beginText}</div>
+        </div>
+      )}
       <div className="field">
         <label className="field-label" htmlFor={inputId}>草稿文字</label>
         <textarea
           id={inputId}
+          ref={draftRef}
           className="draft-input"
           value={view.localText}
-          disabled={frozen}
+          disabled={frozen && !preserved}
+          readOnly={preserved}
           onChange={event => props.controller.onChange(event.target.value)}
           onCompositionStart={() => props.controller.onCompositionStart()}
           onCompositionEnd={event => props.controller.onCompositionEnd(event.currentTarget.value)}
@@ -128,8 +158,14 @@ export function EditorPanel(props: EditorPanelProps) {
           aria-label="草稿文字"
         />
         <div className="field-foot">
-          {frozen ? <span className="badge-pending">输入已暂停</span> : statusBadge(view, input)}
-          <span className="hint">停顿约 0.25 秒自动更新预览；换行显示取决于原页面样式。</span>
+          {draftFailure
+            ? <span className="badge-pending">草稿已冻结 · 输入已保留</span>
+            : frozen ? <span className="badge-pending">输入已暂停</span> : statusBadge(view, input)}
+          {draftFailure
+            ? <span className="hint">{frozenCopyAvailable(input)
+              ? '草稿已冻结，以上输入只读保留，可选中复制；本次保存已确认的候选可用“另存草稿”保全为独立副本，这不代表原文件已保存成功，也不会解除冻结。'
+              : '草稿已冻结，以上输入只读保留，可选中复制后另行保存。'}</span>
+            : <span className="hint">停顿约 0.25 秒自动更新预览；换行显示取决于原页面样式。</span>}
         </div>
       </div>
       {view.intentPending && <p className="hint" role="status">已选中另一段文字，完成当前输入后将切换。</p>}
@@ -137,8 +173,10 @@ export function EditorPanel(props: EditorPanelProps) {
         <p>{view.error.message}</p>
         {view.error.detail !== '' && <textarea className="error-detail" readOnly value={view.error.detail} aria-label="错误详情" />}
         <div className="editor-actions">
-          {view.phase === 'failed' && <button type="button" className="btn sm" onClick={() => props.controller.retry()}>重试</button>}
-          {view.phase === 'failed' && <button type="button" className="btn sm" onClick={() => props.controller.discardFailed()}>放弃本地输入</button>}
+          {view.phase === 'failed' && <button type="button" className="btn sm" disabled={draftFailure}
+            onClick={() => props.controller.retry()}>重试</button>}
+          {view.phase === 'failed' && <button type="button" className="btn sm" disabled={draftFailure}
+            onClick={() => props.controller.discardFailed()}>放弃本地输入</button>}
         </div>
       </div>}
       <div className="editor-actions">
@@ -146,6 +184,14 @@ export function EditorPanel(props: EditorPanelProps) {
           onClick={() => props.controller.restoreParagraph()}>
           还原为文件原文
         </button>
+        {compact && (
+          <button type="button" className="btn"
+            disabled={frozen || view.busy || view.composing || !view.dirty}
+            title="取消尚未预览的输入；已预览内容用“还原为文件原文”或撤销恢复。"
+            onClick={() => props.controller.escape()}>
+            取消待预览
+          </button>
+        )}
         <span className="hint">还原本段为文件原文会形成一条可撤销的草稿记录，不会写回原文件。</span>
       </div>
     </div>;
@@ -153,7 +199,7 @@ export function EditorPanel(props: EditorPanelProps) {
 
   return (
     <div className="editor-inner">
-      <div className="panel-head"><h2>校稿</h2></div>
+      <div className="panel-head"><h2>{compact ? '就地校稿' : '校稿'}</h2></div>
       {body}
     </div>
   );
