@@ -65,7 +65,8 @@ export function createWorkspace(outputRoot: string, decisions: WorkspaceDecision
       persistence: current.persistence?.snapshot() ?? null }) : null,
     review, backupReview, cleanupPending: activationUncertain || failedCleanup.size > 0 || !!lastDeparture?.cleanupPending, lastSave, lastDeparture,
     canSave: !!saveOriginal && phase === 'idle' && !disposed && !activationUncertain && !failedCleanup.size
-      && !lastSave?.requiresReview && !lastDeparture?.requiresReview && current?.mode === 'proofread' && current.input.snapshot().canSaveCopy
+      && !lastSave?.requiresReview && !lastDeparture?.requiresReview && current?.mode === 'proofread'
+      && current.input.snapshot().draftPhase === 'idle' && current.input.snapshot().canSaveCopy
       && (!current.history || current.history.available)
       && current.mapping.status === 'ready' && current.draft.candidate.patches.length > 0 });
   const inputReady = (state: InputSnapshot | null | undefined): void => {

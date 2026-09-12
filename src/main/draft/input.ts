@@ -54,7 +54,7 @@ export function createInputController(mapping: PreviewMapping, draft: DraftSessi
         oldText: patch.expectedText, newText: patch.newText }))),
       lastCopy: copy ? Object.freeze({ status: copy.status, name: basename(copy.path), expectedHash: copy.expectedHash, code: copy.code }) : null,
       canApply: phase === 'idle' && !!input && !input.composing && ownsSelection(input) && draft.phase === 'idle',
-      canSaveCopy: phase === 'idle' && (!input || (!input.composing && input.text === input.appliedText)) && draft.phase === 'idle',
+      canSaveCopy: phase === 'idle' && (!input || (!input.composing && input.text === input.appliedText)) && draft.canSaveCopy,
       history: history ? Object.freeze({ ...history, canUndo: historyReady && history.undoCount > 0, canRedo: historyReady && history.redoCount > 0 }) : null,
     });
   };

@@ -36,7 +36,9 @@ async function click(contents:WebContents, selector:string, label='', text=false
   BrowserWindow.fromWebContents(contents)?.focus();
   await delay(60);
   const point=await contents.executeJavaScript(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(selector)})].find(e=>!e.disabled&&e.getBoundingClientRect().width&&e.textContent.includes(${JSON.stringify(label)}));if(!e)throw Error('NO_TARGET');let r;if(${text}){r=document.createRange();r.setStart(e.firstChild,0);r.setEnd(e.firstChild,1);r=r.getBoundingClientRect()}else r=e.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
-  contents.focus();contents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});contents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});
+  contents.focus();
+  await until(()=>contents.executeJavaScript('document.hasFocus()'),'native click focus');
+  contents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});contents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});
 }
 async function run(){
  await mkdir(results,{recursive:true});await app.whenReady();const root=await mkdtemp(join(results,'view-state-')), entry=join(root,'sample.html');
@@ -100,8 +102,16 @@ async function run(){
   await until(()=>browsing.executeJavaScript('getComputedStyle(document.querySelector("section")).transform==="none"'),'fresh reveal');
   await click(browsing,'summary','展开第一项');await until(()=>browsing.executeJavaScript(visible('#answer')),'reopened FAQ');
   assert.equal(await browsing.executeJavaScript('document.getElementById("answer").textContent'),text);
-  await click(browsing,'input');await browsing.insertText('again@example.invalid');await click(browsing,'button','确认订阅');
-  await until(()=>browsing.executeJavaScript('demoSubmits===1'),'reopened local callback');
+  await click(browsing,'input');
+  await until(()=>browsing.executeJavaScript('document.activeElement===document.querySelector("input")'),'reopened form focus');
+  await browsing.insertText('again@example.invalid');
+  assert.equal(await browsing.executeJavaScript('document.querySelector("input").value'),'again@example.invalid');
+  await click(browsing,'button','确认订阅');
+  try { await until(()=>browsing.executeJavaScript('demoSubmits===1'),'reopened local callback'); }
+  catch(error) {
+    console.log(JSON.stringify({workspace:state(),desktop:desk(),page:await browsing.executeJavaScript('({focus:document.hasFocus(),active:document.activeElement?.outerHTML,value:document.querySelector("input").value,submits:demoSubmits,button:document.querySelector("button").getBoundingClientRect().toJSON(),viewport:{width:innerWidth,height:innerHeight,scrollY},visible:document.querySelector("button").checkVisibility({opacityProperty:true,visibilityProperty:true})})')}));
+    throw error;
+  }
   pass('fresh file reopens with corrected text and working original FAQ and local submit interactions');
   await browsing.executeJavaScript('document.getElementById("answer").textContent="Generated content"');
   await control('编辑文字');await until(()=>state().current?.mode==='proofread'&&state().phase==='idle','dynamic rejection');

@@ -5,6 +5,7 @@ import { createSourceIndex } from '../../src/core/parser/source-index.ts';
 import { createPatchEngine } from '../../src/core/patch/engine.ts';
 import { createDraftSession } from '../../src/main/draft/session.ts';
 import { freezeCandidate } from '../../src/main/draft/prepare.ts';
+import { createInputController } from '../../src/main/draft/input.ts';
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const sourceIdentity = { projectId: '00000000-0000-4000-8000-000000000001',
@@ -265,4 +266,82 @@ test('an unexpected original-save exception is uncertain and cannot authorize a 
   const result = await f.session.saveOriginal(async () => { throw new Error('lost completion'); });
   assert.equal(result.status, 'unknown'); assert.equal(result.requiresReview, true); assert.equal(f.session.candidate, candidate);
   await assert.rejects(f.session.saveOriginal(async () => { assert.fail('blind retry'); }), /DRAFT_UNAVAILABLE/);
+});
+
+test('a frozen original Save permits an exact confirmed-candidate copy without clearing its failure or enabling edits', async () => {
+  for (const status of ['committed', 'unknown', 'failed', 'throw']) {
+    const points = []; const f = setup(undefined, { enqueue: (...args) => points.push(args) });
+    await f.session.apply(f.input('保全 <&> 🧪'));
+    f.mapping.onEvent = f.mapping.onEditState = () => () => {};
+    f.mapping.close = () => {};
+    const input = createInputController(f.mapping, f.session);
+    const candidate = f.session.candidate; const revision = f.session.revision;
+    const saved = await input.saveOriginal(input.snapshot().stateRevision, async () => {
+      if (status === 'throw') throw new Error('lost native result');
+      return { status, code: 'SAVE_TEST', requiresReview: true };
+    });
+    assert.equal(saved.status, status === 'throw' ? 'unknown' : status);
+    assert.equal(input.snapshot().canApply, false);
+    assert.equal(input.snapshot().canSaveCopy, true);
+    let writes = 0;
+    const writer = { write: async (path, bytes) => {
+      writes++; assert.deepEqual(Buffer.from(bytes), Buffer.from('\ufeff<!doctype html>\r\n<h1>保全 &lt;&amp;&gt; 🧪</h1><p>B</p>'));
+      return { status: 'created', path, expectedHash: hash(bytes), code: null };
+    } };
+    const copy = await input.saveCopy(input.snapshot().stateRevision, async () => 'retained.html', writer);
+    assert.equal(copy.status, 'created'); assert.equal(writes, 1);
+    assert.equal(f.session.phase, 'uncertain'); assert.equal(f.session.uncertainCandidate, candidate);
+    assert.equal(f.session.candidate, candidate); assert.equal(f.session.revision, revision);
+    assert.equal(points.length, 1, 'copy must not enqueue a checkpoint or retire saved evidence');
+    await assert.rejects(f.session.apply(f.input('late edit')), /DRAFT_UNAVAILABLE/);
+    await assert.rejects(input.saveOriginal(input.snapshot().stateRevision, async () => assert.fail('repeat replacement')), /DRAFT_UNAVAILABLE/);
+    input.close(); assert.equal(f.session.phase, 'uncertain');
+    assert.equal(input.snapshot().canSaveCopy, false);
+  }
+});
+
+test('frozen Save copy cancellation, chooser failure, close and known write failure retain the original freeze', async () => {
+  for (const outcome of ['cancel', 'chooser-error', 'close', 'failed']) {
+    const f = setup(); await f.session.apply(f.input('保全'));
+    await f.session.saveOriginal(async () => ({ status: 'unknown', requiresReview: true }));
+    const candidate = f.session.candidate; let writes = 0; let release;
+    const writer = { write: async path => { writes++; return { status: 'failed', path, expectedHash: candidate.resultHash, code: 'NEW_FILE_EXISTS' }; } };
+    const copy = f.session.saveCopy(() => new Promise((resolve, reject) => {
+      release = () => outcome === 'chooser-error' ? reject(new Error('chooser failed')) : resolve(outcome === 'cancel' ? undefined : 'retained.html');
+    }), writer);
+    assert.equal(f.session.phase, 'saving');
+    await assert.rejects(f.session.saveCopy(async () => 'duplicate.html', writer), /DRAFT_UNAVAILABLE/);
+    if (outcome === 'close') f.session.close();
+    release();
+    if (outcome === 'chooser-error') await assert.rejects(copy, /chooser failed/);
+    else assert.equal((await copy)?.status ?? null, outcome === 'failed' ? 'failed' : null);
+    assert.equal(writes, outcome === 'failed' ? 1 : 0);
+    assert.equal(f.session.phase, 'uncertain'); assert.equal(f.session.uncertainCandidate, candidate);
+    assert.equal(f.session.canSaveCopy, outcome !== 'close');
+  }
+});
+
+test('an unknown rescue-copy result preserves both pieces of evidence and blocks a duplicate copy or original Save', async () => {
+  for (const throws of [false, true]) {
+    const f = setup(); await f.session.apply(f.input('保全'));
+    await f.session.saveOriginal(async () => ({ status: 'unknown', requiresReview: true }));
+    const candidate = f.session.candidate;
+    const writer = { write: async path => {
+      if (throws) throw new Error('copy completion lost');
+      return { status: 'unknown', path, expectedHash: candidate.resultHash, code: 'NEW_FILE_WRITE_FAILED' };
+    } };
+    const copy = await f.session.saveCopy(async () => 'retained.html', writer);
+    assert.equal(copy.status, 'unknown'); assert.equal(f.session.lastCopy, copy);
+    assert.equal(f.session.uncertainCandidate, candidate); assert.equal(f.session.phase, 'uncertain');
+    assert.equal(f.session.canSaveCopy, false);
+    await assert.rejects(f.session.saveCopy(async () => 'retry.html', writer), /DRAFT_UNAVAILABLE/);
+    await assert.rejects(f.session.saveOriginal(async () => assert.fail('repeat replacement')), /DRAFT_UNAVAILABLE/);
+    f.session.close(); assert.equal(f.session.lastCopy, copy); assert.equal(f.session.uncertainCandidate, candidate);
+  }
+});
+
+test('unknown Preview application does not grant the original-Save copy exception', async () => {
+  const f = setup(); f.mapping.applyText = async () => 'unknown';
+  await assert.rejects(f.session.apply(f.input('unconfirmed text')), /DRAFT_OUTCOME_UNKNOWN/);
+  await assert.rejects(f.session.saveCopy(async () => assert.fail('must not choose'), { write: async () => assert.fail('must not write') }), /DRAFT_UNAVAILABLE/);
 });

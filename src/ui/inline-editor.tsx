@@ -1,13 +1,12 @@
 import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { WorkspaceSnapshot } from '../contracts/workspace.ts';
-import type { InputSnapshot } from '../contracts/input.ts';
 import { panelOwner } from './contextual-panel.ts';
 // 每窗输入控制器与 flush 应答钩子由 app.tsx 定义并在主窗/浮窗/原位窗间复用；
 // 二者均为函数声明，模块环形引用在初始化前即完成提升。
 import { useController, useFlushRequests } from './app.tsx';
 import { useLiveInput } from './live-input.ts';
-import type { LiveInputView } from './live-input.ts';
+import { draftFrozen, frozenCopyAvailable, preservedText, quiesced } from './input-quiescence.ts';
 import { InlineActivationGate, InlineFocusTracker, inlineBeginKey, inlineEffectiveStyle, inlineWrap } from './inline-input.ts';
 
 /**
@@ -36,16 +35,6 @@ import { InlineActivationGate, InlineFocusTracker, inlineBeginKey, inlineEffecti
  *   保留可复制，绝不隐式丢弃。组词期间不改焦点、不触发 Enter/Escape/模式/保存。
  */
 
-/** External transactions and mapping states under which the textarea is quiesced. */
-function quiesced(input: InputSnapshot | null, view: LiveInputView): boolean {
-  if (view.flushing || view.resolving) return true;
-  // 没有输入会话（只读预览或映射尚未建立）时绝不允许输入：null input 不是写入授权。
-  if (!input) return true;
-  if (input.mappingStatus !== 'ready') return true;
-  return input.phase === 'saving' || input.phase === 'leaving' || input.phase === 'closed'
-    || input.phase === 'history' || input.phase === 'resolving' || input.phase === 'beginning';
-}
-
 export function InlineWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   const { state } = props;
   const current = state.current;
@@ -73,10 +62,13 @@ export function InlineWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
   // selection.reference.nodeId；selection revision 按 Main 当前快照传给 begin。
   // 侧栏/浮窗转入 inline 的既有 input token 由 controller.sync() 直接采用，
   // 不经过这里的 begin。detached 只是展示回退，不改变 begin key。
+  // 草稿冻结（保存故障 uncertain/关闭 closed）期间 phase 已回到 idle，必须
+  // 额外按 draftPhase 拒绝新 begin。
   const gateRef = useRef<InlineActivationGate | null>(null);
   gateRef.current ??= new InlineActivationGate();
   useEffect(() => {
-    if (!owner || readonly || !input || input.input || input.phase !== 'idle' || !input.selection || !placement) return;
+    if (!owner || readonly || !input || input.input || input.phase !== 'idle' || draftFrozen(input)
+      || !input.selection || !placement) return;
     if (placement.nodeId !== input.selection.reference.nodeId) return;
     const key = inlineBeginKey(placement);
     if (!gateRef.current!.attempt(key)) return;
@@ -117,12 +109,20 @@ export function InlineWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
     return <div className="inline-app" aria-hidden="true" />;
   }
 
-  // 冻结（排空/保存/历史/映射失效）但仍有本地未确认输入时：只读保留、可聚焦
-  // 可选择可复制，绝不隐式丢弃；无保留内容时按 EditorPanel 语义禁用。
-  const preserved = frozen && view.localText !== ''
-    && (view.dirty || view.composing || view.phase === 'failed' || view.error !== null);
+  // 冻结（排空/保存/历史/映射失效/保存故障）但仍有保留内容时：只读保留、
+  // 可聚焦可选择可复制，绝不隐式丢弃；无保留内容时按 EditorPanel 语义禁用。
+  // 保存故障（draftFrozen）冻结时 phase 已回 idle，保留本身不依赖本地 dirty。
+  const preserved = preservedText(input, view);
   const errorText = view.error
     ? `${view.error.message}${view.error.detail ? ` ${view.error.detail}` : ''}` : null;
+  // 冻结原因包括原文件 Save unknown/需审查、Preview Apply 或历史结果未确认与文档
+  // 关闭，统一用通用冻结文案；只有 Main 授权的保存故障副本（uncertain+canSaveCopy）
+  // 才补充另存说明，且不暗示保存成功或冻结解除。
+  const failureNote = draftFrozen(input)
+    ? (frozenCopyAvailable(input)
+      ? '草稿已冻结，以上输入已保留，可选中复制；本次保存已确认的候选可用“另存草稿”保全为独立副本，这不代表原文件已保存成功，也不会解除冻结。'
+      : '草稿已冻结，以上输入已保留，可选中复制后另行保存。')
+    : null;
   const matched = inlineEffectiveStyle(placement);
   return (
     <div className={detached ? 'inline-app detached' : 'inline-app'}>
@@ -157,9 +157,10 @@ export function InlineWindow(props: Readonly<{ state: WorkspaceSnapshot }>) {
         spellCheck={false}
         aria-label="页面原位文字"
         aria-invalid={view.error ? true : undefined}
-        title={errorText ?? '原位编辑所选文字；停顿后自动更新预览，Esc 取消未预览的输入。'}
+        title={errorText ?? failureNote ?? '原位编辑所选文字；停顿后自动更新预览，Esc 取消未预览的输入。'}
       />
       {errorText && <span className="sr-only" role="alert">{errorText}</span>}
+      {failureNote && !errorText && <span className="sr-only" role="status">{failureNote}</span>}
     </div>
   );
 }

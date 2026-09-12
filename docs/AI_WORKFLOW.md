@@ -57,6 +57,8 @@ Kimi 用于开发过程，应用仍采用既定 React/TypeScript 技术栈并保
 
 仅列出实际参与本项目的 AI；配置存在或计划使用不算实际使用。无法确认具体版本时如实记录已知工具或模型系列，不猜测版本。保留已有贡献的致谢，使用记录与证据按现有隐私规则脱敏；前端模型分工和应用离线边界继续适用。
 
+2026-09-12，保存故障副本保全重新核对 [官方模型目录](https://www.kimi.com/code/docs/kimi-code/models.html)、[K3 公告](https://www.kimi.com/news/kimi-k3)、本机 CLI/doctor 与可用配置，固定 **0.42.0 / `kimi-code/k3` / `k3` / thinking enabled、high / always_thinking**。Kimi 实际执行两次串行限定调用，均退出 0：09:00:19–09:08:11 UTC 完成输入冻结与 8 项初版 UI 检查；09:13:15–09:25:02 UTC 根据独立复核补齐 LiveInputController 的自动意图暂停、干净排空与准确文案，定向增至 15 项。第二次测试曾过早把命令发出视为会话结束，修正等待实际完成后通过；Git Bash 调 npm 的 PATH 问题通过直接执行等价 Node 命令处理。主代理随后独立执行全部 250 项 UI、四套类型和模块边界检查通过。允许路径只有输入 UI、控制器、共享状态函数及 UI 测试；Codex（GPT-6）负责 Main、文件保护、合同和独立集成。具体原生结果与待验边界见 [HAE-010 第九阶段](implementation/HAE-010.md)，没有并行源码写入、应用内 AI 或公开调用日志。
+
 ## 2. 每个任务的工作循环
 
 1. 读取 [AGENTS.md](../AGENTS.md)、对应 Issue、依赖和当前工作区。先说明该任务将交付的可见行为。

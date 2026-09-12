@@ -82,14 +82,17 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
   let pendingFlush: Readonly<{ id: string; action: 'close' | 'dock' | 'action'; owner: WebContents; promise: Promise<boolean>; finish: (ready: boolean) => void }> | null = null;
   const owner = (): WebContents => panel === 'inline' && inline.window && !inline.window.isDestroyed() ? inline.window.webContents
     : (panel === 'floating' || panel === 'contextual') && floating && !floating.isDestroyed() ? floating.webContents : window.webContents;
-  const cleanInput = (): boolean => {
+  const cleanInput = (allowRetainedCopy = false): boolean => {
     const state = runtime().workspace.snapshot(); const input = state.current?.input;
-    return state.phase === 'idle' && (!input || (input.phase === 'idle' && input.draftPhase === 'idle'
+    const retainedCopy = allowRetainedCopy && state.lastSave?.documentId === state.current?.id
+      && state.lastSave?.requiresReview === true && input?.draftPhase === 'uncertain' && input.canSaveCopy;
+    return state.phase === 'idle' && (!input || (input.phase === 'idle' && (input.draftPhase === 'idle' || retainedCopy)
       && !input.hasUnappliedInput && !input.input?.composing));
   };
   const flush = (action: 'close' | 'dock' | 'action'): Promise<boolean> => {
     if (disposed) return Promise.resolve(false);
-    if (pendingFlush) return pendingFlush.promise;
+    if (pendingFlush) return pendingFlush.action === action ? pendingFlush.promise : Promise.resolve(false);
+    const document = runtime().workspace.current;
     const contents = owner();
     if (contents.isDestroyed()) return Promise.resolve(false);
     const id = randomUUID(); let resolveFlush!: (value: boolean) => void;
@@ -98,7 +101,10 @@ export function createDesktopController(window: BrowserWindow, outputRoot: strin
       if (pendingFlush?.id !== id) return;
       clearTimeout(timeout); contents.removeListener('destroyed', lost); contents.removeListener('render-process-gone', lost);
       pendingFlush = null;
-      const accepted = ready && !disposed && owner() === contents && cleanInput();
+      // An owner may acknowledge drained input before copying a frozen Save.
+      // This does not authorize close/dock, any draft mutation or another Save;
+      // their existing guards still require an editable, resolved document.
+      const accepted = ready && !disposed && runtime().workspace.current === document && owner() === contents && cleanInput(action === 'action');
       if (!accepted) error = runtime().workspace.current?.input?.snapshot().input?.composing ? 'INPUT_COMPOSING' : 'INPUT_FLUSH_REQUIRED';
       else if (error === 'INPUT_COMPOSING' || error === 'INPUT_FLUSH_REQUIRED') error = null;
       notify(); resolveFlush(accepted);

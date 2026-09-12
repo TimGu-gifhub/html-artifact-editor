@@ -152,6 +152,17 @@ export class LiveInputController {
     return input.changes.find(change => change.nodeId === nodeId)?.oldText ?? fallback;
   }
 
+  /**
+   * 草稿冻结（原文件 Save unknown/需审查、Preview Apply 或历史结果未确认、文档
+   * 关闭）：草稿不再接受任何修改。冻结期间本地不发送 begin/change/apply/resolve
+   * 等修改请求，也不清空 token、文本、缓冲、失败或组词状态；正常 preparing/
+   * applying 持久化阶段不是冻结，实时输入的缓冲行为保持不变。
+   */
+  private draftIsFrozen(): boolean {
+    const { input } = this.source();
+    return input !== null && (input.draftPhase === 'uncertain' || input.draftPhase === 'closed');
+  }
+
   /** Observe the latest Main snapshot. Called on every workspace state change. */
   sync(): void {
     if (this.disposed) return;
@@ -232,6 +243,11 @@ export class LiveInputController {
     if (this.attemptedSelection === selectionKey) return;
     const { documentId } = this.source();
     if (!documentId) return;
+    if (this.draftIsFrozen()) {
+      // 冻结草稿不接受新会话；记住已尝试，避免每次快照更新重复发起。
+      this.attemptedSelection = selectionKey;
+      return;
+    }
     this.beginning = true;
     this.failed = null;
     this.emit();
@@ -281,7 +297,7 @@ export class LiveInputController {
 
   /** Manual retry after a failed begin or a rejected pipeline. */
   retry(): void {
-    if (this.beginning || this.disposed) return;
+    if (this.beginning || this.disposed || this.draftIsFrozen()) return;
     if (this.editToken) {
       if (this.validationError) return;
       this.failed = null;
@@ -312,7 +328,9 @@ export class LiveInputController {
   }
 
   onChange(text: string): void {
-    if (this.disposed || this.resolving) return;
+    // 冻结时 readOnly textarea 本不应产生输入事件；万一到达也整体忽略，
+    // 保留原 token、文本、缓冲、失败与组词状态。
+    if (this.disposed || this.resolving || this.draftIsFrozen()) return;
     this.localText = text;
     this.validationError = validateInputText(text);
     if (this.composingSource === 'adopted') {
@@ -332,7 +350,7 @@ export class LiveInputController {
   }
 
   onCompositionStart(): void {
-    if (this.disposed || this.resolving) return;
+    if (this.disposed || this.resolving || this.draftIsFrozen()) return;
     this.composing = true;
     this.composingSource = 'local';
     this.clearTimer();
@@ -346,7 +364,7 @@ export class LiveInputController {
   }
 
   onCompositionEnd(text: string): void {
-    if (this.disposed || this.resolving) return;
+    if (this.disposed || this.resolving || this.draftIsFrozen()) return;
     this.composing = false;
     this.composingSource = null;
     this.localText = text;
@@ -366,7 +384,9 @@ export class LiveInputController {
    * Escape supersedes the cancellation intent and is delivered normally.
    */
   escape(): boolean {
-    if (this.disposed || this.resolving || this.composing || !this.editToken || this.failed) return false;
+    // 冻结时 Escape 不得恢复/撤回任何输入；只读保留的文字仍可选择复制。
+    if (this.disposed || this.resolving || this.composing || !this.editToken || this.failed
+      || this.draftIsFrozen()) return false;
     if (this.inflightApply) {
       this.clearTimer();
       this.wantApply = false;
@@ -394,7 +414,8 @@ export class LiveInputController {
 
   /** 还原为文件原文：submit the file baseline as a new applied draft (undoable). */
   restoreParagraph(): void {
-    if (this.disposed || this.resolving || !this.editToken || this.failed || this.beginning || this.composing) return;
+    if (this.disposed || this.resolving || !this.editToken || this.failed || this.beginning || this.composing
+      || this.draftIsFrozen()) return;
     this.clearTimer();
     this.validationError = null;
     this.localText = this.beginText;
@@ -413,6 +434,14 @@ export class LiveInputController {
     if (this.disposed) return Promise.resolve(false);
     if (this.composing || this.failed || this.validationError) return Promise.resolve(false);
     if (!this.editToken && !this.beginning) return Promise.resolve(true);
+    if (this.draftIsFrozen()) {
+      // 冻结期间不能发送任何修改，也不清空本地状态换取成功：只有干净且已完全
+      // 应用的 owner 直接确认排空（供 Main 的独占副本另存等独立事务判断），
+      // 仍有未投递缓冲、未应用差异、组词或在途/失败状态的一律拒绝；关闭与归属
+      // 切换是否放行仍由 Main 决定。
+      return Promise.resolve(this.mainDrained()
+        && normalize(this.localText) === normalize(this.appliedText));
+    }
     this.flushing = true;
     this.emit();
     return new Promise(resolve => {
@@ -461,6 +490,12 @@ export class LiveInputController {
     const input = this.sessionInput();
     if (!input) return;
     if (input.phase !== 'idle') return;
+    if (input.draftPhase === 'uncertain' || input.draftPhase === 'closed') {
+      // 草稿冻结：暂停一切自动变更——不发 change/apply，也不对 pending 的
+      // 目标 intent 自动 resolve。缓冲、wantApply 与 intentPending 原样保留，
+      // 等待明确的处置结果，绝不靠丢弃本地状态推进。
+      return;
+    }
     if (this.buffered !== null) {
       void this.sendChange();
       return;

@@ -1,7 +1,7 @@
 import { proofreadSnapshot, proofreadDocument } from '../helpers/proofread.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { app } from 'electron';
@@ -12,9 +12,10 @@ import { captureReady } from '../helpers/capture.ts';
 import { edits, source, css } from './acceptance-fixture.ts';
 
 const [mode, profile, projectArg, requestedSession, projectLayout] = process.argv.slice(2);
-if (!profile || !projectArg || !['seed', 'restore-save', 'saved-backup', 'conflict', 'file-limited'].includes(mode ?? '')
+if (!profile || !projectArg || !['seed', 'restore-save', 'saved-backup', 'conflict', 'file-limited', 'save-unknown', 'save-rebase'].includes(mode ?? '')
   || (projectLayout !== undefined && !['file', 'directory'].includes(projectLayout))) throw Error('Invalid acceptance arguments');
 const project = projectArg;
+const saveFailure = mode === 'save-unknown' || mode === 'save-rebase';
 const directoryProject = projectLayout === 'directory';
 const documentSource = directoryProject ? source.replace('href="keep.css"', 'href="../assets/keep.css"') : source;
 registerSchemes(); app.enableSandbox(); app.setPath('userData', profile);
@@ -30,7 +31,22 @@ let rootGate: Promise<string | undefined> | null = null;
 let leave: 'cancel' | 'discard' = 'cancel';
 let backupDecision: 'cancel' | 'restore' = 'cancel';
 let backupCalls = 0;
+let copyChoice: string | undefined = join(project, '冲突草稿.html');
+let copyCalls = 0;
 let runtime: Awaited<ReturnType<typeof createProductApplication>> | undefined;
+
+async function recordBytes(directory: string): Promise<Readonly<Record<string, string>>> {
+  const values: Record<string, string> = {};
+  for (const name of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (name.isDirectory()) {
+      for (const [child, digest] of Object.entries(await recordBytes(join(directory, name.name)))) values[name.name + '/' + child] = digest;
+    } else {
+      assert.equal(name.isFile(), true);
+      values[name.name] = createHash('sha256').update(await readFile(join(directory, name.name))).digest('hex');
+    }
+  }
+  return values;
+}
 
 async function until(check: () => boolean | Promise<boolean>, label: string, timeout = 15000): Promise<void> {
   const end = Date.now() + timeout;
@@ -53,12 +69,27 @@ async function select(contents: WebContents, selector: string): Promise<void> {
     + ');const r=document.createRange();r.setStart(e.firstChild,0);r.setEnd(e.firstChild,1);const b=r.getBoundingClientRect();'
     + 'return {x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)};})()');
   contents.focus();
+  if (saveFailure) {
+    await until(() => contents.executeJavaScript('document.hasFocus()'), 'native inline Preview focus');
+    contents.sendInputEvent({ type: 'mouseEnter', ...point });
+    contents.sendInputEvent({ type: 'mouseMove', x: point.x + 2, y: point.y });
+    await delay(30);
+    contents.sendInputEvent({ type: 'mouseMove', ...point });
+  }
   contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
   contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
 }
 async function run(): Promise<void> {
   await app.whenReady();
-  const product = runtime = await createProductApplication(outputRoot, { visible: false, choices: {
+  const product = runtime = await createProductApplication(outputRoot, { visible: false,
+    ...(saveFailure ? { initialPanel: 'inline' as const, onStorageStep: async (kind: 'save' | 'checkpoint', step: string) => {
+      if (kind !== 'save') return;
+      if (mode === 'save-unknown' && step === 'native-replaced') throw Error('SAVE_TEST_RESULT_LOST');
+      if (mode === 'save-rebase' && step === 'release-lock') {
+        const committed = await readFile(entry);
+        await writeFile(entry, committed.toString('utf8').replace('原始备注', '提交后的外部修改'));
+      }
+    } } : {}), choices: {
     open: async () => { choices++; return chooseMode === 'cancel' ? undefined : chooseMode === 'wrong' ? join(dirname(entry), 'wrong.html') : entry; },
     project: {
       chooseDirectory: async () => {
@@ -72,13 +103,19 @@ async function run(): Promise<void> {
           : directoryChoice === 'wrong-file' ? join(dirname(entry), 'wrong.html') : entry;
       },
     },
-    copy: async () => join(project, '冲突草稿.html'),
+    copy: async () => { copyCalls++; return copyChoice; },
     review: async value => ({ reviewId: value.reviewId, decision: leave }),
     backup: async value => { backupCalls++; return { reviewId: value.reviewId, decision: backupDecision }; },
   } });
   const { window, runtime: session, desktop } = product;
   // Visible, unfocused test windows keep Chromium frames current for capture.
   window.showInactive();
+  if (saveFailure) {
+    // Inline bounds require actual unoccluded native viewport evidence. Hidden
+    // process startup may consume the first ShowWindow call on Windows.
+    window.setAlwaysOnTop(true); window.setContentSize(1440, 900); window.show();
+    await until(() => { if (!window.isVisible()) window.show(); return window.isVisible(); }, 'visible inline Main');
+  }
   const state = () => proofreadSnapshot(session.workspace.snapshot());
   const ui = (script: string) => window.webContents.executeJavaScript(script);
   const errors: string[] = [];
@@ -98,6 +135,22 @@ async function run(): Promise<void> {
     const preview = proofreadDocument(session.workspace.current!).preview.contents;
     const before = await preview.executeJavaScript('document.querySelector(' + JSON.stringify(selector) + ').textContent');
     await select(preview, selector);
+    if (saveFailure) {
+      let owner: BrowserWindow | undefined;
+      await until(async () => {
+        owner = desktop.ownedWindows().find(value => value.isFocusable());
+        return !!owner && state().current?.input.input?.appliedText === before
+          && await owner.webContents.executeJavaScript('!!document.querySelector("textarea.inline-text-input:not(:disabled)")');
+      }, 'selected inline input owner');
+      assert.ok(owner);
+      owner.focus(); owner.webContents.focus();
+      await owner.webContents.executeJavaScript('document.querySelector("textarea").focus(); document.querySelector("textarea").select();');
+      await owner.webContents.insertText(value);
+      await until(() => state().current?.input.input?.appliedText === value && !state().current?.input.hasUnappliedInput, 'inline live text update');
+      await settled();
+      assert.equal(await preview.executeJavaScript('document.querySelector(' + JSON.stringify(selector) + ').textContent'), value);
+      return;
+    }
     await until(async () => state().current?.input.input?.appliedText === before
       && await ui('!!document.querySelector("textarea.draft-input:not(:disabled)")'), 'selected Text editing binding');
     await ui('(()=>{const e=document.querySelector("textarea.draft-input");e.focus();e.select();})()');
@@ -182,11 +235,15 @@ async function run(): Promise<void> {
   };
   const review = async (): Promise<void> => {
     const count = state().current!.input.changes.length;
+    if (saveFailure) {
+      await click(window, '.toolbar button', '复核变更');
+      await until(() => ui('document.querySelector("[role=dialog]")?.textContent.includes("复核变更")'), 'inline review dialog');
+    }
     if (desktop.extension(window.webContents).snapshot().reviewed.length !== count) {
       await click(window, '.check-all input');
       await until(() => desktop.extension(window.webContents).snapshot().reviewed.length === count, 'all visible changes reviewed');
     }
-    await click(window, '.toolbar button', '复核并保存');
+    await click(window, saveFailure ? '[role=dialog] button' : '.toolbar button', '复核并保存');
     await until(async () => await ui('document.querySelectorAll("[role=dialog] .diff-list .ci-diff").length === ' + count)
       && session.host.current!.getBounds().width === 0, 'frozen source Diff and native layout');
   };
@@ -197,7 +254,76 @@ async function run(): Promise<void> {
     await settled();
     assert.equal(state().current!.input.changes.length, 0);
   };
-  if (mode === 'seed' || mode === 'conflict') {
+  if (saveFailure) {
+    await click(window, 'button', '打开 HTML');
+    await until(() => state().current?.input.mappingStatus === 'ready' && session.host.current!.getBounds().width > 0, 'original product document');
+    await edit(edits[0][0], edits[0][1]);
+    const before = proofreadDocument(session.workspace.current!);
+    const candidate = before.draft.candidate; const revision = before.draft.revision;
+    const inputOwner = desktop.ownedWindows().find(value => value.isFocusable())!;
+    const inputToken = before.input.snapshot().input!.editToken;
+    await inputOwner.webContents.executeJavaScript('window.__keptInput = document.querySelector("textarea.inline-text-input")');
+    await review(); await click(window, '[role=dialog] button.primary', '确认保存');
+    await until(() => state().phase === 'idle' && state().lastSave?.status === (mode === 'save-unknown' ? 'unknown' : 'rebase-required'), 'retained original Save failure');
+    await until(() => ui('!!document.querySelector("[role=dialog] [role=alert]")'), 'product failure dialog');
+    const saved = state().lastSave; const retained = session.workspace.retainedSave;
+    const originalEvidence = await recordBytes(session.storage.directory);
+    const disk = await readFile(entry);
+    assert.equal(state().current?.id, before.id); assert.equal(before.draft.phase, 'uncertain');
+    assert.equal(state().canSave, false); assert.equal(state().current!.input.canSaveCopy, true);
+    assert.equal('active.lock' in originalEvidence, mode === 'save-unknown');
+    copyChoice = undefined;
+    await click(window, '[role=dialog] .dlg-actions button', '另存草稿');
+    await until(async () => copyCalls === 1 && state().current!.input.phase === 'idle'
+      && await ui('!document.querySelector("[role=dialog]") && document.body.textContent.includes("已取消另存")'), 'cancel retains frozen draft');
+    assert.equal(state().current!.input.lastCopy, null);
+    assert.deepEqual(await readFile(entry), disk);
+    assert.deepEqual(await recordBytes(session.storage.directory), originalEvidence);
+    await until(() => inputOwner.isVisible(), 'frozen inline input remains visible');
+    assert.equal(await inputOwner.webContents.executeJavaScript('document.querySelector("textarea") === window.__keptInput && window.__keptInput.readOnly && !window.__keptInput.disabled'), true);
+    inputOwner.focus(); inputOwner.webContents.focus();
+    await inputOwner.webContents.executeJavaScript('window.__keptInput.focus();window.__keptInput.select()');
+    assert.equal(await inputOwner.webContents.executeJavaScript('window.__keptInput.selectionEnd - window.__keptInput.selectionStart'), edits[0][1].length);
+    await inputOwner.webContents.insertText('冻结后不得修改');
+    inputOwner.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+    inputOwner.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+    window.focus(); await select(before.preview.contents, '#date');
+    await until(() => !!before.input.snapshot().intent, 'different Text intent while frozen');
+    await delay(400); // Beyond the live Apply debounce; no automatic resolve.
+    assert.equal(before.input.snapshot().input?.editToken, inputToken);
+    assert.equal(before.input.snapshot().input?.text, edits[0][1]);
+    assert.equal(await inputOwner.webContents.executeJavaScript('window.__keptInput.value'), edits[0][1]);
+    assert.equal(before.draft.candidate, candidate); assert.equal(before.draft.revision, revision);
+    assert.equal(state().current!.input.canSaveCopy, true);
+    copyChoice = entry;
+    await click(window, '.conflict-banner button', '另存草稿');
+    await until(() => state().current?.input.lastCopy?.status === 'failed' && state().current?.input.phase === 'idle', 'existing target rejected');
+    assert.equal(copyCalls, 2); assert.equal(state().current!.input.lastCopy!.code, 'NEW_FILE_EXISTS');
+    assert.equal(before.draft.phase, 'uncertain'); assert.deepEqual(await readFile(entry), disk);
+    assert.deepEqual(await recordBytes(session.storage.directory), originalEvidence);
+    copyChoice = join(project, '保存故障草稿.html');
+    await click(window, '.conflict-banner button', '另存草稿');
+    await until(() => state().current?.input.lastCopy?.status === 'created' && state().current?.input.phase === 'idle', 'product rescue copy');
+    assert.equal(copyCalls, 3);
+    assert.deepEqual(await readFile(copyChoice), Buffer.from(candidate.bytes));
+    assert.deepEqual(await readFile(entry), disk); assert.deepEqual(await readFile(cssPath), Buffer.from(css));
+    assert.deepEqual(await recordBytes(session.storage.directory), originalEvidence);
+    assert.deepEqual(state().lastSave, saved); assert.equal(session.workspace.retainedSave, retained);
+    assert.equal(before.draft.candidate, candidate); assert.equal(before.draft.revision, revision);
+    assert.equal(before.draft.phase, 'uncertain'); assert.equal(state().canSave, false);
+    const reviewProof = { draftRevision: revision, candidateHash: candidate.resultHash };
+    assert.equal((await ui('haeWorkspace.save(' + JSON.stringify(before.id) + ',' + state().stateRevision + ',' + JSON.stringify(reviewProof) + ')')).code, 'DOCUMENT_RECOVERY_REQUIRED');
+    assert.equal((await ui('haeDesktop.request({kind:"panel",mode:"docked"})')).code, 'INPUT_FLUSH_REQUIRED');
+    assert.equal(await session.requestClose(), 'cancelled'); assert.equal(window.isDestroyed(), false);
+    assert.deepEqual(await recordBytes(session.storage.directory), originalEvidence);
+    assert.deepEqual(errors, []);
+    receipt({ event: 'failure-copied', status: saved!.status, changes: state().current!.input.changes.length,
+      candidateHash: candidate.resultHash, diskHash: createHash('sha256').update(disk).digest('hex'),
+      records: originalEvidence, copyCalls, versions: process.versions });
+    // The product deliberately retains this unresolved session. The parent
+    // owns process termination and verifies every source/evidence byte after it.
+    await new Promise<void>(() => {}); throw Error('Frozen process must be terminated by the parent');
+  } else if (mode === 'seed' || mode === 'conflict') {
     await click(window, 'button', directoryProject ? '打开目录' : '打开 HTML');
     await until(() => state().current?.input.mappingStatus === 'ready' && session.host.current!.getBounds().width > 0, 'original product document');
     if (directoryProject) {
@@ -342,6 +468,8 @@ async function run(): Promise<void> {
 }
 void run().catch(async (error: unknown) => {
   receipt({ event: 'failed', error: String(error), stack: error instanceof Error ? error.stack : null,
-    state: runtime?.runtime.workspace.snapshot() ?? null });
+    state: runtime?.runtime.workspace.snapshot() ?? null,
+    desktop: runtime?.desktop.extension(runtime.window.webContents).snapshot() ?? null,
+    windows: runtime?.desktop.ownedWindows().map(window => ({ visible: window.isVisible(), focusable: window.isFocusable(), bounds: window.getBounds() })) ?? [] });
   process.exitCode = 1; app.exit(1);
 });

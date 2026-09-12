@@ -73,6 +73,8 @@ WorkspaceSnapshot 新增 canSave 和 lastSave。canSave 仅在有效映射、存
 | unknown | 无法确定提交结果，保留证据并阻止再次覆盖，不自动重试 |
 | cancelled / unchanged | 未开始替换，或没有净变更；不更新基线 |
 
+原文件 Save 的冻结候选现可通过现有 save-copy 另存独立新 HTML，精确合同见 [保存故障草稿保全](SAVE_FAILURE_COPY.md)。canSaveCopy 仅表示副本能力；canSave 仍单独要求空闲草稿、当前复核和无待审查故障。副本取消、失败或成功均保留原 Save 报告、候选和冻结；副本未知则同时保留两份结果证据并禁止重试。此例外不适用于未知的 Preview/历史应用或整份备份恢复，不授权关闭、解除锁或丢弃记录。
+
 InputController 与 DraftSession 在整个文件操作期间互斥；已提交或未知的旧草稿进入保护状态，只有成功安装新文档才结束旧会话。重建沿用原 Main 项目授权，保留上级共享资源范围；重新解析与 Chromium 静态树映射后，再检查新源版本和 committed 记录，原生挂载前后均确认新映射仍为 ready。正常重建期间保持 saving，不先发布临时的恢复错误。HAE-011 的历史重建先核验实际已提交文件，再由 Worker 准备保存点；新映射通过完整来源证明安装已清空的 Text，不能复用旧 offset。新文档保留 Undo/Redo，草稿修订随保存点继续递增；可选持久化端口异步写入新的完整干净点。
 
 已核验 saved 但锁/sidecar 清理失败时，命令仍为 ok=true、outcome=saved；lastSave 显示 cleanupPending 和警告，下一次覆盖等待恢复。UI 撤销若发生在准备阶段，Main 取消尚未开始的替换；若已经开始 commit，则继续核对磁盘和重建，即便原 renderer Promise 无法返回。重载后的 UI 读取 Main 当前状态，不触发第二次写盘。Main/系统强杀后的恢复仍需持久化流程，不能用 renderer 崩溃重连代替。
